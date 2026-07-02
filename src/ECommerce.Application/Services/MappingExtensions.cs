@@ -27,7 +27,7 @@ internal static class MappingExtensions
         new(c.Id, c.Items.Select(i => i.ToDto()).ToList(), c.Items.Sum(i => i.Subtotal));
 
     public static OrderItemDto ToDto(this OrderItem i) =>
-        new(i.ProductId, i.ProductName, i.UnitPrice, i.Quantity, i.Subtotal);
+        new(i.Id, i.ProductId, i.ProductName, i.UnitPrice, i.Quantity, i.Subtotal, i.Status.ToString());
 
     public static PaymentDto ToDto(this Payment p) =>
         new(p.Amount, p.Method.ToString(), p.Status.ToString(), p.TransactionId, p.PaidAt);

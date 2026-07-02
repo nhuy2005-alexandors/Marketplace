@@ -48,9 +48,10 @@ export function OrdersPage() {
             <div className="text-sm text-slate-500 mb-2">Giao tới: {order.shippingAddress}</div>
             <div className="divide-y border-y">
               {order.items.map((it) => (
-                <div key={it.productId} className="flex justify-between py-2 text-sm">
-                  <span>{it.productName} × {it.quantity}</span>
-                  <span>${it.subtotal.toFixed(2)}</span>
+                <div key={it.productId} className="flex items-center justify-between py-2 text-sm gap-2">
+                  <span className="flex-1">{it.productName} × {it.quantity}</span>
+                  <StatusBadge status={it.status} />
+                  <span className="w-16 text-right">${it.subtotal.toFixed(2)}</span>
                 </div>
               ))}
             </div>

@@ -32,6 +32,7 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
         b.Property(i => i.ProductName).IsRequired().HasMaxLength(200);
         b.Property(i => i.UnitPrice).HasColumnType("decimal(18,2)");
         b.Ignore(i => i.Subtotal);
+        b.Property(i => i.Status).HasConversion<int>();
         b.HasOne(i => i.Product).WithMany()
             .HasForeignKey(i => i.ProductId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(i => i.SellerId);

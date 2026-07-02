@@ -15,19 +15,31 @@ public class DashboardService : IDashboardService
     {
         var paidStatuses = new[] { OrderStatus.Paid, OrderStatus.Shipped, OrderStatus.Delivered };
 
-        var paidOrderIds = await _db.Orders
+        // Nạp đơn đã thanh toán kèm item để tính doanh thu SAU giảm giá coupon.
+        var paidOrders = await _db.Orders
             .Where(o => paidStatuses.Contains(o.Status))
-            .Select(o => o.Id)
+            .Include(o => o.Items)
             .ToListAsync(ct);
 
-        // Item bán được (đơn đã thanh toán); nếu seller -> chỉ item của seller.
-        var soldItems = _db.OrderItems
-            .Where(oi => paidOrderIds.Contains(oi.OrderId));
+        var paidOrderIds = paidOrders.Select(o => o.Id).ToList();
 
-        if (sellerId != null)
-            soldItems = soldItems.Where(oi => oi.SellerId == sellerId.Value);
-
-        var revenue = await soldItems.SumAsync(x => (decimal?)(x.UnitPrice * x.Quantity), ct) ?? 0m;
+        // Doanh thu (đã trừ coupon). System = tổng Order.Total; seller = phần seller sau khi chia tỉ lệ giảm giá.
+        decimal revenue = 0m;
+        foreach (var o in paidOrders)
+        {
+            if (sellerId == null)
+            {
+                revenue += o.Total;
+            }
+            else
+            {
+                var sellerSub = o.Items.Where(i => i.SellerId == sellerId.Value).Sum(i => i.Subtotal);
+                if (sellerSub <= 0) continue;
+                var orderSub = o.Subtotal;
+                var sellerDiscount = orderSub > 0 ? Math.Round(o.DiscountAmount * (sellerSub / orderSub), 2) : 0m;
+                revenue += Math.Max(0, sellerSub - sellerDiscount);
+            }
+        }
 
         // Số đơn có liên quan (seller: đơn chứa ít nhất 1 item của seller).
         var totalOrders = sellerId == null
@@ -50,9 +62,11 @@ public class DashboardService : IDashboardService
             .Select(g => new { Status = g.Key, Count = g.Count() })
             .ToListAsync(ct);
 
-        var soldList = await soldItems
-            .Select(oi => new { oi.ProductId, oi.ProductName, oi.Quantity, oi.UnitPrice })
-            .ToListAsync(ct);
+        // Top sản phẩm bán chạy — từ item của các đơn đã thanh toán (seller: chỉ item của mình).
+        var soldList = paidOrders
+            .SelectMany(o => o.Items)
+            .Where(i => sellerId == null || i.SellerId == sellerId.Value)
+            .ToList();
 
         var topProducts = soldList
             .GroupBy(oi => new { oi.ProductId, oi.ProductName })

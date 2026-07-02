@@ -1,13 +1,13 @@
 # Báo cáo triển khai — MiniShop E-Commerce Platform
 
 **Ngày:** 2026-06-29
-**Phạm vi:** Xây dựng nền tảng thương mại điện tử full-stack theo chuẩn thiết kế phần mềm, gồm backend, frontend, tài liệu đặc tả, và mở rộng thêm 5 nhóm tính năng theo yêu cầu bổ sung.
+**Phạm vi:** Xây dựng nền tảng thương mại điện tử full-stack theo chuẩn thiết kế phần mềm, gồm backend, frontend, tài liệu đặc tả, mở rộng tính năng, và chuyển đổi sang mô hình marketplace nhiều người bán.
 
 ---
 
 ## 1. Tổng quan
 
-Dự án được thực hiện theo 2 giai đoạn:
+Dự án được thực hiện theo 3 giai đoạn:
 
 **Giai đoạn 1 — Nền tảng cốt lõi:** Xây dựng từ đầu một hệ thống e-commerce tối giản với kiến trúc phân lớp chuẩn (Clean Architecture), đủ 11 chức năng nghiệp vụ (yêu cầu tối thiểu 9, không tính CRUD), kèm bộ tài liệu đặc tả phần mềm (SRS + UML).
 
@@ -39,7 +39,7 @@ SPA với React Router (protected routes theo role), TanStack Query (cache + inv
 
 ### 2.3 Cơ sở dữ liệu — SQL Server qua EF Core Migrations
 
-Toàn bộ schema được quản lý qua 3 migration (`InitialCreate`, `AddCouponsAndDiscounts`, `AddSellerMarketplace`), có thể chạy lại từ đầu trên máy sạch bằng `dotnet ef database update`.
+Toàn bộ schema được quản lý qua 4 migration (`InitialCreate`, `AddCouponsAndDiscounts`, `AddSellerMarketplace`, `AddOrderItemFulfillment`), có thể chạy lại từ đầu trên máy sạch bằng `dotnet ef database update`.
 
 ---
 
@@ -129,9 +129,19 @@ YAML đã được validate cú pháp; các lệnh bên trong (`dotnet build/tes
 
 ---
 
+### 4.9 Giao hàng theo item + Seller tạo danh mục + fix pro-rate coupon (giai đoạn 4)
+
+- **Per-item fulfillment:** Thêm enum `FulfillmentStatus` (Pending/Shipped/Delivered/Cancelled) và `OrderItem.ChangeStatus()` — máy trạng thái thứ ba của hệ thống, cùng pattern với `Order.ChangeStatus()` nhưng **độc lập hoàn toàn**. `Order.Status` vẫn chỉ Admin đổi (vòng đời thanh toán toàn đơn); `OrderItem.Status` do **Seller sở hữu item đó** tự cập nhật qua `PUT /api/seller/orders/items/{itemId}/status` — mỗi seller ship phần của mình trong một đơn trộn nhiều seller mà không cần chờ hay phụ thuộc seller khác. Item không thuộc seller gọi request → 403; chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi Customer hủy đơn, mọi item còn Pending tự chuyển sang Cancelled.
+- **Seller tạo danh mục:** `POST /api/categories` mở từ `Admin` sang `Admin,Seller` — Seller tạo danh mục mới ngay lúc thêm sản phẩm, không phải chờ Admin duyệt trước. `DELETE /api/categories/{id}` vẫn giữ nguyên Admin-only.
+- **Fix bug pro-rate giảm giá coupon cho seller:** Trước đây `SellerOrderService.GetForSellerAsync` và `DashboardService.GetAsync(sellerId)` bỏ qua `Order.DiscountAmount` khi tính doanh thu/subtotal theo seller — seller thấy doanh thu cao hơn thực nhận vì không trừ phần giảm giá coupon. Sửa: chia tỉ lệ giảm giá theo tỉ trọng subtotal của seller trong đơn (`sellerDiscount = DiscountAmount × sellerSubtotal / orderSubtotal`), rồi `sellerTotal = sellerSubtotal − sellerDiscount`. Dashboard hệ thống (Admin) cũng đổi sang tính doanh thu **sau** giảm giá (`Σ Order.Total` của đơn đã thanh toán) thay vì tổng subtotal thô.
+  - **Đã verify bằng test (`FulfillmentTests.CouponDiscount_IsProRatedPerSeller`, `Dashboard_Revenue_IsAfterCouponDiscount`):** đơn $100 gồm seller A (sản phẩm $60) + seller B (sản phẩm $40), coupon giảm cố định $20 → seller A thấy discount $12, total $48; seller B thấy discount $8, total $32; tổng $48 + $32 = $80, khớp đúng `Order.Total` ($100 − $20) mà hệ thống thực nhận. Dashboard Admin (`sellerId = null`) báo doanh thu $80; dashboard seller A báo $48.
+- `OrderItemDto` bổ sung `Id` và `Status` để frontend hiển thị và gọi API đổi trạng thái theo từng item.
+
+---
+
 ## 5. Kiểm thử
 
-- **Unit test (39 test, 100% pass):** state machine đơn hàng (mọi transition hợp lệ/không hợp lệ), giảm tồn kho, checkout (giỏ rỗng, vượt tồn kho, áp coupon hợp lệ/không hợp lệ), thanh toán (hoàn tất, chuyển trạng thái), hủy đơn (hoàn tồn kho), review (chặn chưa mua, chặn trùng), auth (đăng ký trùng email, sai mật khẩu), **seller scope (gán SellerId, chặn sửa/xóa SP của seller khác → 403, admin toàn quyền, lọc theo seller, dashboard scope).**
+- **Unit test (49 test, 100% pass):** state machine đơn hàng (mọi transition hợp lệ/không hợp lệ), giảm tồn kho, checkout (giỏ rỗng, vượt tồn kho, áp coupon hợp lệ/không hợp lệ), thanh toán (hoàn tất, chuyển trạng thái), hủy đơn (hoàn tồn kho), review (chặn chưa mua, chặn trùng), auth (đăng ký trùng email, sai mật khẩu), seller scope (gán SellerId, chặn sửa/xóa SP của seller khác → 403, admin toàn quyền, lọc theo seller, dashboard scope), **`FulfillmentTests` mới (10 test): máy trạng thái `OrderItem` (mọi transition hợp lệ/không hợp lệ), seller chỉ fulfill item của mình (403 nếu không), coupon pro-rate theo seller ($60/$40 split, coupon $20 → $48/$32), dashboard doanh thu sau giảm giá (system $80, seller A $48).**
 - **Smoke test thủ công qua HTTP thật** (không phải giả định): toàn bộ golden path đăng nhập → cart → checkout với coupon → pay đa phương thức → admin đổi trạng thái → dashboard, chạy trên môi trường local (`dotnet run` + `npm run dev`).
 - **Frontend:** `tsc -b && vite build` pass, không lỗi type.
 
@@ -148,6 +158,9 @@ YAML đã được validate cú pháp; các lệnh bên trong (`dotnet build/tes
 **Marketplace (giai đoạn 3):**
 Backend — `Domain/Entities/{User,Product,OrderItem}.cs` + `Enums/UserRole.cs` (thêm SellerId/ShopName/role Seller), `Application/Services/{SellerOrderService,DashboardService,ProductService,AuthService}.cs`, `API/Controllers/SellerController.cs`, migration `AddSellerMarketplace`, `tests/.../SellerScopeTests.cs` (6 test).
 Frontend — `pages/{SellerDashboardPage,SellerProductsPage,SellerOrdersPage}.tsx` (mới), `LoginPage.tsx` (thêm mode đăng ký seller), `ProtectedRoute.tsx` (roles[]).
+
+**Per-item fulfillment + Seller category + coupon pro-rate fix (giai đoạn 4):**
+Backend — `Domain/Enums/FulfillmentStatus.cs` (mới), `Domain/Entities/OrderItem.cs` (thêm `Status` + `ChangeStatus()`), `Application/Services/{SellerOrderService,DashboardService,OrderService}.cs` (pro-rate coupon, hủy đơn set Cancelled cho item Pending), `Application/DTOs/Orders/OrderDtos.cs` (`OrderItemDto` thêm `Id`, `Status`), `API/Controllers/{SellerController,CategoriesController}.cs` (thêm `PUT orders/items/{itemId}/status`; mở `POST /api/categories` cho Seller), `tests/.../FulfillmentTests.cs` (mới, 10 test).
 
 **Hạ tầng:**
 `.github/workflows/ci.yml`.

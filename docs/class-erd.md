@@ -65,7 +65,9 @@ classDiagram
         +string ProductName
         +decimal UnitPrice
         +int Quantity
+        +FulfillmentStatus Status
         +decimal Subtotal
+        +ChangeStatus(FulfillmentStatus)
     }
 
     class Payment {
@@ -134,6 +136,19 @@ classDiagram
 ```
 
 > `User.Products` là navigation phía Seller (một User có `Role = Seller` sở hữu nhiều Product qua `Product.SellerId`). `OrderItem.SellerId` không phải navigation, chỉ là snapshot int (không có association tới User trong sơ đồ) — giữ lại seller tại thời điểm bán dù sản phẩm/seller sau đó đổi.
+>
+> `OrderItem.Status` (kiểu `FulfillmentStatus`, xem enum bên dưới) là máy trạng thái giao hàng **riêng của từng item**, đổi qua `OrderItem.ChangeStatus()` — độc lập hoàn toàn với `Order.Status`/`Order.ChangeStatus()`. Chi tiết cạnh chuyển hợp lệ xem `state-machine.md` mục 3.
+
+### 1.1 Enum liên quan
+
+| Enum | Giá trị | Dùng ở |
+|------|---------|--------|
+| `UserRole` | Customer, Seller, Admin | `User.Role` |
+| `OrderStatus` | Pending, Paid, Shipped, Delivered, Cancelled | `Order.Status` |
+| `FulfillmentStatus` | Pending, Shipped, Delivered, Cancelled | `OrderItem.Status` — độc lập với `OrderStatus`, do Seller sở hữu item tự đổi |
+| `PaymentMethod` | CreditCard, PayPal, CashOnDelivery | `Payment.Method` |
+| `PaymentStatus` | Pending, Completed, Failed, Refunded | `Payment.Status` |
+| `DiscountType` | Percentage, FixedAmount | `Coupon.Type` |
 
 ## 2. Entity Relationship Diagram (ERD)
 
@@ -203,6 +218,7 @@ erDiagram
         string ProductName
         decimal UnitPrice
         int Quantity
+        int Status "FulfillmentStatus, doc lap voi ORDERS.Status"
     }
     PAYMENTS {
         int Id PK

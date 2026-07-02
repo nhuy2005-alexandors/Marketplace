@@ -141,6 +141,8 @@ public class OrderService : IOrderService
             var product = await _db.Products.FindAsync(new object[] { item.ProductId }, ct);
             if (product is not null)
                 product.Stock += item.Quantity;
+            if (item.Status == Domain.Enums.FulfillmentStatus.Pending)
+                item.Status = Domain.Enums.FulfillmentStatus.Cancelled;
         }
         order.ChangeStatus(OrderStatus.Cancelled);
         await _db.SaveChangesAsync(ct);

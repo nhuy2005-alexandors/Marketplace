@@ -15,7 +15,7 @@ public class CategoriesController : ApiControllerBase
     public async Task<ActionResult<IReadOnlyList<CategoryDto>>> GetAll(CancellationToken ct)
         => Ok(await _categories.GetAllAsync(ct));
 
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Seller")]
     [HttpPost]
     public async Task<ActionResult<CategoryDto>> Create(CreateCategoryRequest request, CancellationToken ct)
         => ToResponse(await _categories.CreateAsync(request, ct));

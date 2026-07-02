@@ -92,4 +92,6 @@ public interface ISellerOrderService
 {
     // Đơn hàng chứa item của seller — chỉ trả về các item thuộc seller đó.
     Task<PagedResult<OrderDto>> GetForSellerAsync(int sellerId, int page, int pageSize, CancellationToken ct = default);
+    // Seller cập nhật trạng thái giao hàng cho item của chính mình.
+    Task<Result<OrderItemDto>> UpdateFulfillmentAsync(int sellerId, int orderItemId, UpdateFulfillmentStatusRequest request, CancellationToken ct = default);
 }

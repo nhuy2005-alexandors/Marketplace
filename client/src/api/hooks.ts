@@ -314,6 +314,18 @@ export function useSellerOrders(page = 1, pageSize = 10) {
   });
 }
 
+export function useUpdateItemStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ itemId, status }: { itemId: number; status: string }) =>
+      api.put(`/seller/orders/items/${itemId}/status`, { status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["seller-orders"] });
+      qc.invalidateQueries({ queryKey: ["seller-dashboard"] });
+    },
+  });
+}
+
 export function useMe() {
   const token = useAuth((s) => s.token);
   return useQuery({

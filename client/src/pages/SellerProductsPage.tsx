@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  useCategories, useCreateProduct, useDeleteProduct, useProducts,
+  useCategories, useCreateCategory, useCreateProduct, useDeleteProduct, useProducts,
   useUpdateProduct, useUploadProductImage, type ProductInput,
 } from "../api/hooks";
 import { apiError } from "../api/client";
@@ -17,10 +17,23 @@ export function SellerProductsPage() {
   const updateProduct = useUpdateProduct();
   const deleteProduct = useDeleteProduct();
   const uploadImage = useUploadProductImage();
+  const createCategory = useCreateCategory();
 
   const [form, setForm] = useState<ProductInput>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [newCategory, setNewCategory] = useState("");
   const [error, setError] = useState("");
+
+  const addCategory = async () => {
+    if (!newCategory.trim()) return;
+    try {
+      const cat = await createCategory.mutateAsync({ name: newCategory.trim() });
+      setForm((f) => ({ ...f, categoryId: cat.id }));
+      setNewCategory("");
+    } catch (err) {
+      setError(apiError(err));
+    }
+  };
 
   const startEdit = (p: Product) => {
     setEditingId(p.id);
@@ -76,6 +89,13 @@ export function SellerProductsPage() {
             <option value="">-- Chọn danh mục --</option>
             {categories?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          <div className="flex gap-2">
+            <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)}
+              placeholder="Hoặc tạo danh mục mới"
+              className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+            <button type="button" onClick={addCategory} disabled={createCategory.isPending}
+              className="px-3 py-2 rounded-lg border text-sm hover:bg-slate-50">+ Danh mục</button>
+          </div>
           <div>
             <input type="file" accept="image/*" onChange={onFileChange} className="text-sm" />
             {uploadImage.isPending && <span className="text-xs text-slate-400 ml-2">Đang tải ảnh...</span>}

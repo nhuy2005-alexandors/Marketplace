@@ -30,6 +30,7 @@ MiniShop hiện là **marketplace đa người bán (multi-seller)**: hỗ trợ
 | Order | Đơn hàng chốt từ giỏ — có thể chứa sản phẩm của **nhiều Seller khác nhau** |
 | Order Status | Trạng thái vòng đời đơn (Pending/Paid/Shipped/Delivered/Cancelled) — chỉ Admin thay đổi |
 | OrderItem.SellerId | Snapshot seller sở hữu sản phẩm tại thời điểm đặt hàng cho dòng item đó |
+| FulfillmentStatus | Trạng thái giao hàng riêng của từng `OrderItem` (Pending/Shipped/Delivered/Cancelled) — do Seller sở hữu item tự đổi, độc lập với `Order.Status` |
 | Payment | Bản ghi thanh toán gắn với đơn |
 | Verified purchase | Khách đã mua sản phẩm — điều kiện để đánh giá |
 | JWT | JSON Web Token dùng xác thực |
@@ -87,6 +88,8 @@ Kiến trúc 4 lớp (Clean Architecture):
 | FR-13 | Phân trang đơn hàng | Danh sách đơn (khách & admin) chia trang, tổng số trang | Customer/Admin |
 | FR-14 | Đăng ký Seller | Tự đăng ký tài khoản vai trò Seller kèm `ShopName` (`POST /api/auth/register-seller`), không cần Admin duyệt | Khách |
 | FR-15 | Đơn hàng theo Seller | `GET /api/seller/orders` — danh sách đơn có chứa sản phẩm của seller, phân trang; mỗi đơn trả về **chỉ** các `OrderItem` và phần doanh thu thuộc seller đó | Seller |
+| FR-16 | Giao hàng theo item (per-item fulfillment) | `PUT /api/seller/orders/items/{itemId}/status` — Seller đổi `FulfillmentStatus` (Pending/Shipped/Delivered/Cancelled) của **item thuộc chính mình** trong đơn trộn nhiều seller; chuyển sai cạnh → 409, item không thuộc seller gọi → 403. Độc lập với `Order.Status` (vẫn chỉ Admin đổi) | Seller |
+| FR-17 | Tạo danh mục bởi Seller | `POST /api/categories` mở cho role `Admin,Seller` — Seller tạo danh mục mới ngay khi thêm sản phẩm, không cần chờ Admin. Xóa danh mục (`DELETE`) vẫn chỉ Admin | Admin/Seller |
 
 ### 3.1 Chi tiết một số quy tắc
 - **FR-05:** Checkout thất bại nếu giỏ rỗng hoặc tồn kho không đủ; khi đủ, tồn kho giảm và giỏ được làm rỗng. Mỗi `OrderItem` lưu snapshot `SellerId` (seller sở hữu sản phẩm tại thời điểm đặt hàng) — giỏ hàng và đơn hàng **không** bị giới hạn theo một seller, một đơn có thể chứa item từ nhiều shop khác nhau.
@@ -96,7 +99,9 @@ Kiến trúc 4 lớp (Clean Architecture):
 - **FR-11 (Seller ownership):** `POST/PUT/DELETE /api/products` và `upload-image` cho phép role `Admin,Seller`. Với Seller, hệ thống kiểm tra `product.SellerId == currentUserId` trước khi sửa/xóa — không khớp trả 403 Forbidden. Admin bỏ qua kiểm tra này (sửa/xóa sản phẩm của bất kỳ seller nào). Khi tạo sản phẩm, `SellerId` luôn gán bằng id của người tạo (Seller tự tạo cho mình; Admin tạo thì gán chính Admin làm seller).
 - **FR-10/FR-15 (Seller scope):** `DashboardService.GetAsync(int? sellerId)` — truyền `null` trả số liệu toàn hệ thống (Admin dùng), truyền id trả số liệu đã lọc theo `OrderItem.SellerId`/`Product.SellerId` của seller đó (doanh thu, số sản phẩm, số đơn liên quan, phân bố trạng thái, top sản phẩm). `SellerOrderService.GetForSellerAsync` trả đơn có chứa item của seller nhưng lọc `Order.Items` chỉ còn item của seller đó và tính lại subtotal/total trên phần này.
 - **FR-12:** Coupon áp dụng tại bước checkout; hệ thống validate hạn dùng, đơn tối thiểu, số lượt còn lại trước khi trừ giảm giá vào `Order.DiscountAmount`.
-- **Hủy đơn:** Customer hủy được khi đơn ở Pending/Paid; tồn kho được hoàn lại.
+- **FR-10/FR-15 (Pro-rate giảm giá coupon theo seller):** `Order.DiscountAmount` là giảm giá **toàn đơn**, không gắn riêng seller nào. Cả `SellerOrderService.GetForSellerAsync` và `DashboardService.GetAsync(sellerId)` chia tỉ lệ giảm giá này theo tỉ trọng subtotal của seller trong đơn: `sellerDiscount = DiscountAmount × (sellerSubtotal / orderSubtotal)`, sau đó `sellerTotal = sellerSubtotal - sellerDiscount`. Doanh thu hệ thống (`sellerId = null`) dùng trực tiếp `Order.Total` (đã trừ giảm giá) của các đơn đã thanh toán. Ví dụ đã verify: đơn $100 (seller A $60 + seller B $40), coupon giảm $20 → A thấy discount $12/total $48, B thấy discount $8/total $32, tổng $80 khớp `Order.Total` thực nhận.
+- **FR-16 (Giao hàng theo item):** `OrderItem.ChangeStatus()` là máy trạng thái riêng (xem `state-machine.md` mục 3), tách biệt hoàn toàn khỏi `Order.ChangeStatus()`. Seller chỉ đổi được `FulfillmentStatus` của item có `SellerId == currentUserId`; sai chủ → 403. Chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi Customer hủy đơn (`OrderService.CancelAsync`), mọi `OrderItem` còn ở `Pending` được tự động chuyển sang `Cancelled`.
+- **Hủy đơn:** Customer hủy được khi đơn ở Pending/Paid; tồn kho được hoàn lại; các item còn Pending chuyển `FulfillmentStatus → Cancelled`.
 
 ---
 
@@ -118,7 +123,7 @@ Kiến trúc 4 lớp (Clean Architecture):
 ## 5. Giao diện ngoài
 
 ### 5.1 API
-REST/JSON. Nhóm endpoint chính: `/api/auth` (gồm `register-seller`), `/api/products`, `/api/categories`, `/api/cart`, `/api/orders`, `/api/wishlist`, `/api/admin`, `/api/seller` (`dashboard`, `orders` — riêng cho vai trò Seller). Tài liệu tương tác qua Swagger UI (`/swagger`).
+REST/JSON. Nhóm endpoint chính: `/api/auth` (gồm `register-seller`), `/api/products`, `/api/categories` (`POST` nay cho `Admin,Seller`; `DELETE` vẫn `Admin`), `/api/cart`, `/api/orders`, `/api/wishlist`, `/api/admin`, `/api/seller` (`dashboard`, `orders`, `PUT orders/items/{itemId}/status` — riêng cho vai trò Seller, đổi `FulfillmentStatus` của item thuộc chính seller đó). Tài liệu tương tác qua Swagger UI (`/swagger`).
 
 ### 5.2 Người dùng
 SPA React: trang sản phẩm, chi tiết, giỏ, thanh toán, đơn hàng, wishlist, dashboard admin.

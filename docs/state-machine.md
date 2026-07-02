@@ -70,3 +70,39 @@ stateDiagram-v2
 ```
 
 > `Refunded` được mô hình hóa trong enum cho khả năng mở rộng; luồng hoàn tiền chưa nằm trong phạm vi hiện tại.
+
+## 3. Vòng đời Giao hàng theo Item (OrderItem Fulfillment)
+
+Quy tắc cài đặt trong `OrderItem.ChangeStatus()` (Domain layer) — **độc lập** với máy trạng thái Order ở mục 1. `Order.Status` vẫn chỉ do Admin đổi (vòng đời thanh toán/vận đơn toàn đơn: Pending→Paid→Shipped→Delivered→Cancelled). `FulfillmentStatus` là trạng thái giao hàng **của từng dòng sản phẩm**, do **Seller sở hữu item đó** tự cập nhật qua `PUT /api/seller/orders/items/{itemId}/status` — mỗi seller ship phần của mình trong một đơn trộn nhiều seller mà không phụ thuộc seller khác hay Admin. Chuyển sai cạnh bị từ chối (`InvalidOrderTransitionException` → HTTP 409); item không thuộc seller gọi request → HTTP 403.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: Checkout (tạo OrderItem)
+
+    Pending --> Shipped: Seller xác nhận giao (item của mình)
+    Pending --> Cancelled: Khách hủy đơn (item còn Pending)
+
+    Shipped --> Delivered: Giao thành công
+
+    Delivered --> [*]
+    Cancelled --> [*]
+
+    note right of Pending
+        Trạng thái mặc định khi tạo OrderItem
+    end note
+    note right of Cancelled
+        Khi Order bị hủy (Order.Cancel),
+        mọi item còn Pending -> Cancelled
+    end note
+```
+
+**Bảng chuyển trạng thái hợp lệ:**
+
+| Từ \ Đến | Pending | Shipped | Delivered | Cancelled |
+|----------|:-------:|:-------:|:---------:|:---------:|
+| Pending   | — | ✅ | ❌ | ✅ |
+| Shipped   | ❌ | — | ✅ | ❌ |
+| Delivered | ❌ | ❌ | — | ❌ |
+| Cancelled | ❌ | ❌ | ❌ | — |
+
+> Delivered và Cancelled là trạng thái cuối (không có cạnh ra). Đây là máy trạng thái thứ ba của hệ thống, tách biệt hoàn toàn khỏi `Order.Status` (mục 1) và `Payment.Status` (mục 2) — một đơn có thể ở `Order.Status = Paid` trong khi các `OrderItem` của nó vẫn ở nhiều `FulfillmentStatus` khác nhau tùy tiến độ giao hàng của từng seller.

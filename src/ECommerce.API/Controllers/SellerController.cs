@@ -28,4 +28,9 @@ public class SellerController : ApiControllerBase
     public async Task<ActionResult<PagedResult<OrderDto>>> Orders(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
         => Ok(await _orders.GetForSellerAsync(UserId, page, pageSize, ct));
+
+    // Seller cập nhật trạng thái giao hàng cho một item của mình.
+    [HttpPut("orders/items/{itemId:int}/status")]
+    public async Task<ActionResult<OrderItemDto>> UpdateItemStatus(int itemId, UpdateFulfillmentStatusRequest request, CancellationToken ct)
+        => ToResponse(await _orders.UpdateFulfillmentAsync(UserId, itemId, request, ct));
 }

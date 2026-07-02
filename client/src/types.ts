@@ -60,12 +60,16 @@ export interface Cart {
 
 export type OrderStatus = "Pending" | "Paid" | "Shipped" | "Delivered" | "Cancelled";
 
+export type FulfillmentStatus = "Pending" | "Shipped" | "Delivered" | "Cancelled";
+
 export interface OrderItem {
+  id: number;
   productId: number;
   productName: string;
   unitPrice: number;
   quantity: number;
   subtotal: number;
+  status: FulfillmentStatus;
 }
 
 export interface Payment {
