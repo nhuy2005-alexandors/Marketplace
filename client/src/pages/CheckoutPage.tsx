@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCart, useCheckout, usePayOrder, useValidateCoupon } from "../api/hooks";
 import { apiError } from "../api/client";
+import { Button, Card, Input, Select, Textarea } from "../components/ui";
 
 const RETURN_BASE = "http://localhost:5215/api/payments"; // API callback endpoint cho cổng redirect
 
@@ -57,63 +58,67 @@ export function CheckoutPage() {
   };
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6">
-      <h1 className="text-xl font-bold mb-4">Thanh toán</h1>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 space-y-4">
-        <div className="flex gap-2">
-          <input
-            value={couponInput} onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-            placeholder="Mã giảm giá (VD: WELCOME10)"
-            className="flex-1 border rounded-lg px-3 py-2 text-sm"
-          />
-          <button
-            type="button" onClick={applyCoupon} disabled={validateCoupon.isPending}
-            className="px-4 py-2 rounded-lg border text-sm hover:bg-slate-50"
-          >Áp dụng</button>
-        </div>
-        {couponMsg && (
-          <div className={couponApplied ? "text-emerald-600 text-sm" : "text-rose-500 text-sm"}>{couponMsg}</div>
-        )}
-
-        <div className="text-sm text-slate-500 space-y-1 border-t pt-3">
-          <div className="flex justify-between"><span>Tạm tính</span><span>${subtotal.toFixed(2)}</span></div>
-          {discount > 0 && (
-            <div className="flex justify-between text-emerald-600"><span>Giảm giá</span><span>-${discount.toFixed(2)}</span></div>
-          )}
-          <div className="flex justify-between font-bold text-brand-700 text-base">
-            <span>Tổng cộng</span><span>${finalTotal.toFixed(2)}</span>
-          </div>
-        </div>
-
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <label className="text-sm font-medium">Địa chỉ giao hàng</label>
-            <textarea
-              required value={address} onChange={(e) => setAddress(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
-              placeholder="Số nhà, đường, phường/xã, tỉnh/thành"
-            />
-          </div>
-          <div>
-            <label className="text-sm font-medium">Phương thức thanh toán</label>
-            <select
-              value={method} onChange={(e) => setMethod(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm mt-1"
+    <div className="max-w-4xl mx-auto px-4 py-6 animate-fade-in">
+      <h1 className="text-2xl font-bold tracking-tight mb-6">Thanh toán</h1>
+      <div className="grid md:grid-cols-5 gap-6">
+        <Card className="p-6 space-y-4 md:col-span-3 order-2 md:order-1">
+          <form onSubmit={submit} className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Địa chỉ giao hàng</label>
+              <Textarea
+                required value={address} onChange={(e) => setAddress(e.target.value)}
+                className="mt-1"
+                placeholder="Số nhà, đường, phường/xã, tỉnh/thành"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Phương thức thanh toán</label>
+              <Select
+                value={method} onChange={(e) => setMethod(e.target.value)}
+                className="mt-1"
+              >
+                <option value="mock">Thẻ demo (hoàn tất ngay)</option>
+                <option value="vnpay">VNPay</option>
+                <option value="stripe">Stripe</option>
+                <option value="cod">Thanh toán khi nhận hàng</option>
+              </Select>
+            </div>
+            {error && <div className="text-rose-500 text-sm">{error}</div>}
+            <Button
+              type="submit"
+              disabled={checkout.isPending || payOrder.isPending}
+              className="w-full"
             >
-              <option value="mock">Thẻ demo (hoàn tất ngay)</option>
-              <option value="vnpay">VNPay</option>
-              <option value="stripe">Stripe</option>
-              <option value="cod">Thanh toán khi nhận hàng</option>
-            </select>
+              {checkout.isPending || payOrder.isPending ? "Đang xử lý..." : "Đặt hàng & Thanh toán"}
+            </Button>
+          </form>
+        </Card>
+
+        <Card className="p-6 space-y-4 md:col-span-2 order-1 md:order-2 h-fit">
+          <h2 className="font-semibold">Tóm tắt đơn hàng</h2>
+          <div className="flex gap-2">
+            <Input
+              value={couponInput} onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+              placeholder="Mã giảm giá"
+            />
+            <Button
+              type="button" variant="ghost" onClick={applyCoupon} disabled={validateCoupon.isPending}
+            >Áp dụng</Button>
           </div>
-          {error && <div className="text-rose-500 text-sm">{error}</div>}
-          <button
-            disabled={checkout.isPending || payOrder.isPending}
-            className="w-full py-2.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {checkout.isPending || payOrder.isPending ? "Đang xử lý..." : "Đặt hàng & Thanh toán"}
-          </button>
-        </form>
+          {couponMsg && (
+            <div className={`text-sm ${couponApplied ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"}`}>{couponMsg}</div>
+          )}
+
+          <div className="text-sm muted space-y-1 border-t border-slate-200 dark:border-slate-800 pt-3">
+            <div className="flex justify-between"><span>Tạm tính</span><span>${subtotal.toFixed(2)}</span></div>
+            {discount > 0 && (
+              <div className="flex justify-between text-emerald-600 dark:text-emerald-400"><span>Giảm giá</span><span>-${discount.toFixed(2)}</span></div>
+            )}
+            <div className="flex justify-between font-bold text-base pt-1 text-slate-800 dark:text-slate-100">
+              <span>Tổng cộng</span><span className="text-brand-600 dark:text-brand-400">${finalTotal.toFixed(2)}</span>
+            </div>
+          </div>
+        </Card>
       </div>
     </div>
   );

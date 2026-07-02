@@ -2,6 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-50 text-slate-800 antialiased;
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased transition-colors duration-200;
+  }
+  .dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+@layer components {
+  /* Surface: card/panel nền — tự đổi theo dark */
+  .surface {
+    @apply bg-white border border-slate-200/70 shadow-soft transition-colors;
+  }
+  .dark .surface {
+    @apply bg-slate-900 border-slate-800;
+  }
+
+  .input-base {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800
+           placeholder:text-slate-400 outline-none transition
+           focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20;
+  }
+  .dark .input-base {
+    @apply border-slate-700 bg-slate-800 text-slate-100 placeholder:text-slate-500;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+           transition active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700 shadow-sm hover:shadow-glow;
+  }
+  .btn-ghost {
+    @apply btn border border-slate-300 text-slate-700 hover:bg-slate-100;
+  }
+  .dark .btn-ghost {
+    @apply border-slate-700 text-slate-200 hover:bg-slate-800;
+  }
+  .btn-danger {
+    @apply btn border border-rose-200 text-rose-600 hover:bg-rose-50;
+  }
+  .dark .btn-danger {
+    @apply border-rose-900/50 text-rose-400 hover:bg-rose-950/40;
+  }
+
+  .muted { @apply text-slate-500; }
+  .dark .muted { @apply text-slate-400; }
 }
