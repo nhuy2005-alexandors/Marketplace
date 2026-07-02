@@ -12,8 +12,13 @@ namespace ECommerce.Infrastructure.Payments;
 public class VnPayProvider : IPaymentProvider
 {
     private readonly VnPayOptions _opt;
+    private readonly bool _allowDemo;
 
-    public VnPayProvider(IOptions<PaymentOptions> opt) => _opt = opt.Value.VnPay;
+    public VnPayProvider(IOptions<PaymentOptions> opt)
+    {
+        _opt = opt.Value.VnPay;
+        _allowDemo = opt.Value.AllowDemo;
+    }
 
     public string Key => "vnpay";
 
@@ -24,8 +29,10 @@ public class VnPayProvider : IPaymentProvider
 
         if (!_opt.Enabled)
         {
-            // Sandbox chưa cấu hình → demo hoàn tất ngay
-            return Task.FromResult(new PaymentInitResult(true, null, $"VNPAY-DEMO-{Guid.NewGuid():N}", null));
+            // Chưa cấu hình key: chỉ demo ở môi trường Development, ngược lại từ chối.
+            if (_allowDemo)
+                return Task.FromResult(new PaymentInitResult(true, null, $"VNPAY-DEMO-{Guid.NewGuid():N}", null));
+            return Task.FromResult(new PaymentInitResult(false, null, "", "VNPay chưa được cấu hình."));
         }
 
         var txnRef = $"{ctx.OrderId}-{DateTime.UtcNow:yyyyMMddHHmmss}";
@@ -59,7 +66,11 @@ public class VnPayProvider : IPaymentProvider
         var orderId = ParseOrderId(data);
 
         if (!_opt.Enabled)
-            return Task.FromResult(new PaymentVerifyResult(true, orderId, $"VNPAY-DEMO-{Guid.NewGuid():N}", null));
+        {
+            if (_allowDemo)
+                return Task.FromResult(new PaymentVerifyResult(true, orderId, $"VNPAY-DEMO-{Guid.NewGuid():N}", null));
+            return Task.FromResult(new PaymentVerifyResult(false, orderId, "", "VNPay chưa được cấu hình."));
+        }
 
         if (!data.TryGetValue("vnp_SecureHash", out var receivedHash))
             return Task.FromResult(new PaymentVerifyResult(false, orderId, "", "Missing secure hash."));

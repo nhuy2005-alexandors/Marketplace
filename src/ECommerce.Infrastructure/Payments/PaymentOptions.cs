@@ -2,6 +2,8 @@ namespace ECommerce.Infrastructure.Payments;
 
 public class PaymentOptions
 {
+    // Cho phép chế độ demo (hoàn tất ngay không cần key thật). Chỉ bật ở Development.
+    public bool AllowDemo { get; set; }
     public VnPayOptions VnPay { get; set; } = new();
     public StripeOptions Stripe { get; set; } = new();
 }

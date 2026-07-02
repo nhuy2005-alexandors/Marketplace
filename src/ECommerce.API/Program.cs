@@ -14,8 +14,15 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Override secret/config nhạy cảm bằng file local (gitignored) khi deploy.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// Demo payment (hoàn tất ngay không cần key thật) chỉ cho phép ở Development.
+builder.Services.PostConfigure<ECommerce.Infrastructure.Payments.PaymentOptions>(o =>
+    o.AllowDemo = builder.Environment.IsDevelopment());
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();

@@ -10,8 +10,13 @@ namespace ECommerce.Infrastructure.Payments;
 public class StripeProvider : IPaymentProvider
 {
     private readonly StripeOptions _opt;
+    private readonly bool _allowDemo;
 
-    public StripeProvider(IOptions<PaymentOptions> opt) => _opt = opt.Value.Stripe;
+    public StripeProvider(IOptions<PaymentOptions> opt)
+    {
+        _opt = opt.Value.Stripe;
+        _allowDemo = opt.Value.AllowDemo;
+    }
 
     public string Key => "stripe";
 
@@ -21,7 +26,9 @@ public class StripeProvider : IPaymentProvider
             return new PaymentInitResult(false, null, "", "Invalid amount.");
 
         if (!_opt.Enabled)
-            return new PaymentInitResult(true, null, $"STRIPE-DEMO-{Guid.NewGuid():N}", null);
+            return _allowDemo
+                ? new PaymentInitResult(true, null, $"STRIPE-DEMO-{Guid.NewGuid():N}", null)
+                : new PaymentInitResult(false, null, "", "Stripe chưa được cấu hình.");
 
         StripeConfiguration.ApiKey = _opt.SecretKey;
         var successUrl = string.IsNullOrEmpty(ctx.ReturnUrl) ? _opt.SuccessUrl : ctx.ReturnUrl;
@@ -68,6 +75,8 @@ public class StripeProvider : IPaymentProvider
 
         if (!_opt.Enabled)
         {
+            if (!_allowDemo)
+                return new PaymentVerifyResult(false, 0, "", "Stripe chưa được cấu hình.");
             var demoOrderId = data.TryGetValue("orderId", out var o) && int.TryParse(o, out var di) ? di : 0;
             return new PaymentVerifyResult(true, demoOrderId, $"STRIPE-DEMO-{Guid.NewGuid():N}", null);
         }

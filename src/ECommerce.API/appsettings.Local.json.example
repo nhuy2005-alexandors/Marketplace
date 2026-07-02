@@ -1,0 +1,15 @@
+{
+  "_note": "Copy file này thành appsettings.Local.json (đã gitignore) và điền giá trị thật khi deploy. Không commit file .Local.json.",
+  "Jwt": {
+    "Secret": "CHANGE-ME-đặt-chuỗi-ngẫu-nhiên-tối-thiểu-32-ký-tự"
+  },
+  "Payment": {
+    "VnPay": {
+      "TmnCode": "your-vnpay-tmncode",
+      "HashSecret": "your-vnpay-hashsecret"
+    },
+    "Stripe": {
+      "SecretKey": "sk_test_your-stripe-key"
+    }
+  }
+}
