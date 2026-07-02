@@ -24,6 +24,7 @@ public class SellerOrderService : ISellerOrderService
         var total = await baseQuery.CountAsync(ct);
 
         var orders = await baseQuery
+            .AsNoTracking()
             .Include(o => o.Items)
             .Include(o => o.Payment)
             .OrderByDescending(o => o.CreatedAt)

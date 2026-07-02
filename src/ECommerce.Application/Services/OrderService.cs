@@ -144,10 +144,12 @@ public class OrderService : IOrderService
         if (!order.CanCancel())
             return Result.Fail<OrderDto>($"Cannot cancel an order in {order.Status} state.", ErrorType.Conflict);
 
+        var productIds = order.Items.Select(i => i.ProductId).ToList();
+        var products = await _db.Products.Where(p => productIds.Contains(p.Id)).ToListAsync(ct);
+        var byId = products.ToDictionary(p => p.Id);
         foreach (var item in order.Items)
         {
-            var product = await _db.Products.FindAsync(new object[] { item.ProductId }, ct);
-            if (product is not null)
+            if (byId.TryGetValue(item.ProductId, out var product))
                 product.Stock += item.Quantity;
             if (item.Status == Domain.Enums.FulfillmentStatus.Pending)
                 item.Status = Domain.Enums.FulfillmentStatus.Cancelled;

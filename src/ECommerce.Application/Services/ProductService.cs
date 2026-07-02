@@ -15,6 +15,7 @@ public class ProductService : IProductService
     public async Task<PagedResult<ProductDto>> SearchAsync(ProductQuery q, CancellationToken ct = default)
     {
         var query = _db.Products
+            .AsNoTracking()
             .Include(p => p.Category)
             .Include(p => p.Seller)
             .Include(p => p.Reviews)
@@ -63,6 +64,7 @@ public class ProductService : IProductService
     public async Task<Result<ProductDto>> GetByIdAsync(int id, CancellationToken ct = default)
     {
         var product = await _db.Products
+            .AsNoTracking()
             .Include(p => p.Category)
             .Include(p => p.Seller)
             .Include(p => p.Reviews)
@@ -128,7 +130,15 @@ public class ProductService : IProductService
         if (!isAdmin && product.SellerId != actorId)
             return Result.Fail("You can only delete your own products.", ErrorType.Forbidden);
         _db.Products.Remove(product);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Product đã nằm trong đơn hàng (FK Restrict) — không xóa được, gợi ý ẩn thay vì xóa.
+            return Result.Fail("Không thể xóa sản phẩm đã có trong đơn hàng.", ErrorType.Conflict);
+        }
         return Result.Ok();
     }
 }
