@@ -1,0 +1,22 @@
+## .NET
+bin/
+obj/
+*.user
+appsettings.*.local.json
+
+## EF / SQL
+*.mdf
+*.ldf
+
+## Uploaded files (runtime)
+src/ECommerce.API/wwwroot/uploads/
+
+## Node / frontend
+client/node_modules/
+client/dist/
+*.log
+
+## IDE
+.vs/
+.idea/
+.vscode/
