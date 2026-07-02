@@ -14,7 +14,7 @@ export function ProductDetailPage() {
   const addToCart = useAddToCart();
   const toggleWishlist = useToggleWishlist();
   const createReview = useCreateReview(productId);
-  const isAuthed = useAuth((s) => !!s.token);
+  const isAuthed = useAuth((s) => s.user?.role === "Customer");
 
   const [qty, setQty] = useState(1);
   const [rating, setRating] = useState(5);

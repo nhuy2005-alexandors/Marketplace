@@ -13,8 +13,8 @@ export function Navbar() {
       <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-6">
         <Link to="/" className="font-bold text-brand-700 text-lg">🛍️ MiniShop</Link>
         <Link to="/" className="text-sm text-slate-600 hover:text-brand-600">Sản phẩm</Link>
-        {token && <Link to="/orders" className="text-sm text-slate-600 hover:text-brand-600">Đơn hàng</Link>}
-        {token && <Link to="/wishlist" className="text-sm text-slate-600 hover:text-brand-600">Yêu thích</Link>}
+        {user?.role === "Customer" && <Link to="/orders" className="text-sm text-slate-600 hover:text-brand-600">Đơn hàng</Link>}
+        {user?.role === "Customer" && <Link to="/wishlist" className="text-sm text-slate-600 hover:text-brand-600">Yêu thích</Link>}
         {user?.role === "Admin" && (
           <>
             <Link to="/admin" className="text-sm text-slate-600 hover:text-brand-600">Dashboard</Link>
@@ -22,8 +22,15 @@ export function Navbar() {
             <Link to="/admin/coupons" className="text-sm text-slate-600 hover:text-brand-600">Mã giảm giá</Link>
           </>
         )}
+        {user?.role === "Seller" && (
+          <>
+            <Link to="/seller" className="text-sm text-slate-600 hover:text-brand-600">Dashboard</Link>
+            <Link to="/seller/products" className="text-sm text-slate-600 hover:text-brand-600">SP của tôi</Link>
+            <Link to="/seller/orders" className="text-sm text-slate-600 hover:text-brand-600">Đơn hàng</Link>
+          </>
+        )}
         <div className="ml-auto flex items-center gap-4">
-          {token && (
+          {user?.role === "Customer" && (
             <Link to="/cart" className="relative text-slate-600 hover:text-brand-600">
               🛒
               {cartCount > 0 && (

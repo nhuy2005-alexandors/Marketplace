@@ -1,10 +1,11 @@
-export type Role = "Customer" | "Admin";
+export type Role = "Customer" | "Admin" | "Seller";
 
 export interface User {
   id: number;
   email: string;
   fullName: string;
   role: Role;
+  shopName?: string;
 }
 
 export interface AuthResponse {
@@ -21,6 +22,8 @@ export interface Product {
   imageUrl?: string;
   categoryId: number;
   categoryName: string;
+  sellerId: number;
+  sellerShopName: string;
   averageRating: number;
   reviewCount: number;
 }

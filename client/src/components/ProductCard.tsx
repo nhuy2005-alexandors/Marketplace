@@ -6,7 +6,7 @@ import { useAuth } from "../store/auth";
 export function ProductCard({ product }: { product: Product }) {
   const addToCart = useAddToCart();
   const toggleWishlist = useToggleWishlist();
-  const isAuthed = useAuth((s) => !!s.token);
+  const isCustomer = useAuth((s) => s.user?.role === "Customer");
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition">
@@ -28,7 +28,7 @@ export function ProductCard({ product }: { product: Product }) {
         </div>
         <div className="flex items-center justify-between pt-1">
           <span className="text-lg font-semibold text-brand-700">${product.price.toFixed(2)}</span>
-          {isAuthed && (
+          {isCustomer && (
             <div className="flex gap-1">
               <button
                 title="Yêu thích"

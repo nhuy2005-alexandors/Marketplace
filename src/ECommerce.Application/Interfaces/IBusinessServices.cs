@@ -13,6 +13,7 @@ namespace ECommerce.Application.Interfaces;
 public interface IAuthService
 {
     Task<Result<AuthResponse>> RegisterAsync(RegisterRequest request, CancellationToken ct = default);
+    Task<Result<AuthResponse>> RegisterSellerAsync(RegisterSellerRequest request, CancellationToken ct = default);
     Task<Result<AuthResponse>> LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task<Result<UserDto>> GetCurrentAsync(int userId, CancellationToken ct = default);
 }
@@ -21,9 +22,9 @@ public interface IProductService
 {
     Task<PagedResult<ProductDto>> SearchAsync(ProductQuery query, CancellationToken ct = default);
     Task<Result<ProductDto>> GetByIdAsync(int id, CancellationToken ct = default);
-    Task<Result<ProductDto>> CreateAsync(CreateProductRequest request, CancellationToken ct = default);
-    Task<Result<ProductDto>> UpdateAsync(int id, UpdateProductRequest request, CancellationToken ct = default);
-    Task<Result> DeleteAsync(int id, CancellationToken ct = default);
+    Task<Result<ProductDto>> CreateAsync(int sellerId, CreateProductRequest request, CancellationToken ct = default);
+    Task<Result<ProductDto>> UpdateAsync(int actorId, bool isAdmin, int id, UpdateProductRequest request, CancellationToken ct = default);
+    Task<Result> DeleteAsync(int actorId, bool isAdmin, int id, CancellationToken ct = default);
 }
 
 public interface ICategoryService
@@ -83,5 +84,12 @@ public interface IWishlistService
 
 public interface IDashboardService
 {
-    Task<DashboardDto> GetAsync(CancellationToken ct = default);
+    // sellerId = null -> toàn hệ thống (Admin); có giá trị -> chỉ dữ liệu của seller đó.
+    Task<DashboardDto> GetAsync(int? sellerId = null, CancellationToken ct = default);
+}
+
+public interface ISellerOrderService
+{
+    // Đơn hàng chứa item của seller — chỉ trả về các item thuộc seller đó.
+    Task<PagedResult<OrderDto>> GetForSellerAsync(int sellerId, int page, int pageSize, CancellationToken ct = default);
 }

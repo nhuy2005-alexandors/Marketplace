@@ -38,6 +38,7 @@ public class OrderService : IOrderService
                 order.Items.Add(new OrderItem
                 {
                     ProductId = ci.ProductId,
+                    SellerId = ci.Product.SellerId,
                     ProductName = ci.Product.Name,
                     UnitPrice = ci.Product.Price,
                     Quantity = ci.Quantity

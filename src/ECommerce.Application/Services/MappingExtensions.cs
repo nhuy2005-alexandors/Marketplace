@@ -12,8 +12,10 @@ internal static class MappingExtensions
     {
         var count = p.Reviews?.Count ?? 0;
         var avg = count > 0 ? p.Reviews!.Average(r => r.Rating) : 0;
+        var shopName = p.Seller?.ShopName ?? p.Seller?.FullName ?? string.Empty;
         return new ProductDto(p.Id, p.Name, p.Description, p.Price, p.Stock, p.ImageUrl,
-            p.CategoryId, p.Category?.Name ?? string.Empty, Math.Round(avg, 2), count);
+            p.CategoryId, p.Category?.Name ?? string.Empty, p.SellerId, shopName,
+            Math.Round(avg, 2), count);
     }
 
     public static CategoryDto ToDto(this Category c) => new(c.Id, c.Name, c.Description);

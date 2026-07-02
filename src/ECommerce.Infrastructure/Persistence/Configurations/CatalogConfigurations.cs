@@ -13,6 +13,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         b.HasIndex(u => u.Email).IsUnique();
         b.Property(u => u.PasswordHash).IsRequired();
         b.Property(u => u.FullName).IsRequired().HasMaxLength(100);
+        b.Property(u => u.ShopName).HasMaxLength(150);
         b.Property(u => u.Role).HasConversion<int>();
         b.HasOne(u => u.Cart).WithOne(c => c.User).HasForeignKey<Cart>(c => c.UserId);
     }
@@ -40,7 +41,10 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         b.Property(p => p.ImageUrl).HasMaxLength(500);
         b.HasOne(p => p.Category).WithMany(c => c.Products)
             .HasForeignKey(p => p.CategoryId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(p => p.Seller).WithMany(u => u.Products)
+            .HasForeignKey(p => p.SellerId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(p => p.Name);
+        b.HasIndex(p => p.SellerId);
     }
 }
 

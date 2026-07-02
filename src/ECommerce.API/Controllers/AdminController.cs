@@ -15,5 +15,5 @@ public class AdminController : ApiControllerBase
 
     [HttpGet("dashboard")]
     public async Task<ActionResult<DashboardDto>> Dashboard(CancellationToken ct)
-        => Ok(await _dashboard.GetAsync(ct));
+        => Ok(await _dashboard.GetAsync(null, ct));
 }

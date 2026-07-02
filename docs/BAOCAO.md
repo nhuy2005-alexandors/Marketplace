@@ -13,6 +13,8 @@ Dự án được thực hiện theo 2 giai đoạn:
 
 **Giai đoạn 2 — Mở rộng:** Bổ sung các hạng mục theo yêu cầu: thanh toán đa cổng thật (VNPay + Stripe), hệ thống mã giảm giá, upload ảnh sản phẩm, phân trang đơn hàng, giao diện quản trị CRUD, và pipeline CI/CD.
 
+**Giai đoạn 3 — Marketplace nhiều người bán:** Chuyển từ mô hình single-store (1 admin quản mọi thứ) sang marketplace: thêm vai trò **Seller**, mỗi seller tự đăng ký, quản sản phẩm/đơn/doanh thu riêng của cửa hàng mình; một đơn hàng có thể trộn sản phẩm từ nhiều seller (mỗi `OrderItem` gắn `SellerId`), seller chỉ thấy phần của mình. Admin vẫn quản toàn sàn.
+
 > **Ghi chú phạm vi:** Ứng dụng chạy trực tiếp trên máy (local) — backend qua `dotnet run` + SQL Server LocalDB, frontend qua `npm run dev`. Không dùng Docker.
 
 ---
@@ -37,7 +39,7 @@ SPA với React Router (protected routes theo role), TanStack Query (cache + inv
 
 ### 2.3 Cơ sở dữ liệu — SQL Server qua EF Core Migrations
 
-Toàn bộ schema được quản lý qua 2 migration (`InitialCreate`, `AddCouponsAndDiscounts`), có thể chạy lại từ đầu trên máy sạch bằng `dotnet ef database update`.
+Toàn bộ schema được quản lý qua 3 migration (`InitialCreate`, `AddCouponsAndDiscounts`, `AddSellerMarketplace`), có thể chạy lại từ đầu trên máy sạch bằng `dotnet ef database update`.
 
 ---
 
@@ -114,13 +116,22 @@ Thiết kế theo pattern **Strategy + Factory**:
 1. **backend** — `dotnet restore/build/test`, xuất kết quả test dạng `.trx` làm artifact.
 2. **frontend** — `npm ci`, `npm run build` (bao gồm type-check `tsc -b`).
 
+### 4.8 Marketplace nhiều người bán
+
+- **Vai trò Seller** thêm vào `UserRole` enum; `User` có `ShopName`. Tự đăng ký qua `POST /api/auth/register-seller` (không cần Admin duyệt).
+- **Sở hữu sản phẩm:** `Product.SellerId` (FK → User). Product CRUD mở cho `Admin,Seller`; seller chỉ sửa/xóa sản phẩm của mình (`ProductService` kiểm tra `actorId == SellerId`, sai → 403). Admin sửa được mọi sản phẩm. Search hỗ trợ lọc `sellerId`.
+- **Đơn trộn nhiều seller:** mỗi `OrderItem` snapshot `SellerId` lúc checkout. Một đơn có thể chứa item của nhiều shop. `SellerOrderService.GetForSellerAsync` trả các đơn chứa item của seller, nhưng chỉ hiển thị item + doanh thu phần của seller đó.
+- **Dashboard scope:** `DashboardService.GetAsync(int? sellerId)` — `null` = toàn hệ thống (Admin), có giá trị = chỉ dữ liệu seller. `SellerController` (`/api/seller/dashboard`, `/api/seller/orders`) chỉ cho role Seller.
+- **Frontend:** đăng ký seller (thêm mode trong LoginPage), 3 trang seller (dashboard, quản lý SP của tôi, đơn hàng), điều hướng + protected route theo role. `ProductCard`/cart chỉ hiện cho Customer.
+- **Kiểm chứng thật (qua HTTP):** seller2 xóa SP của seller1 → 403; admin xóa → 200; đơn trộn TechZone + BookHaven → seller1 chỉ thấy "Wireless Headphones", seller2 chỉ thấy "Clean Code".
+
 YAML đã được validate cú pháp; các lệnh bên trong (`dotnet build/test`, `npm run build`) đều đã chạy thành công thật trong quá trình phát triển.
 
 ---
 
 ## 5. Kiểm thử
 
-- **Unit test (33 test, 100% pass):** state machine đơn hàng (mọi transition hợp lệ/không hợp lệ), giảm tồn kho, checkout (giỏ rỗng, vượt tồn kho, áp coupon hợp lệ/không hợp lệ), thanh toán (hoàn tất, chuyển trạng thái), hủy đơn (hoàn tồn kho), review (chặn chưa mua, chặn trùng), auth (đăng ký trùng email, sai mật khẩu).
+- **Unit test (39 test, 100% pass):** state machine đơn hàng (mọi transition hợp lệ/không hợp lệ), giảm tồn kho, checkout (giỏ rỗng, vượt tồn kho, áp coupon hợp lệ/không hợp lệ), thanh toán (hoàn tất, chuyển trạng thái), hủy đơn (hoàn tồn kho), review (chặn chưa mua, chặn trùng), auth (đăng ký trùng email, sai mật khẩu), **seller scope (gán SellerId, chặn sửa/xóa SP của seller khác → 403, admin toàn quyền, lọc theo seller, dashboard scope).**
 - **Smoke test thủ công qua HTTP thật** (không phải giả định): toàn bộ golden path đăng nhập → cart → checkout với coupon → pay đa phương thức → admin đổi trạng thái → dashboard, chạy trên môi trường local (`dotnet run` + `npm run dev`).
 - **Frontend:** `tsc -b && vite build` pass, không lỗi type.
 
@@ -133,6 +144,10 @@ YAML đã được validate cú pháp; các lệnh bên trong (`dotnet build/tes
 
 **Frontend:**
 `pages/{AdminProductsPage,AdminCouponsPage}.tsx` (mới), `pages/{CheckoutPage,OrdersPage}.tsx` (viết lại), `api/hooks.ts` (mở rộng ~15 hook mới), `types.ts` (mở rộng).
+
+**Marketplace (giai đoạn 3):**
+Backend — `Domain/Entities/{User,Product,OrderItem}.cs` + `Enums/UserRole.cs` (thêm SellerId/ShopName/role Seller), `Application/Services/{SellerOrderService,DashboardService,ProductService,AuthService}.cs`, `API/Controllers/SellerController.cs`, migration `AddSellerMarketplace`, `tests/.../SellerScopeTests.cs` (6 test).
+Frontend — `pages/{SellerDashboardPage,SellerProductsPage,SellerOrdersPage}.tsx` (mới), `LoginPage.tsx` (thêm mode đăng ký seller), `ProtectedRoute.tsx` (roles[]).
 
 **Hạ tầng:**
 `.github/workflows/ci.yml`.

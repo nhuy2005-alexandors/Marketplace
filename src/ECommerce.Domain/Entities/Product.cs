@@ -14,6 +14,9 @@ public class Product : BaseEntity
     public int CategoryId { get; set; }
     public Category Category { get; set; } = null!;
 
+    public int SellerId { get; set; }
+    public User Seller { get; set; } = null!;
+
     public ICollection<Review> Reviews { get; set; } = new List<Review>();
 
     public void DecreaseStock(int quantity)

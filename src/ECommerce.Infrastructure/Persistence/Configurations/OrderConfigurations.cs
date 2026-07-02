@@ -34,6 +34,7 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
         b.Ignore(i => i.Subtotal);
         b.HasOne(i => i.Product).WithMany()
             .HasForeignKey(i => i.ProductId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(i => i.SellerId);
     }
 }
 

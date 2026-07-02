@@ -13,6 +13,8 @@ public record ProductDto(
     string? ImageUrl,
     int CategoryId,
     string CategoryName,
+    int SellerId,
+    string SellerShopName,
     double AverageRating,
     int ReviewCount);
 
@@ -35,6 +37,7 @@ public record UpdateProductRequest(
 public record ProductQuery(
     string? Search,
     int? CategoryId,
+    int? SellerId,
     decimal? MinPrice,
     decimal? MaxPrice,
     string? SortBy,

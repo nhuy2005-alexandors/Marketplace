@@ -15,6 +15,10 @@ public class AuthController : ApiControllerBase
     public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request, CancellationToken ct)
         => ToResponse(await _auth.RegisterAsync(request, ct));
 
+    [HttpPost("register-seller")]
+    public async Task<ActionResult<AuthResponse>> RegisterSeller(RegisterSellerRequest request, CancellationToken ct)
+        => ToResponse(await _auth.RegisterSellerAsync(request, ct));
+
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request, CancellationToken ct)
         => ToResponse(await _auth.LoginAsync(request, ct));

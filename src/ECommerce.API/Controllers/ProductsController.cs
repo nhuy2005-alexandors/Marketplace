@@ -28,23 +28,23 @@ public class ProductsController : ApiControllerBase
     public async Task<ActionResult<ProductDto>> GetById(int id, CancellationToken ct)
         => ToResponse(await _products.GetByIdAsync(id, ct));
 
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Seller")]
     [HttpPost]
     public async Task<ActionResult<ProductDto>> Create(CreateProductRequest request, CancellationToken ct)
-        => ToResponse(await _products.CreateAsync(request, ct));
+        => ToResponse(await _products.CreateAsync(UserId, request, ct));
 
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Seller")]
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ProductDto>> Update(int id, UpdateProductRequest request, CancellationToken ct)
-        => ToResponse(await _products.UpdateAsync(id, request, ct));
+        => ToResponse(await _products.UpdateAsync(UserId, IsAdmin, id, request, ct));
 
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Seller")]
     [HttpDelete("{id:int}")]
     public async Task<ActionResult> Delete(int id, CancellationToken ct)
-        => ToResponse(await _products.DeleteAsync(id, ct));
+        => ToResponse(await _products.DeleteAsync(UserId, IsAdmin, id, ct));
 
     // Upload ảnh sản phẩm, trả URL để gán vào ImageUrl khi tạo/sửa.
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Seller")]
     [HttpPost("upload-image")]
     [RequestSizeLimit(5_000_000)]
     public async Task<ActionResult<object>> UploadImage(IFormFile file, CancellationToken ct)

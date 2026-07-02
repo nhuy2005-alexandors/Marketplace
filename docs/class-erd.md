@@ -15,6 +15,7 @@ classDiagram
         +string PasswordHash
         +string FullName
         +UserRole Role
+        +string? ShopName
     }
 
     class Category {
@@ -29,6 +30,7 @@ classDiagram
         +int Stock
         +string? ImageUrl
         +int CategoryId
+        +int SellerId
         +DecreaseStock(int qty)
     }
 
@@ -59,6 +61,7 @@ classDiagram
     class OrderItem {
         +int OrderId
         +int ProductId
+        +int SellerId
         +string ProductName
         +decimal UnitPrice
         +int Quantity
@@ -119,6 +122,7 @@ classDiagram
     User "1" --> "*" Order
     User "1" --> "*" Review
     User "1" --> "*" WishlistItem
+    User "1" --> "*" Product : sells (Seller)
     Category "1" --> "*" Product
     Cart "1" --> "*" CartItem
     CartItem "*" --> "1" Product
@@ -129,6 +133,8 @@ classDiagram
     WishlistItem "*" --> "1" Product
 ```
 
+> `User.Products` là navigation phía Seller (một User có `Role = Seller` sở hữu nhiều Product qua `Product.SellerId`). `OrderItem.SellerId` không phải navigation, chỉ là snapshot int (không có association tới User trong sơ đồ) — giữ lại seller tại thời điểm bán dù sản phẩm/seller sau đó đổi.
+
 ## 2. Entity Relationship Diagram (ERD)
 
 ```mermaid
@@ -137,6 +143,7 @@ erDiagram
     USERS ||--o{ ORDERS : places
     USERS ||--o{ REVIEWS : writes
     USERS ||--o{ WISHLIST_ITEMS : saves
+    USERS ||--o{ PRODUCTS : sells
     CATEGORIES ||--o{ PRODUCTS : contains
     CARTS ||--o{ CART_ITEMS : holds
     PRODUCTS ||--o{ CART_ITEMS : in
@@ -152,6 +159,7 @@ erDiagram
         string PasswordHash
         string FullName
         int Role
+        string ShopName "nullable, chỉ dùng khi Role = Seller"
     }
     CATEGORIES {
         int Id PK
@@ -165,6 +173,7 @@ erDiagram
         int Stock
         string ImageUrl
         int CategoryId FK
+        int SellerId FK
     }
     CARTS {
         int Id PK
@@ -190,6 +199,7 @@ erDiagram
         int Id PK
         int OrderId FK
         int ProductId FK
+        int SellerId "snapshot, khong phai navigation FK"
         string ProductName
         decimal UnitPrice
         int Quantity
@@ -240,3 +250,7 @@ erDiagram
 - `Coupons.Code` — unique index.
 - `Orders.CouponCode` là snapshot string, không phải FK tới `Coupons`.
 - `Orders.Subtotal` / `Orders.Total` là computed property (không lưu cột riêng): `Subtotal = Σ Items.Subtotal`, `Total = Max(0, Subtotal - DiscountAmount)`.
+- `Products.SellerId` — FK tới `Users`, có index (phục vụ lọc theo `sellerId` trong search + truy vấn dashboard/orders theo seller).
+- `OrderItems.SellerId` — không phải FK (chỉ là snapshot int, không có navigation tới `Users`), nhưng có index để truy vấn nhanh "đơn/doanh thu của seller X" (`DashboardService`, `SellerOrderService`).
+- **Ràng buộc ở tầng application (không phải DB constraint):** một Seller chỉ được sửa/xóa sản phẩm có `Product.SellerId == currentUserId`; Admin không bị ràng buộc này. Kiểm tra thực hiện trong `ProductService.UpdateAsync`/`DeleteAsync` (tham số `actorId`, `isAdmin`), không khớp → trả lỗi Forbidden (403).
+- Khi tạo sản phẩm (`ProductService.CreateAsync`), `SellerId` luôn được gán bằng id của người gọi (`sellerId` tham số) — client không thể tự chọn seller khác.

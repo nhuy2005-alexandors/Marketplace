@@ -18,11 +18,21 @@ ECommerce.sln
 ```
 
 ## Chức năng nghiệp vụ
-Đăng ký/đăng nhập (JWT) · RBAC Customer/Admin · tìm-lọc-phân trang sản phẩm · giỏ hàng · checkout (trừ kho) ·
+Đăng ký/đăng nhập khách + **đăng ký người bán (seller)** · RBAC 3 vai trò Customer/Seller/Admin ·
+tìm-lọc-phân trang sản phẩm (lọc theo cửa hàng) · giỏ hàng · checkout (trừ kho) ·
 **mã giảm giá** (percentage/fixed, min-order, hết hạn, giới hạn lượt) ·
 **thanh toán đa cổng** (mock, COD, VNPay sandbox, Stripe Checkout — redirect + callback verify) ·
 state machine đơn hàng · đánh giá (verified-purchase) · wishlist ·
-**phân trang đơn hàng** · dashboard quản trị · CRUD sản phẩm/danh mục + **upload ảnh**.
+**marketplace nhiều người bán** (mỗi seller quản sản phẩm/đơn/doanh thu riêng, 1 đơn trộn nhiều seller) ·
+phân trang đơn hàng · dashboard (admin toàn sàn / seller theo cửa hàng) · CRUD sản phẩm/danh mục + upload ảnh.
+
+## Vai trò
+| Vai trò | Quyền |
+|---------|-------|
+| **Guest** | Xem/tìm sản phẩm, đọc đánh giá |
+| **Customer** | + giỏ hàng, checkout, thanh toán, đánh giá, wishlist, coupon |
+| **Seller** | Quản sản phẩm của mình (CRUD + upload ảnh), xem đơn chứa SP của mình, dashboard cửa hàng |
+| **Admin** | Quản toàn sàn: mọi sản phẩm, danh mục, đơn, coupon, dashboard tổng |
 
 ## Yêu cầu
 - .NET 9 SDK, `dotnet-ef`
@@ -70,6 +80,8 @@ Method gửi lên API: `mock` | `cod` | `vnpay` | `stripe`.
 |---------|-------|----------|
 | Admin | admin@shop.com | Admin@123 |
 | Customer | user@shop.com | User@123 |
+| Seller (TechZone) | seller1@shop.com | Seller@123 |
+| Seller (BookHaven) | seller2@shop.com | Seller@123 |
 
 Mã giảm giá mẫu: `WELCOME10` (giảm 10%, đơn tối thiểu $50), `SAVE20` (giảm $20, đơn tối thiểu $100).
 

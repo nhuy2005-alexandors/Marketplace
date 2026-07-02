@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddScoped<IWishlistService, WishlistService>();
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<ICouponService, CouponService>();
+        services.AddScoped<ISellerOrderService, SellerOrderService>();
 
         services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
         return services;

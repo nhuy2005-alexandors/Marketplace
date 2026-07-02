@@ -25,10 +25,20 @@ export function useLogin() {
   });
 }
 
+export function useRegisterSeller() {
+  const setAuth = useAuth((s) => s.setAuth);
+  return useMutation({
+    mutationFn: (body: { email: string; password: string; fullName: string; shopName: string }) =>
+      api.post<AuthResponse>("/auth/register-seller", body).then((r) => r.data),
+    onSuccess: (d) => setAuth(d.token, d.user),
+  });
+}
+
 // ---- Catalog ----
 export interface ProductFilters {
   search?: string;
   categoryId?: number;
+  sellerId?: number;
   minPrice?: number;
   maxPrice?: number;
   sortBy?: string;
@@ -286,6 +296,21 @@ export function useDashboard() {
   return useQuery({
     queryKey: ["dashboard"],
     queryFn: () => api.get<Dashboard>("/admin/dashboard").then((r) => r.data),
+  });
+}
+
+// ---- Seller ----
+export function useSellerDashboard() {
+  return useQuery({
+    queryKey: ["seller-dashboard"],
+    queryFn: () => api.get<Dashboard>("/seller/dashboard").then((r) => r.data),
+  });
+}
+
+export function useSellerOrders(page = 1, pageSize = 10) {
+  return useQuery({
+    queryKey: ["seller-orders", page, pageSize],
+    queryFn: () => api.get<Paged<Order>>("/seller/orders", { params: { page, pageSize } }).then((r) => r.data),
   });
 }
 

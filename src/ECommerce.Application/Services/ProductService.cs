@@ -16,6 +16,7 @@ public class ProductService : IProductService
     {
         var query = _db.Products
             .Include(p => p.Category)
+            .Include(p => p.Seller)
             .Include(p => p.Reviews)
             .AsQueryable();
 
@@ -27,6 +28,8 @@ public class ProductService : IProductService
         }
         if (q.CategoryId.HasValue)
             query = query.Where(p => p.CategoryId == q.CategoryId.Value);
+        if (q.SellerId.HasValue)
+            query = query.Where(p => p.SellerId == q.SellerId.Value);
         if (q.MinPrice.HasValue)
             query = query.Where(p => p.Price >= q.MinPrice.Value);
         if (q.MaxPrice.HasValue)
@@ -61,6 +64,7 @@ public class ProductService : IProductService
     {
         var product = await _db.Products
             .Include(p => p.Category)
+            .Include(p => p.Seller)
             .Include(p => p.Reviews)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         return product is null
@@ -68,7 +72,7 @@ public class ProductService : IProductService
             : Result.Ok(product.ToDto());
     }
 
-    public async Task<Result<ProductDto>> CreateAsync(CreateProductRequest r, CancellationToken ct = default)
+    public async Task<Result<ProductDto>> CreateAsync(int sellerId, CreateProductRequest r, CancellationToken ct = default)
     {
         if (!await _db.Categories.AnyAsync(c => c.Id == r.CategoryId, ct))
             return Result.Fail<ProductDto>("Category not found.", ErrorType.Validation);
@@ -80,22 +84,27 @@ public class ProductService : IProductService
             Price = r.Price,
             Stock = r.Stock,
             ImageUrl = r.ImageUrl,
-            CategoryId = r.CategoryId
+            CategoryId = r.CategoryId,
+            SellerId = sellerId
         };
         _db.Products.Add(product);
         await _db.SaveChangesAsync(ct);
         await _db.Entry(product).Reference(p => p.Category).LoadAsync(ct);
+        await _db.Entry(product).Reference(p => p.Seller).LoadAsync(ct);
         return Result.Ok(product.ToDto());
     }
 
-    public async Task<Result<ProductDto>> UpdateAsync(int id, UpdateProductRequest r, CancellationToken ct = default)
+    public async Task<Result<ProductDto>> UpdateAsync(int actorId, bool isAdmin, int id, UpdateProductRequest r, CancellationToken ct = default)
     {
         var product = await _db.Products
             .Include(p => p.Category)
+            .Include(p => p.Seller)
             .Include(p => p.Reviews)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (product is null)
             return Result.Fail<ProductDto>("Product not found.", ErrorType.NotFound);
+        if (!isAdmin && product.SellerId != actorId)
+            return Result.Fail<ProductDto>("You can only edit your own products.", ErrorType.Forbidden);
         if (!await _db.Categories.AnyAsync(c => c.Id == r.CategoryId, ct))
             return Result.Fail<ProductDto>("Category not found.", ErrorType.Validation);
 
@@ -111,11 +120,13 @@ public class ProductService : IProductService
         return Result.Ok(product.ToDto());
     }
 
-    public async Task<Result> DeleteAsync(int id, CancellationToken ct = default)
+    public async Task<Result> DeleteAsync(int actorId, bool isAdmin, int id, CancellationToken ct = default)
     {
         var product = await _db.Products.FindAsync(new object[] { id }, ct);
         if (product is null)
             return Result.Fail("Product not found.", ErrorType.NotFound);
+        if (!isAdmin && product.SellerId != actorId)
+            return Result.Fail("You can only delete your own products.", ErrorType.Forbidden);
         _db.Products.Remove(product);
         await _db.SaveChangesAsync(ct);
         return Result.Ok();

@@ -39,6 +39,26 @@ public class AuthService : IAuthService
         return Result.Ok(Build(user));
     }
 
+    public async Task<Result<AuthResponse>> RegisterSellerAsync(RegisterSellerRequest request, CancellationToken ct = default)
+    {
+        var email = request.Email.Trim().ToLowerInvariant();
+        if (await _db.Users.AnyAsync(u => u.Email == email, ct))
+            return Result.Fail<AuthResponse>("Email already registered.", ErrorType.Conflict);
+
+        var user = new User
+        {
+            Email = email,
+            PasswordHash = _hasher.Hash(request.Password),
+            FullName = request.FullName.Trim(),
+            ShopName = request.ShopName.Trim(),
+            Role = UserRole.Seller
+        };
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync(ct);
+
+        return Result.Ok(Build(user));
+    }
+
     public async Task<Result<AuthResponse>> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
         var email = request.Email.Trim().ToLowerInvariant();
@@ -60,5 +80,5 @@ public class AuthService : IAuthService
     private AuthResponse Build(User user) => new(_jwt.Generate(user), ToDto(user));
 
     private static UserDto ToDto(User user) =>
-        new(user.Id, user.Email, user.FullName, user.Role.ToString());
+        new(user.Id, user.Email, user.FullName, user.Role.ToString(), user.ShopName);
 }

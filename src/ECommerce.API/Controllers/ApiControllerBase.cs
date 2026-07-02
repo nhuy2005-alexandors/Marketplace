@@ -16,6 +16,7 @@ public abstract class ApiControllerBase : ControllerBase
         ?? throw new InvalidOperationException("User id not present on authenticated request.");
 
     protected bool IsAdmin => User.IsInRole("Admin");
+    protected bool IsSeller => User.IsInRole("Seller");
 
     protected ActionResult<T> ToResponse<T>(Result<T> result) =>
         result.Success ? Ok(result.Value) : MapError(result);

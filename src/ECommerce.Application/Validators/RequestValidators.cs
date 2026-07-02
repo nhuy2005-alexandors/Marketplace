@@ -24,6 +24,17 @@ public class LoginRequestValidator : AbstractValidator<LoginRequest>
     }
 }
 
+public class RegisterSellerRequestValidator : AbstractValidator<RegisterSellerRequest>
+{
+    public RegisterSellerRequestValidator()
+    {
+        RuleFor(x => x.Email).NotEmpty().EmailAddress();
+        RuleFor(x => x.Password).NotEmpty().MinimumLength(6);
+        RuleFor(x => x.FullName).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.ShopName).NotEmpty().MaximumLength(150);
+    }
+}
+
 public class CreateProductRequestValidator : AbstractValidator<CreateProductRequest>
 {
     public CreateProductRequestValidator()

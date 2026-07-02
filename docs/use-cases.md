@@ -6,6 +6,7 @@
 graph TB
     Guest([Khách vãng lai])
     Customer([Customer])
+    Seller([Seller])
     Admin([Admin])
 
     subgraph Hệ thống MiniShop
@@ -25,12 +26,17 @@ graph TB
         UC14[UC-14 Áp dụng mã giảm giá]
         UC15[UC-15 Quản lý mã giảm giá - Admin]
         UC16[UC-16 Upload ảnh sản phẩm]
+        UC17[UC-17 Đăng ký làm Seller]
+        UC18[UC-18 Quản lý sản phẩm của Seller]
+        UC19[UC-19 Xem đơn hàng của Seller]
+        UC20[UC-20 Xem dashboard Seller]
     end
 
     Guest --> UC1
     Guest --> UC2
     Guest --> UC3
     Guest --> UC4
+    Guest --> UC17
 
     Customer --> UC3
     Customer --> UC4
@@ -41,6 +47,12 @@ graph TB
     Customer --> UC9
     Customer --> UC10
     Customer --> UC14
+
+    Seller --> UC3
+    Seller --> UC4
+    Seller --> UC18
+    Seller --> UC19
+    Seller --> UC20
 
     Admin --> UC11
     Admin --> UC12
@@ -53,11 +65,14 @@ graph TB
     UC7 -.->|include| UC6
     UC9 -.->|require| UC6
     UC11 -.->|include| UC16
+    UC18 -.->|include| UC16
 ```
 
-> Customer kế thừa mọi use case của Guest (đã đăng nhập). Admin có thêm các use case quản trị.
+> Customer kế thừa mọi use case của Guest (đã đăng nhập). Seller cũng là một vai trò tự đăng ký từ Guest (UC-17), không kế thừa quyền Customer (giỏ hàng/checkout) — một tài khoản chỉ mang một vai trò. Admin có thêm các use case quản trị.
 >
-> Danh sách đơn hàng (`GET /api/orders`, dùng chung cho UC-08 phía Customer và phần xem đơn trong UC-12 phía Admin) trả kết quả có phân trang (`page`, `pageSize`, mặc định 10, tối đa 100/trang).
+> Danh sách đơn hàng (`GET /api/orders`, dùng chung cho UC-08 phía Customer và phần xem đơn trong UC-12 phía Admin) trả kết quả có phân trang (`page`, `pageSize`, mặc định 10, tối đa 100/trang). `GET /api/seller/orders` (UC-19) dùng cùng cơ chế phân trang nhưng scope riêng cho Seller.
+>
+> MiniShop là marketplace đa seller: `UC-11` (Admin) và `UC-18` (Seller) đều là CRUD sản phẩm trên cùng bảng `Products`, khác nhau ở phạm vi ownership — Admin sửa/xóa mọi sản phẩm, Seller chỉ sửa/xóa sản phẩm có `SellerId` bằng chính mình.
 
 ---
 
@@ -154,3 +169,44 @@ graph TB
 | **Hậu điều kiện** | File ảnh lưu trên storage; trả về URL công khai để gán vào `ImageUrl` của sản phẩm |
 | **Luồng chính** | 1. Admin chọn file ảnh, gửi `POST /api/products/upload-image` (multipart/form-data, giới hạn 5MB qua `RequestSizeLimit`). 2. Hệ thống kiểm tra file tồn tại và không rỗng. 3. `IFileStorage.SaveImageAsync` kiểm tra định dạng (`.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`). 4. Sinh tên file ngẫu nhiên (GUID) giữ nguyên extension, lưu vào thư mục `wwwroot/uploads` (hoặc `Storage:RootPath` cấu hình). 5. Trả về URL công khai (`Storage:PublicPath` + tên file). 6. Admin gán URL này vào field `ImageUrl` khi gọi `POST`/`PUT` sản phẩm (UC-11). |
 | **Luồng thay thế / ngoại lệ** | 2a. Không có file hoặc file rỗng → 400 "No file provided.". 3a. Định dạng không được hỗ trợ → lỗi "Unsupported image format.". File vượt 5MB → bị chặn ở tầng request (413/400) trước khi vào action. |
+
+### UC-17: Đăng ký làm Seller
+| Mục | Nội dung |
+|-----|----------|
+| **Actor** | Khách vãng lai |
+| **Mục tiêu** | Tự tạo tài khoản vai trò Seller (không cần Admin duyệt) |
+| **Tiền điều kiện** | Email chưa tồn tại trong hệ thống |
+| **Hậu điều kiện** | Tài khoản `User` mới với `Role = Seller` và `ShopName` được lưu; trả JWT như đăng nhập ngay |
+| **Luồng chính** | 1. Khách gửi `POST /api/auth/register-seller` với email, password, họ tên, `ShopName`. 2. Hệ thống validate (email hợp lệ, password ≥ 6 ký tự, `ShopName` không rỗng, tối đa 150 ký tự). 3. Kiểm tra email chưa tồn tại. 4. Hash password (BCrypt), tạo `User` với `Role = Seller`, gán `ShopName`. 5. Sinh JWT chứa id + role Seller. 6. Trả token + thông tin user (giống UC-01/UC-02). |
+| **Luồng thay thế / ngoại lệ** | 3a. Email đã tồn tại → 409. 2a. `ShopName` rỗng hoặc quá dài → 400. |
+| **Ghi chú** | Không có luồng "chờ Admin duyệt" — seller hoạt động ngay sau khi đăng ký (self-service). |
+
+### UC-18: Quản lý sản phẩm của Seller (CRUD, chỉ sản phẩm của chính mình)
+| Mục | Nội dung |
+|-----|----------|
+| **Actor** | Seller |
+| **Tiền điều kiện** | Đã đăng nhập với vai trò Seller |
+| **Hậu điều kiện** | Sản phẩm được tạo/sửa/xóa; `SellerId` luôn là id của Seller đang thao tác |
+| **Luồng chính (Tạo)** | 1. Seller gửi `POST /api/products` (name, price, stock, categoryId, ...). 2. Hệ thống validate dữ liệu, kiểm tra `CategoryId` tồn tại. 3. Tạo `Product` với `SellerId = UserId` của Seller hiện tại (không cho client truyền `SellerId`). 4. Lưu, trả `ProductDto` (kèm `SellerId`, `SellerShopName`). |
+| **Luồng chính (Sửa / Xóa)** | 5. Seller gửi `PUT`/`DELETE /api/products/{id}`. 6. Hệ thống nạp sản phẩm theo id. 7. Kiểm tra ownership: `product.SellerId == currentUserId` — Admin bỏ qua bước này. 8. Nếu khớp: thực hiện sửa/xóa như UC-11. |
+| **Luồng thay thế / ngoại lệ** | 7a. Không phải chủ sản phẩm (và không phải Admin) → 403 Forbidden "You can only edit/delete your own products.". 6a. Sản phẩm không tồn tại → 404. 2a. Category không tồn tại → 400. |
+| **Ghi chú** | Dùng chung endpoint và `[Authorize(Roles = "Admin,Seller")]` với UC-11 (Admin) — khác nhau ở kiểm tra ownership tại tầng service (`ProductService.UpdateAsync`/`DeleteAsync` nhận `actorId` + `isAdmin`). UC-16 (upload ảnh) áp dụng tương tự cho Seller. |
+
+### UC-19: Xem đơn hàng của Seller (scoped)
+| Mục | Nội dung |
+|-----|----------|
+| **Actor** | Seller |
+| **Tiền điều kiện** | Đã đăng nhập với vai trò Seller |
+| **Hậu điều kiện** | Không thay đổi dữ liệu — chỉ đọc |
+| **Luồng chính** | 1. Seller gọi `GET /api/seller/orders?page=&pageSize=`. 2. Hệ thống lấy các `Order` có ít nhất một `OrderItem.SellerId` khớp với Seller hiện tại. 3. Với mỗi đơn, chỉ giữ lại các `OrderItem` thuộc seller đó (bỏ item của seller khác trong cùng đơn). 4. Tính lại `Subtotal`/`Total` chỉ trên phần item của seller. 5. Trả kết quả phân trang (`page`, `pageSize`, tối đa 100/trang). |
+| **Luồng thay thế / ngoại lệ** | Đơn không chứa sản phẩm của seller này → không xuất hiện trong danh sách. Seller không thấy trạng thái đổi được — chỉ xem, không có action đổi status (đó là quyền của Admin, UC-12). |
+| **Ghi chú** | Một `Order` có thể đồng thời xuất hiện trong danh sách của nhiều Seller khác nhau (nếu đơn gồm sản phẩm từ nhiều shop) — mỗi Seller chỉ thấy phần của mình, không thấy toàn bộ đơn. |
+
+### UC-20: Xem dashboard Seller (scoped)
+| Mục | Nội dung |
+|-----|----------|
+| **Actor** | Seller |
+| **Tiền điều kiện** | Đã đăng nhập với vai trò Seller |
+| **Luồng chính** | 1. Seller mở dashboard (`GET /api/seller/dashboard`). 2. Hệ thống gọi `DashboardService.GetAsync(sellerId)` với `sellerId` = id của Seller hiện tại. 3. Tổng hợp: doanh thu (chỉ `OrderItem.SellerId` của seller, tính trên đơn đã Paid/Shipped/Delivered), số sản phẩm của seller, số đơn có chứa item của seller, số đơn theo trạng thái (đơn chứa item của seller), top 5 sản phẩm bán chạy của seller. 4. Trả số liệu. |
+| **Luồng thay thế / ngoại lệ** | Không có sản phẩm/đơn nào → trả số liệu 0, không lỗi. |
+| **Ghi chú** | Cùng service/logic với UC-13 (Admin dashboard) — `DashboardService.GetAsync(int? sellerId)`: `null` = toàn hệ thống (Admin qua `/api/admin/dashboard`), có giá trị = scoped theo seller (`/api/seller/dashboard`). |
