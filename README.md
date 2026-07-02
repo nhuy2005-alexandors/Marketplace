@@ -1,4 +1,4 @@
-# MiniShop — Nền tảng E-Commerce tối giản
+# MiniShop — Nền tảng Marketplace tối giản
 
 Full-stack e-commerce: **ASP.NET Core 9 + EF Core (SQL Server)** backend, **React + Vite + TypeScript + Tailwind** frontend.
 
