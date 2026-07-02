@@ -45,6 +45,7 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
             .HasForeignKey(p => p.SellerId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(p => p.Name);
         b.HasIndex(p => p.SellerId);
+        b.Property(p => p.RowVersion).IsRowVersion();
     }
 }
 

@@ -19,6 +19,9 @@ public class Product : BaseEntity
 
     public ICollection<Review> Reviews { get; set; } = new List<Review>();
 
+    // Optimistic concurrency token — chặn oversell khi nhiều checkout cùng lúc.
+    public byte[]? RowVersion { get; set; }
+
     public void DecreaseStock(int quantity)
     {
         if (quantity <= 0)

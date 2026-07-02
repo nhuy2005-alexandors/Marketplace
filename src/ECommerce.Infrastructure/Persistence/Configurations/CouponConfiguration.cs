@@ -14,5 +14,6 @@ public class CouponConfiguration : IEntityTypeConfiguration<Coupon>
         b.Property(c => c.Type).HasConversion<int>();
         b.Property(c => c.Value).HasColumnType("decimal(18,2)");
         b.Property(c => c.MinOrderAmount).HasColumnType("decimal(18,2)");
+        b.Property(c => c.RowVersion).IsRowVersion();
     }
 }

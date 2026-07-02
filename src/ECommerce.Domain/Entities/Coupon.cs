@@ -20,6 +20,9 @@ public class Coupon : BaseEntity
     public int TimesUsed { get; set; }
     public bool IsActive { get; set; } = true;
 
+    // Optimistic concurrency token — chặn over-redeem khi nhiều request cùng lúc.
+    public byte[]? RowVersion { get; set; }
+
     public bool IsValidFor(decimal orderSubtotal, DateTime now)
     {
         if (!IsActive) return false;

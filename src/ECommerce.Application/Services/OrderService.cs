@@ -65,7 +65,15 @@ public class OrderService : IOrderService
         _db.Orders.Add(order);
         foreach (var ci in cart.Items.ToList())
             _db.CartItems.Remove(ci);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Xung đột optimistic lock: có request khác vừa đổi tồn kho/lượt coupon. Chặn oversell/over-redeem.
+            return Result.Fail<OrderDto>("Sản phẩm hoặc mã giảm giá vừa được cập nhật, vui lòng thử lại.", ErrorType.Conflict);
+        }
 
         return Result.Ok(order.ToDto());
     }
