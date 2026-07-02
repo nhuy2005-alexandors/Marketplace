@@ -47,13 +47,13 @@ public class ProductsController : ApiControllerBase
     [Authorize(Roles = "Admin,Seller")]
     [HttpPost("upload-image")]
     [RequestSizeLimit(5_000_000)]
-    public async Task<ActionResult<object>> UploadImage(IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<UploadImageResponse>> UploadImage(IFormFile file, CancellationToken ct)
     {
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file provided." });
         await using var stream = file.OpenReadStream();
         var url = await _storage.SaveImageAsync(stream, file.FileName, ct);
-        return Ok(new { url });
+        return Ok(new UploadImageResponse(url));
     }
 
     [HttpGet("{id:int}/reviews")]

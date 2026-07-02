@@ -30,6 +30,19 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddControllers();
 builder.Services.AddFluentValidationAutoValidation();
 
+// Thống nhất lỗi validation về envelope { "error": "..." } (thay cho ProblemDetails RFC7807 mặc định).
+builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var error = context.ModelState.Values
+            .SelectMany(v => v.Errors)
+            .Select(e => e.ErrorMessage)
+            .FirstOrDefault() ?? "Invalid request.";
+        return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(new { error });
+    };
+});
+
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

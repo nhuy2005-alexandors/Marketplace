@@ -2,6 +2,8 @@ namespace ECommerce.Application.DTOs.Catalog;
 
 public record CategoryDto(int Id, string Name, string? Description);
 
+public record UploadImageResponse(string Url);
+
 public record CreateCategoryRequest(string Name, string? Description);
 
 public record ProductDto(
