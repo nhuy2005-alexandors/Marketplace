@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ShoppingBag } from "lucide-react";
 import { useLogin, useRegister, useRegisterSeller } from "../api/hooks";
 import { apiError } from "../api/client";
 import { Button, Card, Input } from "../components/ui";
@@ -42,7 +43,7 @@ export function LoginPage() {
     <div className="min-h-[80vh] flex items-center justify-center px-4 animate-fade-in">
       <Card className="w-full max-w-sm p-6">
         <div className="text-center mb-2">
-          <span className="inline-grid place-items-center w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white text-lg shadow-glow mb-3">🛍️</span>
+          <span className="inline-grid place-items-center w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow mb-3"><ShoppingBag className="w-5 h-5" strokeWidth={2.25} aria-hidden /></span>
           <h1 className="text-xl font-bold tracking-tight">{title}</h1>
         </div>
         <p className="muted text-xs text-center mb-5">

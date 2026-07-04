@@ -1,5 +1,6 @@
 using ECommerce.Application.Interfaces;
 using ECommerce.Infrastructure.Auth;
+using ECommerce.Infrastructure.Notifications;
 using ECommerce.Infrastructure.Payments;
 using ECommerce.Infrastructure.Persistence;
 using ECommerce.Infrastructure.Storage;
@@ -25,11 +26,12 @@ public static class DependencyInjection
         services.Configure<PaymentOptions>(config.GetSection("Payment"));
         services.AddScoped<IPaymentProvider, MockPaymentProvider>();
         services.AddScoped<IPaymentProvider, CodPaymentProvider>();
-        services.AddScoped<IPaymentProvider, VnPayProvider>();
-        services.AddScoped<IPaymentProvider, StripeProvider>();
+        services.AddScoped<IPaymentProvider, MoMoProvider>();
         services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
 
         services.AddScoped<IFileStorage, LocalFileStorage>();
+
+        services.AddScoped<IEmailSender, LoggingEmailSender>();
 
         return services;
     }

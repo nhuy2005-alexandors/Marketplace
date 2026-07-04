@@ -11,3 +11,5 @@ public record DashboardDto(
     int TotalCustomers,
     IReadOnlyList<StatusCountDto> OrdersByStatus,
     IReadOnlyList<TopProductDto> TopProducts);
+
+public record SellerApplicationDto(int Id, string Email, string FullName, string? ShopName, string Status, DateTime CreatedAt);

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
   AuthResponse, Cart, Category, Coupon, CouponPreview, Dashboard, Order, Paged, PayResult,
-  Product, Review, User, WishlistItem,
+  OrderSplit, Product, Review, SellerApplication, SellerShop, User, WishlistItem,
 } from "../types";
 import { useAuth } from "../store/auth";
 
@@ -12,7 +12,7 @@ export function useRegister() {
   return useMutation({
     mutationFn: (body: { email: string; password: string; fullName: string }) =>
       api.post<AuthResponse>("/auth/register", body).then((r) => r.data),
-    onSuccess: (d) => setAuth(d.token, d.user),
+    onSuccess: (d) => setAuth(d.token, d.refreshToken, d.user),
   });
 }
 
@@ -21,7 +21,7 @@ export function useLogin() {
   return useMutation({
     mutationFn: (body: { email: string; password: string }) =>
       api.post<AuthResponse>("/auth/login", body).then((r) => r.data),
-    onSuccess: (d) => setAuth(d.token, d.user),
+    onSuccess: (d) => setAuth(d.token, d.refreshToken, d.user),
   });
 }
 
@@ -30,7 +30,7 @@ export function useRegisterSeller() {
   return useMutation({
     mutationFn: (body: { email: string; password: string; fullName: string; shopName: string }) =>
       api.post<AuthResponse>("/auth/register-seller", body).then((r) => r.data),
-    onSuccess: (d) => setAuth(d.token, d.user),
+    onSuccess: (d) => setAuth(d.token, d.refreshToken, d.user),
   });
 }
 
@@ -59,6 +59,14 @@ export function useProduct(id: number) {
   return useQuery({
     queryKey: ["product", id],
     queryFn: () => api.get<Product>(`/products/${id}`).then((r) => r.data),
+    enabled: !!id,
+  });
+}
+
+export function useSellerShop(id: number) {
+  return useQuery({
+    queryKey: ["seller-shop", id],
+    queryFn: () => api.get<SellerShop>(`/sellers/${id}/shop`).then((r) => r.data),
     enabled: !!id,
   });
 }
@@ -214,13 +222,21 @@ export function useCheckout() {
   });
 }
 
-// method: mock | cod | vnpay | stripe. Trả requiresRedirect=true kèm redirectUrl khi cần chuyển sang cổng.
+// method: mock | cod | momo. Trả requiresRedirect=true kèm redirectUrl khi cần chuyển sang cổng.
 export function usePayOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, method, returnUrl }: { id: number; method: string; returnUrl?: string }) =>
       api.post<PayResult>(`/orders/${id}/pay`, { method, returnUrl }).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+  });
+}
+
+export function useOrderSplit(id: number, enabled = true) {
+  return useQuery({
+    queryKey: ["order-split", id],
+    queryFn: () => api.get<OrderSplit>(`/orders/${id}/split`).then((r) => r.data),
+    enabled: !!id && enabled,
   });
 }
 
@@ -235,6 +251,13 @@ export function useCoupons() {
   return useQuery({
     queryKey: ["coupons"],
     queryFn: () => api.get<Coupon[]>("/coupons").then((r) => r.data),
+  });
+}
+
+export function useActiveCoupons() {
+  return useQuery({
+    queryKey: ["coupons", "active"],
+    queryFn: () => api.get<Coupon[]>("/coupons/active").then((r) => r.data),
   });
 }
 
@@ -299,6 +322,22 @@ export function useDashboard() {
   });
 }
 
+export function useSellerApplications(status?: string) {
+  return useQuery({
+    queryKey: ["admin-sellers", status ?? "all"],
+    queryFn: () =>
+      api.get<SellerApplication[]>("/admin/sellers", { params: status ? { status } : {} }).then((r) => r.data),
+  });
+}
+
+export function useApproveSeller() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<SellerApplication>(`/admin/sellers/${id}/approve`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-sellers"] }),
+  });
+}
+
 // ---- Seller ----
 export function useSellerDashboard() {
   return useQuery({
@@ -326,11 +365,18 @@ export function useUpdateItemStatus() {
   });
 }
 
+// Refetch /auth/me và đồng bộ vào auth store — để sellerStatus (vd sau khi Admin duyệt)
+// cập nhật mà không cần logout/login lại.
 export function useMe() {
   const token = useAuth((s) => s.token);
+  const setUser = useAuth((s) => s.setUser);
   return useQuery({
     queryKey: ["me"],
-    queryFn: () => api.get<User>("/auth/me").then((r) => r.data),
+    queryFn: async () => {
+      const user = await api.get<User>("/auth/me").then((r) => r.data);
+      setUser(user);
+      return user;
+    },
     enabled: !!token,
   });
 }

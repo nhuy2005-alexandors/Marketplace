@@ -12,5 +12,6 @@ public enum PaymentMethod
 {
     CreditCard = 0,
     PayPal = 1,
-    CashOnDelivery = 2
+    CashOnDelivery = 2,
+    EWallet = 3
 }

@@ -132,7 +132,7 @@ sequenceDiagram
     end
 ```
 
-## 4b. Thanh toán qua redirect (VNPay / Stripe)
+## 4b. Thanh toán qua redirect (MoMo)
 
 Áp dụng khi `CreatePaymentAsync` trả `RedirectUrl` (payment vẫn `Pending`). Việc xác nhận thật sự diễn ra sau, khi cổng gọi lại callback endpoint.
 
@@ -142,27 +142,28 @@ sequenceDiagram
     participant FE as React Client
     participant OC as OrdersController
     participant PS as PaymentService
-    participant PP as IPaymentProvider (VNPay/Stripe)
-    participant GW as Cổng thanh toán (VNPay/Stripe)
+    participant PP as IPaymentProvider (MoMo)
+    participant GW as Cổng thanh toán MoMo
     participant PC as PaymentsController
     participant DB as AppDbContext
 
-    C->>FE: Chọn phương thức (vnpay/stripe), bấm Thanh toán
+    C->>FE: Chọn phương thức (momo), bấm Thanh toán
     FE->>OC: POST /api/orders/{id}/pay {method, returnUrl}
     OC->>PS: InitiateAsync(userId, orderId, req)
     PS->>DB: Load Order + Items + Payment
     alt Hợp lệ (chủ đơn, Order.Status = Pending)
         PS->>DB: Payment.Status = Pending (tạo/cập nhật bản ghi)
         PS->>PP: CreatePaymentAsync(context)
-        PP-->>PS: PaymentInitResult(Completed = false, RedirectUrl, txnId)
+        PP->>GW: POST /v2/gateway/api/create (ký HMAC-SHA256, amount VND)
+        GW-->>PP: { payUrl, resultCode }
+        PP-->>PS: PaymentInitResult(Completed = false, RedirectUrl = payUrl, txnId)
         PS->>DB: Payment.TransactionId = txnId, SaveChanges
         PS-->>OC: Result.Ok(PayResultDto{requiresRedirect: true, redirectUrl})
         OC-->>FE: 200 { requiresRedirect: true, redirectUrl }
-        FE->>C: Redirect trình duyệt -> redirectUrl
-        C->>GW: Nhập thông tin, xác nhận thanh toán
-        GW->>GW: Xử lý giao dịch (ký HMAC-SHA512 với VNPay / tạo PaymentIntent với Stripe)
-        GW->>C: Redirect về returnUrl kèm query đã ký / session_id
-        C->>PC: GET /api/payments/{provider}/callback ?params
+        FE->>C: Redirect trình duyệt -> payUrl
+        C->>GW: Quét QR / nhập thẻ ATM, xác nhận thanh toán
+        GW->>C: Redirect về returnUrl kèm query đã ký (HMAC-SHA256)
+        C->>PC: GET /api/payments/momo/callback ?params
         PC->>PS: ConfirmAsync(provider, callbackData)
         PS->>PP: VerifyAsync(callbackData)
         alt Verify hợp lệ (đúng chữ ký / session paid)

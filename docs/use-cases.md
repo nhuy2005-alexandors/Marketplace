@@ -107,16 +107,16 @@ graph TB
 | **Luồng chính** | 1. Customer nhập địa chỉ giao. 2. Hệ thống nạp giỏ. 3. Với mỗi item: trừ tồn kho, tạo OrderItem (snapshot tên + giá). 4. Lưu đơn, xóa item giỏ. 5. Trả đơn. |
 | **Luồng thay thế** | 2a. Giỏ rỗng → 400. 3a. Tồn kho không đủ → 400, rollback (không lưu). |
 
-### UC-07: Thanh toán đơn (đa cổng: mock / COD / VNPay / Stripe)
+### UC-07: Thanh toán đơn (đa cổng: mock / COD / MoMo)
 | Mục | Nội dung |
 |-----|----------|
 | **Actor** | Customer |
 | **Tiền điều kiện** | Đơn ở trạng thái Pending, thuộc về Customer |
 | **Hậu điều kiện** | Payment = Completed; đơn → Paid (tức thì hoặc sau callback) |
-| **Luồng chính** | 1. Customer chọn phương thức (mock / cod / vnpay / stripe). 2. Hệ thống lấy `PaymentProviderFactory` resolve provider theo key (không nhận key hợp lệ → fallback `mock`). 3. Gọi `CreatePaymentAsync`. 4a. **Mock / COD**: provider hoàn tất ngay (`Completed = true`) → ghi Payment Completed + transactionId, chuyển đơn Paid, trả `OrderDto`. 4b. **VNPay / Stripe (đã cấu hình key)**: provider trả `RedirectUrl` kèm transactionId tạm, Payment ở trạng thái Pending, API trả `redirectUrl` cho FE chuyển hướng khách sang cổng thanh toán. |
-| **Luồng thay thế / callback** | 5. Khách thanh toán xong tại cổng, cổng redirect về `GET /api/payments/{vnpay|stripe}/callback` kèm dữ liệu ký (query params). 6. `ConfirmAsync` gọi `VerifyAsync` để xác thực chữ ký / response code. 7a. Verify thành công → ghi Payment Completed, đơn chuyển Paid, redirect FE `/orders?payment=success`. 7b. Verify thất bại (sai chữ ký, response code ≠ 00, hoặc lỗi) → Payment Failed, đơn giữ nguyên trạng thái, redirect FE `/orders?payment=failed`. |
+| **Luồng chính** | 1. Customer chọn phương thức (mock / cod / momo). 2. Hệ thống lấy `PaymentProviderFactory` resolve provider theo key (không nhận key hợp lệ → fallback `mock`). 3. Gọi `CreatePaymentAsync`. 4a. **Mock / COD**: provider hoàn tất ngay (`Completed = true`) → ghi Payment Completed + transactionId, chuyển đơn Paid, trả `OrderDto`. 4b. **MoMo**: provider gọi API MoMo (`payWithMethod`, quy đổi USD→VND) tạo giao dịch, trả `RedirectUrl` (payUrl) kèm transactionId tạm, Payment ở trạng thái Pending, API trả `redirectUrl` cho FE chuyển hướng khách sang cổng thanh toán MoMo. |
+| **Luồng thay thế / callback** | 5. Khách thanh toán xong tại cổng MoMo, cổng redirect về `GET /api/payments/momo/callback` kèm dữ liệu ký (query params); MoMo cũng gửi IPN `POST /api/payments/momo/ipn` (server-to-server). 6. `ConfirmAsync` gọi `VerifyAsync` để xác thực chữ ký HMAC-SHA256 và `resultCode`. 7a. Verify thành công → ghi Payment Completed, đơn chuyển Paid, redirect FE `/orders?payment=success`. 7b. Verify thất bại (sai chữ ký, `resultCode` ≠ 0, hoặc lỗi) → Payment Failed, đơn giữ nguyên trạng thái, redirect FE `/orders?payment=failed`. |
 | **Ngoại lệ** | Cổng từ chối / lỗi khi tạo thanh toán → Payment Failed, đơn giữ Pending, trả 409. Đơn không ở Pending → 409. Không phải chủ đơn → 403. Amount ≤ 0 → lỗi "Invalid amount". Đơn đã Paid khi callback tới muộn → trả kết quả hiện tại, không xử lý lại (idempotent). |
-| **Ghi chú** | Khi VNPay/Stripe chưa cấu hình key (`Enabled = false` trong `PaymentOptions`), provider tự fallback sang chế độ demo: hoàn tất thanh toán ngay như mock, không redirect thật, để tiện dev/test. |
+| **Ghi chú** | MoMo dùng test credentials sandbox công khai (`test-payment.momo.vn`) nên chạy cổng thật ngay không cần đăng ký merchant. Khi MoMo chưa cấu hình key (`Enabled = false`) và bật `AllowDemo`, provider fallback sang chế độ demo: hoàn tất ngay như mock, để tiện dev/test. |
 
 ### UC-09: Đánh giá sản phẩm
 | Mục | Nội dung |

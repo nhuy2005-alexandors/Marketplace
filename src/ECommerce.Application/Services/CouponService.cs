@@ -28,6 +28,18 @@ public class CouponService : ICouponService
         return coupons.Select(ToDto).ToList();
     }
 
+    public async Task<IReadOnlyList<CouponDto>> GetActiveAsync(CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var coupons = await _db.Coupons
+            .Where(c => c.IsActive
+                && (c.ExpiresAt == null || c.ExpiresAt > now)
+                && (c.MaxUses == null || c.TimesUsed < c.MaxUses))
+            .OrderByDescending(c => c.CreatedAt)
+            .ToListAsync(ct);
+        return coupons.Select(ToDto).ToList();
+    }
+
     public async Task<Result<CouponDto>> CreateAsync(CreateCouponRequest r, CancellationToken ct = default)
     {
         if (!Enum.TryParse<DiscountType>(r.Type, true, out var type))

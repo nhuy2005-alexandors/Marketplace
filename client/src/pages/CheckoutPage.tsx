@@ -45,6 +45,8 @@ export function CheckoutPage() {
         shippingAddress: address,
         couponCode: couponApplied?.code,
       });
+
+      // Cổng redirect thật (MoMo) trả redirectUrl -> chuyển sang cổng.
       const returnUrl = `${RETURN_BASE}/${method}/callback`;
       const result = await payOrder.mutateAsync({ id: order.id, method, returnUrl });
       if (result.requiresRedirect && result.redirectUrl) {
@@ -78,8 +80,7 @@ export function CheckoutPage() {
                 className="mt-1"
               >
                 <option value="mock">Thẻ demo (hoàn tất ngay)</option>
-                <option value="vnpay">VNPay</option>
-                <option value="stripe">Stripe</option>
+                <option value="momo">Ví MoMo</option>
                 <option value="cod">Thanh toán khi nhận hàng</option>
               </Select>
             </div>

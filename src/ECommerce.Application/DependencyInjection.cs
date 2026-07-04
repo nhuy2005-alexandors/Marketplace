@@ -21,6 +21,7 @@ public static class DependencyInjection
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<ICouponService, CouponService>();
         services.AddScoped<ISellerOrderService, SellerOrderService>();
+        services.AddScoped<ISellerAdminService, SellerAdminService>();
 
         services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
         return services;

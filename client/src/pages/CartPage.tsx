@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { ShoppingCart } from "lucide-react";
 import { useCart, useRemoveCartItem, useUpdateCartItem } from "../api/hooks";
 import { Button, Card, EmptyState, Input, Spinner } from "../components/ui";
 
@@ -13,7 +14,7 @@ export function CartPage() {
   if (!cart || cart.items.length === 0)
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 animate-fade-in">
-        <EmptyState icon="🛒" title="Giỏ hàng trống" hint="Hãy khám phá các sản phẩm và thêm vào giỏ." />
+        <EmptyState icon={ShoppingCart} title="Giỏ hàng trống" hint="Hãy khám phá các sản phẩm và thêm vào giỏ." />
         <button onClick={() => navigate("/")} className="block mx-auto mt-4 text-brand-600 dark:text-brand-400 hover:underline">
           Tiếp tục mua sắm →
         </button>

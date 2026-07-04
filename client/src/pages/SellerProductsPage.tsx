@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Clock } from "lucide-react";
 import {
-  useCategories, useCreateCategory, useCreateProduct, useDeleteProduct, useProducts,
+  useCategories, useCreateCategory, useCreateProduct, useDeleteProduct, useMe, useProducts,
   useUpdateProduct, useUploadProductImage, type ProductInput,
 } from "../api/hooks";
 import { apiError } from "../api/client";
@@ -12,6 +13,8 @@ const EMPTY_FORM: ProductInput = { name: "", description: "", price: 0, stock: 0
 
 export function SellerProductsPage() {
   const sellerId = useAuth((s) => s.user?.id);
+  const sellerStatus = useAuth((s) => s.user?.sellerStatus);
+  useMe(); // đồng bộ sellerStatus mới nhất (vd vừa được Admin duyệt) vào store
   const { data: categories } = useCategories();
   const { data: products } = useProducts({ sellerId, pageSize: 50 });
   const createProduct = useCreateProduct();
@@ -69,6 +72,12 @@ export function SellerProductsPage() {
     <div className="max-w-5xl mx-auto px-4 py-6 grid md:grid-cols-3 gap-6 animate-fade-in">
       <Card className="md:col-span-1 p-5 h-fit">
         <h2 className="font-semibold mb-3">{editingId ? `Sửa sản phẩm #${editingId}` : "Thêm sản phẩm"}</h2>
+        {sellerStatus === "Pending" && (
+          <div className="rounded-2xl p-4 mb-3 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 text-sm border border-amber-200 dark:border-amber-500/20 flex items-start gap-2">
+            <Clock className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
+            <span>Tài khoản người bán của bạn đang chờ Admin duyệt. Bạn chưa thể đăng sản phẩm cho đến khi được duyệt.</span>
+          </div>
+        )}
         <form onSubmit={submit} className="space-y-2">
           <Input required placeholder="Tên sản phẩm" value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -100,7 +109,7 @@ export function SellerProductsPage() {
           </div>
           {error && <div className="text-rose-500 text-sm">{error}</div>}
           <div className="flex gap-2">
-            <Button disabled={createProduct.isPending || updateProduct.isPending} className="flex-1">
+            <Button disabled={createProduct.isPending || updateProduct.isPending || (sellerStatus === "Pending" && !editingId)} className="flex-1">
               {editingId ? "Lưu thay đổi" : "Thêm sản phẩm"}
             </Button>
             {editingId && (

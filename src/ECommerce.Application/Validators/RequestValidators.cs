@@ -133,8 +133,8 @@ public class PayOrderRequestValidator : AbstractValidator<PayOrderRequest>
     public PayOrderRequestValidator()
     {
         RuleFor(x => x.Method).NotEmpty()
-            .Must(m => m is "mock" or "cod" or "vnpay" or "stripe")
-            .WithMessage("Method must be one of: mock, cod, vnpay, stripe.");
+            .Must(m => m is "mock" or "cod" or "momo")
+            .WithMessage("Method must be one of: mock, cod, momo.");
     }
 }
 

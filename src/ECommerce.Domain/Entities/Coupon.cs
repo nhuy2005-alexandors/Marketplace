@@ -37,7 +37,7 @@ public class Coupon : BaseEntity
         var discount = Type == DiscountType.Percentage
             ? orderSubtotal * Value / 100m
             : Value;
-        return Math.Min(discount, orderSubtotal);
+        return Math.Round(Math.Min(discount, orderSubtotal), 2, MidpointRounding.AwayFromZero);
     }
 
     public void Redeem()

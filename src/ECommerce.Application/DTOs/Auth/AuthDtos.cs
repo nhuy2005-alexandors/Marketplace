@@ -6,6 +6,10 @@ public record RegisterSellerRequest(string Email, string Password, string FullNa
 
 public record LoginRequest(string Email, string Password);
 
-public record AuthResponse(string Token, UserDto User);
+public record AuthResponse(string Token, string RefreshToken, UserDto User);
 
-public record UserDto(int Id, string Email, string FullName, string Role, string? ShopName);
+public record RefreshRequest(string RefreshToken);
+
+public record LogoutRequest(string RefreshToken);
+
+public record UserDto(int Id, string Email, string FullName, string Role, string? ShopName, string? SellerStatus);

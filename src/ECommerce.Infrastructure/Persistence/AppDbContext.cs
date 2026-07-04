@@ -20,6 +20,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     EntityEntry<TEntity> IAppDbContext.Entry<TEntity>(TEntity entity) => base.Entry(entity);
 

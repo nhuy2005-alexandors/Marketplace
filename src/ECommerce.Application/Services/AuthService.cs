@@ -36,7 +36,7 @@ public class AuthService : IAuthService
         _db.Users.Add(user);
         await _db.SaveChangesAsync(ct);
 
-        return Result.Ok(Build(user));
+        return Result.Ok(await BuildAsync(user, ct));
     }
 
     public async Task<Result<AuthResponse>> RegisterSellerAsync(RegisterSellerRequest request, CancellationToken ct = default)
@@ -51,12 +51,13 @@ public class AuthService : IAuthService
             PasswordHash = _hasher.Hash(request.Password),
             FullName = request.FullName.Trim(),
             ShopName = request.ShopName.Trim(),
-            Role = UserRole.Seller
+            Role = UserRole.Seller,
+            SellerStatus = Domain.Enums.SellerStatus.Pending
         };
         _db.Users.Add(user);
         await _db.SaveChangesAsync(ct);
 
-        return Result.Ok(Build(user));
+        return Result.Ok(await BuildAsync(user, ct));
     }
 
     public async Task<Result<AuthResponse>> LoginAsync(LoginRequest request, CancellationToken ct = default)
@@ -66,7 +67,7 @@ public class AuthService : IAuthService
         if (user is null || !_hasher.Verify(request.Password, user.PasswordHash))
             return Result.Fail<AuthResponse>("Invalid email or password.", ErrorType.Unauthorized);
 
-        return Result.Ok(Build(user));
+        return Result.Ok(await BuildAsync(user, ct));
     }
 
     public async Task<Result<UserDto>> GetCurrentAsync(int userId, CancellationToken ct = default)
@@ -77,8 +78,45 @@ public class AuthService : IAuthService
         return Result.Ok(ToDto(user));
     }
 
-    private AuthResponse Build(User user) => new(_jwt.Generate(user), ToDto(user));
+    public async Task<Result<AuthResponse>> RefreshAsync(string refreshToken, CancellationToken ct = default)
+    {
+        var existing = await _db.RefreshTokens
+            .Include(t => t.User)
+            .FirstOrDefaultAsync(t => t.Token == refreshToken, ct);
+        if (existing is null || !existing.IsActive)
+            return Result.Fail<AuthResponse>("Invalid or expired refresh token.", ErrorType.Unauthorized);
+
+        // Rotate: thu hồi token cũ, cấp token mới.
+        existing.RevokedAt = DateTime.UtcNow;
+        var response = await BuildAsync(existing.User, ct);
+        return Result.Ok(response);
+    }
+
+    public async Task<Result> LogoutAsync(string refreshToken, CancellationToken ct = default)
+    {
+        var existing = await _db.RefreshTokens.FirstOrDefaultAsync(t => t.Token == refreshToken, ct);
+        if (existing is { RevokedAt: null })
+        {
+            existing.RevokedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+        return Result.Ok();
+    }
+
+    private async Task<AuthResponse> BuildAsync(User user, CancellationToken ct)
+    {
+        var (refresh, expiresAt) = _jwt.GenerateRefreshToken();
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = user.Id,
+            Token = refresh,
+            ExpiresAt = expiresAt
+        });
+        await _db.SaveChangesAsync(ct);
+        return new AuthResponse(_jwt.Generate(user), refresh, ToDto(user));
+    }
 
     private static UserDto ToDto(User user) =>
-        new(user.Id, user.Email, user.FullName, user.Role.ToString(), user.ShopName);
+        new(user.Id, user.Email, user.FullName, user.Role.ToString(), user.ShopName,
+            user.SellerStatus?.ToString());
 }

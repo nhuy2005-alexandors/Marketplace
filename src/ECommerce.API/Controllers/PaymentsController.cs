@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ECommerce.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,24 +18,28 @@ public class PaymentsController : ControllerBase
         _config = config;
     }
 
-    // VNPay return URL — cổng redirect khách về kèm query params đã ký.
+    // MoMo redirect URL — cổng redirect khách về kèm query params đã ký.
     [AllowAnonymous]
-    [HttpGet("vnpay/callback")]
-    public async Task<IActionResult> VnPayCallback(CancellationToken ct)
+    [HttpGet("momo/callback")]
+    [ProducesResponseType(StatusCodes.Status302Found)]
+    public async Task<IActionResult> MoMoCallback(CancellationToken ct)
     {
         var data = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
-        var result = await _payments.ConfirmAsync("vnpay", data, ct);
+        var result = await _payments.ConfirmAsync("momo", data, ct);
         return RedirectToClient(result.Success);
     }
 
-    // Stripe success URL — kèm session_id.
+    // MoMo IPN — server-to-server notification (JSON body), xác nhận độc lập với redirect.
     [AllowAnonymous]
-    [HttpGet("stripe/callback")]
-    public async Task<IActionResult> StripeCallback(CancellationToken ct)
+    [HttpPost("momo/ipn")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> MoMoIpn([FromBody] Dictionary<string, JsonElement> payload, CancellationToken ct)
     {
-        var data = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
-        var result = await _payments.ConfirmAsync("stripe", data, ct);
-        return RedirectToClient(result.Success);
+        var data = payload.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.ValueKind == JsonValueKind.String ? kv.Value.GetString() ?? "" : kv.Value.GetRawText());
+        await _payments.ConfirmAsync("momo", data, ct);
+        return NoContent();
     }
 
     private IActionResult RedirectToClient(bool success)

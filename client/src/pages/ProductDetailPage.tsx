@@ -5,7 +5,8 @@ import {
 } from "../api/hooks";
 import { useAuth } from "../store/auth";
 import { apiError } from "../api/client";
-import { Button, Card, Input, Select, Spinner, Textarea } from "../components/ui";
+import { Heart } from "lucide-react";
+import { Button, Card, Input, Select, Spinner, Stars, Textarea } from "../components/ui";
 
 export function ProductDetailPage() {
   const { id } = useParams();
@@ -45,12 +46,12 @@ export function ProductDetailPage() {
         <div className="space-y-4">
           <div className="muted text-xs">{product.categoryName}</div>
           <h1 className="text-2xl font-bold tracking-tight">{product.name}</h1>
-          <div className="flex items-center gap-1 text-amber-500">
-            {"★".repeat(Math.round(product.averageRating))}
+          <div className="flex items-center gap-2">
+            <Stars value={product.averageRating} size={16} />
             <span className="muted text-sm">({product.reviewCount} đánh giá)</span>
           </div>
           <p className="muted">{product.description}</p>
-          <div className="text-3xl font-bold bg-gradient-to-r from-brand-600 to-brand-400 bg-clip-text text-transparent">
+          <div className="text-3xl font-bold text-slate-900 dark:text-white">
             ${product.price.toFixed(2)}
           </div>
           <div className="muted text-sm">Còn lại: {product.stock}</div>
@@ -66,10 +67,10 @@ export function ProductDetailPage() {
                 onClick={() => addToCart.mutate({ productId: product.id, quantity: qty })}
               >Thêm vào giỏ</Button>
               <Button
-                variant="ghost"
+                variant="ghost" aria-label="Thêm vào yêu thích"
                 onClick={() => toggleWishlist.mutate({ productId: product.id, add: true })}
                 className="text-rose-500"
-              >♥</Button>
+              ><Heart className="w-4 h-4" aria-hidden /></Button>
             </div>
           )}
         </div>
@@ -82,7 +83,7 @@ export function ProductDetailPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm">Số sao:</span>
               <Select value={rating} onChange={(e) => setRating(Number(e.target.value))} className="w-auto">
-                {[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} ★</option>)}
+                {[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} sao</option>)}
               </Select>
             </div>
             <Textarea
@@ -100,7 +101,7 @@ export function ProductDetailPage() {
             <div key={r.id} className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-sm">{r.userName}</span>
-                <span className="text-amber-500 text-sm">{"★".repeat(r.rating)}</span>
+                <Stars value={r.rating} size={12} />
               </div>
               <p className="muted text-sm mt-1">{r.comment}</p>
             </div>

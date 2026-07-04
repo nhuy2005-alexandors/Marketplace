@@ -17,6 +17,7 @@ public interface IAppDbContext
     DbSet<Review> Reviews { get; }
     DbSet<WishlistItem> WishlistItems { get; }
     DbSet<Coupon> Coupons { get; }
+    DbSet<RefreshToken> RefreshTokens { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
     EntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class;

@@ -78,7 +78,7 @@ Kiến trúc 4 lớp (Clean Architecture):
 | FR-03 | Tìm kiếm / lọc / phân trang sản phẩm | Theo từ khóa, danh mục, khoảng giá, `sellerId`; sắp xếp; phân trang | Mọi người |
 | FR-04 | Giỏ hàng | Thêm/sửa/xóa item, kiểm tra tồn kho, tính tổng | Customer |
 | FR-05 | Đặt hàng (Checkout) | Chuyển giỏ → đơn, trừ tồn kho nguyên tử; một đơn có thể gồm sản phẩm của nhiều seller | Customer |
-| FR-06 | Thanh toán đa cổng | Mock / COD / VNPay sandbox / Stripe Checkout — redirect + callback verify | Customer |
+| FR-06 | Thanh toán đa cổng | Mock / COD / MoMo sandbox (AIO v2) — redirect + callback verify | Customer |
 | FR-07 | Vòng đời đơn hàng | State machine, đổi trạng thái hợp lệ, chặn chuyển sai; chỉ Admin đổi trạng thái (whole-order, Seller không có quyền này) | Customer/Admin |
 | FR-08 | Đánh giá sản phẩm | Rating 1–5 + nhận xét, chỉ khách đã mua, 1 lần/sp | Customer |
 | FR-09 | Wishlist | Thêm/xóa sản phẩm yêu thích | Customer |
@@ -93,7 +93,7 @@ Kiến trúc 4 lớp (Clean Architecture):
 
 ### 3.1 Chi tiết một số quy tắc
 - **FR-05:** Checkout thất bại nếu giỏ rỗng hoặc tồn kho không đủ; khi đủ, tồn kho giảm và giỏ được làm rỗng. Mỗi `OrderItem` lưu snapshot `SellerId` (seller sở hữu sản phẩm tại thời điểm đặt hàng) — giỏ hàng và đơn hàng **không** bị giới hạn theo một seller, một đơn có thể chứa item từ nhiều shop khác nhau.
-- **FR-06:** `IPaymentProvider` trừu tượng hóa cổng — VNPay/Stripe trả `RedirectUrl` (chuyển hướng khách sang cổng), callback xác minh chữ ký/session rồi chốt `Order → Paid`. Mock/COD hoàn tất tức thì. Chưa cấu hình key → chạy chế độ demo (không lỗi, hoàn tất ngay).
+- **FR-06:** `IPaymentProvider` trừu tượng hóa cổng — MoMo gọi API tạo giao dịch, trả `RedirectUrl` (payUrl, chuyển hướng khách sang cổng), callback xác minh chữ ký HMAC-SHA256 rồi chốt `Order → Paid`. Mock/COD hoàn tất tức thì. MoMo dùng test credentials sandbox công khai nên chạy cổng thật ngay; nếu chưa cấu hình key và bật `AllowDemo` → chạy chế độ demo (hoàn tất ngay).
 - **FR-07:** Chuyển trạng thái chỉ theo các cạnh hợp lệ (xem `state-machine.md`); chuyển sai trả HTTP 409. Trạng thái được quản lý ở cấp toàn Order, chỉ Admin thực hiện — kể cả khi đơn có item của nhiều seller, Seller không tự đổi trạng thái phần của mình.
 - **FR-08:** Đánh giá yêu cầu tồn tại đơn (khác Cancelled) chứa sản phẩm đó; trùng đánh giá trả 409.
 - **FR-11 (Seller ownership):** `POST/PUT/DELETE /api/products` và `upload-image` cho phép role `Admin,Seller`. Với Seller, hệ thống kiểm tra `product.SellerId == currentUserId` trước khi sửa/xóa — không khớp trả 403 Forbidden. Admin bỏ qua kiểm tra này (sửa/xóa sản phẩm của bất kỳ seller nào). Khi tạo sản phẩm, `SellerId` luôn gán bằng id của người tạo (Seller tự tạo cho mình; Admin tạo thì gán chính Admin làm seller).

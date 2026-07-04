@@ -34,7 +34,8 @@ public static class DbSeeder
                     PasswordHash = hasher.Hash("Seller@123"),
                     FullName = "Nguyen Van A",
                     ShopName = "TechZone",
-                    Role = UserRole.Seller
+                    Role = UserRole.Seller,
+                    SellerStatus = SellerStatus.Approved
                 },
                 new User
                 {
@@ -42,7 +43,8 @@ public static class DbSeeder
                     PasswordHash = hasher.Hash("Seller@123"),
                     FullName = "Tran Thi B",
                     ShopName = "BookHaven",
-                    Role = UserRole.Seller
+                    Role = UserRole.Seller,
+                    SellerStatus = SellerStatus.Approved
                 });
             await db.SaveChangesAsync();
         }

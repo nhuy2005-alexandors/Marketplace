@@ -13,7 +13,7 @@ ECommerce.sln
 │   └── ECommerce.Infrastructure # DbContext, EF config, migrations, JWT/BCrypt, payment providers, storage, seed
 ├── tests/ECommerce.Tests        # xUnit: state machine, checkout, coupon, payment, review, auth
 ├── client/                      # React SPA
-├── docs/                        # SRS + UML (use-case, sequence, activity, state-machine, class/ERD)
+├── docs/                        # SRS + UML (use-case, sequence, activity, state-machine, class/ERD, component/deployment)
 └── .github/workflows/ci.yml     # GitHub Actions: build + test backend/frontend
 ```
 
@@ -21,7 +21,7 @@ ECommerce.sln
 Đăng ký/đăng nhập khách + **đăng ký người bán (seller)** · RBAC 3 vai trò Customer/Seller/Admin ·
 tìm-lọc-phân trang sản phẩm (lọc theo cửa hàng) · giỏ hàng · checkout (trừ kho) ·
 **mã giảm giá** (percentage/fixed, min-order, hết hạn, giới hạn lượt) ·
-**thanh toán đa cổng** (mock, COD, VNPay sandbox, Stripe Checkout — redirect + callback verify) ·
+**thanh toán đa cổng** (mock, COD, MoMo AIO v2 sandbox — redirect + callback verify) ·
 state machine đơn hàng · đánh giá (verified-purchase) · wishlist ·
 **marketplace nhiều người bán** (mỗi seller quản sản phẩm/đơn/doanh thu riêng, 1 đơn trộn nhiều seller) ·
 phân trang đơn hàng · dashboard (admin toàn sàn / seller theo cửa hàng) · CRUD sản phẩm/danh mục + upload ảnh.
@@ -65,15 +65,16 @@ dotnet test
 ```
 
 ## Thanh toán — cấu hình cổng thật
-Mặc định `vnpay`/`stripe` chạy ở chế độ **demo** (hoàn tất ngay, không cần key) nếu chưa cấu hình.
-Để dùng sandbox/thật, set trong `appsettings.json`:
+Cổng **MoMo** (AIO v2 sandbox) đã cấu hình sẵn test credentials công khai trong `appsettings.json` nên chạy cổng thật ngay — chọn "Ví MoMo" khi checkout sẽ redirect sang trang thanh toán MoMo (QR ví + thẻ ATM nội địa test).
 
 | Cổng | Config | Lấy ở đâu |
 |------|--------|-----------|
-| VNPay | `Payment:VnPay:TmnCode`, `Payment:VnPay:HashSecret` | Đăng ký merchant sandbox tại vnpay.vn |
-| Stripe | `Payment:Stripe:SecretKey` | Dashboard Stripe → Developers → API keys (test mode) |
+| MoMo | `Payment:MoMo:PartnerCode`, `Payment:MoMo:AccessKey`, `Payment:MoMo:SecretKey` | Đăng ký merchant tại business.momo.vn (production); sandbox dùng test credentials công khai |
 
-Method gửi lên API: `mock` | `cod` | `vnpay` | `stripe`.
+Thẻ ATM test (thành công): `9704 0000 0000 0018`, tên `NGUYEN VAN A`, phát hành `03/07`, OTP bất kỳ.
+Method gửi lên API: `mock` | `cod` | `momo`.
+
+> Lưu ý: IPN của MoMo không gọi tới được `localhost` — trên máy dev, đơn được chốt qua redirect callback khi khách quay lại. Cần deploy public (hoặc ngrok) để IPN hoạt động đầy đủ.
 
 ## Tài khoản demo
 | Vai trò | Email | Mật khẩu |
@@ -89,4 +90,4 @@ Mã giảm giá mẫu: `WELCOME10` (giảm 10%, đơn tối thiểu $50), `SAVE2
 `.github/workflows/ci.yml` chạy khi push/PR vào `main`/`master`: build + test backend (.NET), build frontend (tsc + vite).
 
 ## Tài liệu
-Xem thư mục [`docs/`](docs/): SRS, use case, sequence, activity, state machine, class/ERD (Mermaid — render trực tiếp trên VSCode/GitHub).
+Xem thư mục [`docs/`](docs/): SRS, use case, sequence, activity, state machine, class/ERD, component & deployment (Mermaid — render trực tiếp trên VSCode/GitHub).

@@ -121,8 +121,7 @@ public class PaymentService : IPaymentService
     // map provider key -> PaymentMethod enum cho lưu trữ
     private static string MapToMethod(string method) => method.ToLowerInvariant() switch
     {
-        "vnpay" => "CreditCard",
-        "stripe" => "CreditCard",
+        "momo" => "EWallet",
         "cod" => "CashOnDelivery",
         "mock" => "CreditCard",
         _ => method

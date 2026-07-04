@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Receipt } from "lucide-react";
 import { useSellerOrders, useUpdateItemStatus } from "../api/hooks";
 import { StatusBadge } from "../components/StatusBadge";
 import { Card, EmptyState, PageHeader, Spinner } from "../components/ui";
@@ -21,7 +22,7 @@ export function SellerOrdersPage() {
       <PageHeader title="Đơn hàng có sản phẩm của tôi" subtitle="Chỉ hiển thị các sản phẩm thuộc cửa hàng bạn trong mỗi đơn." />
 
       <div className="space-y-4">
-        {data?.items.length === 0 && <EmptyState icon="🧾" title="Chưa có đơn nào." />}
+        {data?.items.length === 0 && <EmptyState icon={Receipt} title="Chưa có đơn nào." />}
         {data?.items.map((order) => (
           <Card key={order.id} className="p-5">
             <div className="flex items-center justify-between mb-3">

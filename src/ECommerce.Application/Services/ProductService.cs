@@ -2,6 +2,7 @@ using ECommerce.Application.Common;
 using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
 using ECommerce.Domain.Entities;
+using ECommerce.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace ECommerce.Application.Services;
@@ -40,6 +41,10 @@ public class ProductService : IProductService
         {
             "price" => q.Desc ? query.OrderByDescending(p => p.Price) : query.OrderBy(p => p.Price),
             "name" => q.Desc ? query.OrderByDescending(p => p.Name) : query.OrderBy(p => p.Name),
+            "rating" => q.Desc
+                ? query.OrderByDescending(p => p.Reviews.Any() ? p.Reviews.Average(r => r.Rating) : 0)
+                : query.OrderBy(p => p.Reviews.Any() ? p.Reviews.Average(r => r.Rating) : 0),
+            "stock" => q.Desc ? query.OrderByDescending(p => p.Stock) : query.OrderBy(p => p.Stock),
             _ => q.Desc ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt)
         };
 
@@ -76,6 +81,16 @@ public class ProductService : IProductService
 
     public async Task<Result<ProductDto>> CreateAsync(int sellerId, CreateProductRequest r, CancellationToken ct = default)
     {
+        // Seller chưa được Admin duyệt thì không đăng sản phẩm. Admin (SellerStatus null) bỏ qua.
+        var actor = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == sellerId)
+            .Select(u => new { u.Role, u.SellerStatus })
+            .FirstOrDefaultAsync(ct);
+        if (actor is null)
+            return Result.Fail<ProductDto>("User not found.", ErrorType.NotFound);
+        if (actor is { Role: UserRole.Seller, SellerStatus: not SellerStatus.Approved })
+            return Result.Fail<ProductDto>("Tài khoản seller chưa được duyệt.", ErrorType.Forbidden);
+
         if (!await _db.Categories.AnyAsync(c => c.Id == r.CategoryId, ct))
             return Result.Fail<ProductDto>("Category not found.", ErrorType.Validation);
 
@@ -140,5 +155,18 @@ public class ProductService : IProductService
             return Result.Fail("Không thể xóa sản phẩm đã có trong đơn hàng.", ErrorType.Conflict);
         }
         return Result.Ok();
+    }
+
+    public async Task<Result<SellerShopDto>> GetSellerShopAsync(int sellerId, CancellationToken ct = default)
+    {
+        var seller = await _db.Users
+            .AsNoTracking()
+            .Where(u => u.Id == sellerId && u.Role == UserRole.Seller
+                        && u.SellerStatus == SellerStatus.Approved)
+            .Select(u => new { u.Id, u.ShopName, u.FullName })
+            .FirstOrDefaultAsync(ct);
+        return seller is null
+            ? Result.Fail<SellerShopDto>("Seller not found.", ErrorType.NotFound)
+            : Result.Ok(new SellerShopDto(seller.Id, seller.ShopName ?? seller.FullName));
     }
 }

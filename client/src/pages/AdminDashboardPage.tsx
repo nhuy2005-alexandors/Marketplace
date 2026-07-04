@@ -1,8 +1,9 @@
+import { DollarSign, Package, Receipt, Users, type LucideIcon } from "lucide-react";
 import { useDashboard } from "../api/hooks";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageHeader, Spinner } from "../components/ui";
 
-function StatCard({ icon, label, value, accent }: { icon: string; label: string; value: string | number; accent: string }) {
+function StatCard({ icon: Icon, label, value, accent }: { icon: LucideIcon; label: string; value: string | number; accent: string }) {
   return (
     <div className="surface rounded-2xl p-5 relative overflow-hidden hover:-translate-y-0.5 hover:shadow-card transition-all duration-200">
       <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
@@ -11,8 +12,8 @@ function StatCard({ icon, label, value, accent }: { icon: string; label: string;
           <div className="muted text-sm">{label}</div>
           <div className="text-2xl font-bold mt-1">{value}</div>
         </div>
-        <div className={`w-11 h-11 rounded-xl grid place-items-center text-lg text-white shadow-sm bg-gradient-to-br ${accent}`}>
-          {icon}
+        <div className={`w-11 h-11 rounded-xl grid place-items-center text-white shadow-sm bg-gradient-to-br ${accent}`}>
+          <Icon className="w-5 h-5" strokeWidth={2} aria-hidden />
         </div>
       </div>
     </div>
@@ -29,10 +30,10 @@ export function AdminDashboardPage() {
       <PageHeader title="Bảng điều khiển" />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <StatCard icon="💰" label="Doanh thu" value={`$${data.totalRevenue.toFixed(2)}`} accent="from-brand-500 to-brand-600" />
-        <StatCard icon="🧾" label="Đơn hàng" value={data.totalOrders} accent="from-blue-500 to-blue-600" />
-        <StatCard icon="📦" label="Sản phẩm" value={data.totalProducts} accent="from-amber-500 to-amber-600" />
-        <StatCard icon="👥" label="Khách hàng" value={data.totalCustomers} accent="from-emerald-500 to-emerald-600" />
+        <StatCard icon={DollarSign} label="Doanh thu" value={`$${data.totalRevenue.toFixed(2)}`} accent="from-brand-500 to-brand-600" />
+        <StatCard icon={Receipt} label="Đơn hàng" value={data.totalOrders} accent="from-blue-500 to-blue-600" />
+        <StatCard icon={Package} label="Sản phẩm" value={data.totalProducts} accent="from-amber-500 to-amber-600" />
+        <StatCard icon={Users} label="Khách hàng" value={data.totalCustomers} accent="from-emerald-500 to-emerald-600" />
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">

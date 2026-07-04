@@ -146,7 +146,7 @@ classDiagram
 | `UserRole` | Customer, Seller, Admin | `User.Role` |
 | `OrderStatus` | Pending, Paid, Shipped, Delivered, Cancelled | `Order.Status` |
 | `FulfillmentStatus` | Pending, Shipped, Delivered, Cancelled | `OrderItem.Status` — độc lập với `OrderStatus`, do Seller sở hữu item tự đổi |
-| `PaymentMethod` | CreditCard, PayPal, CashOnDelivery | `Payment.Method` |
+| `PaymentMethod` | CreditCard, PayPal, CashOnDelivery, EWallet | `Payment.Method` (MoMo → EWallet) |
 | `PaymentStatus` | Pending, Completed, Failed, Refunded | `Payment.Status` |
 | `DiscountType` | Percentage, FixedAmount | `Coupon.Type` |
 

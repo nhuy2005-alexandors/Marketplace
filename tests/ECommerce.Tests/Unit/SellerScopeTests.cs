@@ -12,8 +12,8 @@ public class SellerScopeTests
 {
     private static async Task<(int sellerA, int sellerB, int categoryId)> SeedAsync(Infrastructure.Persistence.AppDbContext db)
     {
-        var a = new User { Email = "a@s.com", PasswordHash = "h", FullName = "A", ShopName = "ShopA", Role = UserRole.Seller };
-        var b = new User { Email = "b@s.com", PasswordHash = "h", FullName = "B", ShopName = "ShopB", Role = UserRole.Seller };
+        var a = new User { Email = "a@s.com", PasswordHash = "h", FullName = "A", ShopName = "ShopA", Role = UserRole.Seller, SellerStatus = SellerStatus.Approved };
+        var b = new User { Email = "b@s.com", PasswordHash = "h", FullName = "B", ShopName = "ShopB", Role = UserRole.Seller, SellerStatus = SellerStatus.Approved };
         var cat = new Category { Name = "Cat" };
         db.Users.AddRange(a, b);
         db.Categories.Add(cat);

@@ -4,12 +4,10 @@
     "Secret": "CHANGE-ME-đặt-chuỗi-ngẫu-nhiên-tối-thiểu-32-ký-tự"
   },
   "Payment": {
-    "VnPay": {
-      "TmnCode": "your-vnpay-tmncode",
-      "HashSecret": "your-vnpay-hashsecret"
-    },
-    "Stripe": {
-      "SecretKey": "sk_test_your-stripe-key"
+    "MoMo": {
+      "PartnerCode": "your-momo-partner-code",
+      "AccessKey": "your-momo-access-key",
+      "SecretKey": "your-momo-secret-key"
     }
   }
 }

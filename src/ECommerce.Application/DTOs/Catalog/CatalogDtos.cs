@@ -4,6 +4,8 @@ public record CategoryDto(int Id, string Name, string? Description);
 
 public record UploadImageResponse(string Url);
 
+public record SellerShopDto(int SellerId, string ShopName);
+
 public record CreateCategoryRequest(string Name, string? Description);
 
 public record ProductDto(

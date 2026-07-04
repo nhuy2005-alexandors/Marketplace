@@ -41,17 +41,17 @@ stateDiagram-v2
 
 ## 2. Vòng đời Thanh toán (Payment)
 
-Cài đặt trong `PaymentService.InitiateAsync` / `ConfirmAsync` qua `IPaymentProvider` (Mock, COD, VNPay, Stripe). Có 2 kiểu provider:
+Cài đặt trong `PaymentService.InitiateAsync` / `ConfirmAsync` qua `IPaymentProvider` (Mock, COD, MoMo). Có 2 kiểu provider:
 - **Tức thời** (Mock, COD): `CreatePaymentAsync` trả `Completed = true` ngay trong `InitiateAsync` → không có bước redirect/callback.
-- **Redirect** (VNPay, Stripe): `CreatePaymentAsync` trả `RedirectUrl`, payment giữ `Pending` cho tới khi cổng gọi lại `GET /api/payments/{provider}/callback` → `ConfirmAsync` gọi `VerifyAsync` (kiểm tra HMAC-SHA512 với VNPay, hoặc `session_id`/`PaymentStatus` với Stripe) để chốt kết quả.
+- **Redirect** (MoMo): `CreatePaymentAsync` gọi API MoMo tạo giao dịch, trả `RedirectUrl` (payUrl), payment giữ `Pending` cho tới khi cổng gọi lại `GET /api/payments/momo/callback` (hoặc IPN `POST /api/payments/momo/ipn`) → `ConfirmAsync` gọi `VerifyAsync` (kiểm tra chữ ký HMAC-SHA256) để chốt kết quả.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Pending: InitiateAsync tạo bản ghi payment
 
     Pending --> Completed: Tức thời — CreatePaymentAsync trả Completed (Mock/COD)
-    Pending --> Completed: Redirect — VerifyAsync thành công (VNPay/Stripe callback)
-    Pending --> Failed: CreatePaymentAsync trả lỗi, hoặc VerifyAsync thất bại (sai HMAC/cổng từ chối)
+    Pending --> Completed: Redirect — VerifyAsync thành công (MoMo callback)
+    Pending --> Failed: CreatePaymentAsync trả lỗi, hoặc VerifyAsync thất bại (sai chữ ký/cổng từ chối)
 
     Failed --> Completed: Thử lại thành công (InitiateAsync lại)
     Completed --> Refunded: Hoàn tiền (tương lai)

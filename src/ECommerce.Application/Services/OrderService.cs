@@ -11,8 +11,20 @@ namespace ECommerce.Application.Services;
 public class OrderService : IOrderService
 {
     private readonly IAppDbContext _db;
+    private readonly IEmailSender _email;
 
-    public OrderService(IAppDbContext db) => _db = db;
+    public OrderService(IAppDbContext db, IEmailSender? email = null)
+    {
+        _db = db;
+        _email = email ?? new NullEmailSender();
+    }
+
+    // No-op fallback giữ ctor cũ `new OrderService(db)` compile được cho unit test hiện có.
+    private sealed class NullEmailSender : IEmailSender
+    {
+        public Task SendAsync(string toEmail, string subject, string body, CancellationToken ct = default)
+            => Task.CompletedTask;
+    }
 
     public async Task<Result<OrderDto>> CheckoutAsync(int userId, CheckoutRequest r, CancellationToken ct = default)
     {
@@ -73,6 +85,26 @@ public class OrderService : IOrderService
         {
             // Xung đột optimistic lock: có request khác vừa đổi tồn kho/lượt coupon. Chặn oversell/over-redeem.
             return Result.Fail<OrderDto>("Sản phẩm hoặc mã giảm giá vừa được cập nhật, vui lòng thử lại.", ErrorType.Conflict);
+        }
+
+        try
+        {
+            var email = await _db.Users
+                .Where(u => u.Id == userId)
+                .Select(u => u.Email)
+                .FirstOrDefaultAsync(ct);
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                await _email.SendAsync(
+                    email,
+                    $"Xác nhận đơn hàng #{order.Id}",
+                    $"Đơn hàng #{order.Id} của bạn đã được đặt thành công. Tổng tiền: {order.Total:N0}đ.",
+                    ct);
+            }
+        }
+        catch (Exception)
+        {
+            // Best-effort: gửi email thất bại không được làm fail checkout.
         }
 
         return Result.Ok(order.ToDto());
@@ -155,8 +187,72 @@ public class OrderService : IOrderService
                 item.Status = Domain.Enums.FulfillmentStatus.Cancelled;
         }
         order.ChangeStatus(OrderStatus.Cancelled);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Cancel song song / tồn kho vừa đổi (Product RowVersion): trả Conflict thay vì 500.
+            return Result.Fail<OrderDto>("Đơn hàng vừa được cập nhật, vui lòng thử lại.", ErrorType.Conflict);
+        }
         return Result.Ok(order.ToDto());
+    }
+
+    public async Task<Result<OrderSplitDto>> GetSplitAsync(int userId, bool isAdmin, int orderId, CancellationToken ct = default)
+    {
+        var order = await _db.Orders
+            .AsNoTracking()
+            .Include(o => o.Items)
+            .FirstOrDefaultAsync(o => o.Id == orderId, ct);
+        if (order is null)
+            return Result.Fail<OrderSplitDto>("Order not found.", ErrorType.NotFound);
+        if (!isAdmin && order.UserId != userId)
+            return Result.Fail<OrderSplitDto>("Access denied.", ErrorType.Forbidden);
+
+        var sellerIds = order.Items.Select(i => i.SellerId).Distinct().ToList();
+        var shopNames = await _db.Users
+            .AsNoTracking()
+            .Where(u => sellerIds.Contains(u.Id))
+            .Select(u => new { u.Id, Name = u.ShopName ?? u.FullName })
+            .ToDictionaryAsync(u => u.Id, u => u.Name, ct);
+
+        var orderSubtotal = order.Subtotal;
+        var groups = order.Items
+            .GroupBy(i => i.SellerId)
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        var splits = new List<SellerSplitDto>(groups.Count);
+        var allocated = 0m;
+        for (var idx = 0; idx < groups.Count; idx++)
+        {
+            var g = groups[idx];
+            var sellerSubtotal = g.Sum(i => i.Subtotal);
+            // Pro-rate coupon discount by seller subtotal share; last seller absorbs the
+            // rounding remainder so the per-seller shares sum back to the order discount exactly.
+            decimal discountShare;
+            if (idx == groups.Count - 1)
+                // Clamp [0, sellerSubtotal] để phần dư làm tròn không tạo giảm giá âm/vượt subtotal.
+                discountShare = Math.Clamp(order.DiscountAmount - allocated, 0m, sellerSubtotal);
+            else
+            {
+                discountShare = orderSubtotal > 0
+                    ? Math.Round(order.DiscountAmount * (sellerSubtotal / orderSubtotal), 2)
+                    : 0m;
+                allocated += discountShare;
+            }
+            splits.Add(new SellerSplitDto(
+                g.Key,
+                shopNames.TryGetValue(g.Key, out var n) ? n : $"Seller #{g.Key}",
+                sellerSubtotal,
+                discountShare,
+                Math.Max(0, sellerSubtotal - discountShare),
+                g.Select(i => i.ToDto()).ToList()));
+        }
+
+        return Result.Ok(new OrderSplitDto(
+            order.Id, orderSubtotal, order.DiscountAmount, order.Total, splits));
     }
 
     private IQueryable<Order> BaseQuery() =>

@@ -11,7 +11,7 @@ Dự án được thực hiện theo 3 giai đoạn:
 
 **Giai đoạn 1 — Nền tảng cốt lõi:** Xây dựng từ đầu một hệ thống e-commerce tối giản với kiến trúc phân lớp chuẩn (Clean Architecture), đủ 11 chức năng nghiệp vụ (yêu cầu tối thiểu 9, không tính CRUD), kèm bộ tài liệu đặc tả phần mềm (SRS + UML).
 
-**Giai đoạn 2 — Mở rộng:** Bổ sung các hạng mục theo yêu cầu: thanh toán đa cổng thật (VNPay + Stripe), hệ thống mã giảm giá, upload ảnh sản phẩm, phân trang đơn hàng, giao diện quản trị CRUD, và pipeline CI/CD.
+**Giai đoạn 2 — Mở rộng:** Bổ sung các hạng mục theo yêu cầu: thanh toán qua cổng thật (MoMo AIO v2 sandbox), hệ thống mã giảm giá, upload ảnh sản phẩm, phân trang đơn hàng, giao diện quản trị CRUD, và pipeline CI/CD.
 
 **Giai đoạn 3 — Marketplace nhiều người bán:** Chuyển từ mô hình single-store (1 admin quản mọi thứ) sang marketplace: thêm vai trò **Seller**, mỗi seller tự đăng ký, quản sản phẩm/đơn/doanh thu riêng của cửa hàng mình; một đơn hàng có thể trộn sản phẩm từ nhiều seller (mỗi `OrderItem` gắn `SellerId`), seller chỉ thấy phần của mình. Admin vẫn quản toàn sàn.
 
@@ -52,7 +52,7 @@ Toàn bộ schema được quản lý qua 4 migration (`InitialCreate`, `AddCoup
 | 3 | Tìm kiếm/lọc/phân trang sản phẩm | Query theo tên, danh mục, khoảng giá; sort; `PagedResult<T>` |
 | 4 | Giỏ hàng | Thêm/sửa/xóa item, validate tồn kho real-time |
 | 5 | Đặt hàng (Checkout) | Chuyển giỏ → đơn, trừ tồn kho nguyên tử, snapshot giá/tên sản phẩm vào OrderItem |
-| 6 | **Thanh toán đa cổng** | Abstraction `IPaymentProvider`: Mock, COD, **VNPay** (HMAC-SHA512, redirect + verify), **Stripe** (Checkout Session, verify qua session_id) |
+| 6 | **Thanh toán đa cổng** | Abstraction `IPaymentProvider`: Mock, COD, **MoMo** (AIO v2 sandbox: gọi API tạo giao dịch, redirect payUrl, verify chữ ký HMAC-SHA256 qua callback + IPN) |
 | 7 | Vòng đời đơn hàng | State machine trong Domain (`Order.ChangeStatus`), chặn transition sai bằng exception → HTTP 409 |
 | 8 | Đánh giá sản phẩm | Rating 1–5 + comment, ràng buộc "verified purchase" (phải có đơn chứa SP, khác Cancelled), chống trùng |
 | 9 | Wishlist | Thêm/xóa sản phẩm yêu thích |
@@ -66,18 +66,17 @@ Toàn bộ schema được quản lý qua 4 migration (`InitialCreate`, `AddCoup
 
 ## 4. Chi tiết kỹ thuật các hạng mục mở rộng
 
-### 4.1 Thanh toán đa cổng (VNPay + Stripe)
+### 4.1 Thanh toán đa cổng (MoMo)
 
 Thiết kế theo pattern **Strategy + Factory**:
 
 - `IPaymentProvider` — interface chung: `CreatePaymentAsync` (khởi tạo, trả redirect URL hoặc hoàn tất ngay) và `VerifyAsync` (xác minh callback).
-- `PaymentProviderFactory` — resolve provider theo key (`mock`/`cod`/`vnpay`/`stripe`) từ danh sách đăng ký DI.
-- `VnPayProvider` — build URL redirect ký HMAC-SHA512 đúng chuẩn VNPay sandbox; verify chữ ký khi khách quay lại qua `GET /api/payments/vnpay/callback`.
-- `StripeProvider` — dùng SDK `Stripe.net`, tạo Checkout Session, verify bằng `session_id` qua `GET /api/payments/stripe/callback`.
-- **Fallback demo:** Khi chưa cấu hình `TmnCode`/`SecretKey`, cả 2 provider tự chuyển sang chế độ hoàn tất ngay (không lỗi, không cần key) — cho phép demo toàn bộ luồng ngay lập tức, và chỉ cần điền config để chuyển sang sandbox/thật.
+- `PaymentProviderFactory` — resolve provider theo key (`mock`/`cod`/`momo`) từ danh sách đăng ký DI.
+- `MoMoProvider` — tích hợp MoMo AIO v2 sandbox: POST `/v2/gateway/api/create` với chữ ký HMAC-SHA256, nhận `payUrl` để redirect khách; verify chữ ký khi khách quay lại qua `GET /api/payments/momo/callback` và IPN `POST /api/payments/momo/ipn`. Dùng `requestType = payWithMethod` để cổng hiện đủ QR ví + thẻ ATM nội địa + thẻ tín dụng. Quy đổi USD → VND (MoMo yêu cầu số tiền VND nguyên).
+- **Fallback demo:** Khi chưa cấu hình key MoMo và bật `AllowDemo`, provider tự chuyển sang chế độ hoàn tất ngay (không lỗi, không cần key) — cho phép demo luồng nhanh. Mặc định dùng test credentials sandbox công khai của MoMo nên chạy cổng thật ngay.
 - `PaymentService` được viết lại theo 2 method: `InitiateAsync` (khởi tạo, có thể trả redirect) và `ConfirmAsync` (xử lý callback, chốt `Order → Paid`).
 
-Đã verify thật: pay qua `mock` hoàn tất ngay (status → Paid), pay qua `vnpay` khi chưa cấu hình key cũng tự hoàn tất demo đúng như thiết kế.
+Đã verify thật: pay qua `mock` hoàn tất ngay (status → Paid), pay qua `momo` trả về `payUrl` sandbox thật (`test-payment.momo.vn`) và redirect callback chốt đơn Paid đúng như thiết kế.
 
 ### 4.2 Mã giảm giá (Coupon)
 
@@ -150,7 +149,7 @@ YAML đã được validate cú pháp; các lệnh bên trong (`dotnet build/tes
 ## 6. Cấu trúc file thay đổi/thêm mới (giai đoạn mở rộng)
 
 **Backend:**
-`Domain/Entities/Coupon.cs`, `Application/DTOs/Coupons/*`, `Application/Services/CouponService.cs`, `Application/Services/PaymentService.cs` (viết lại), `Application/Interfaces/IServices.cs` + `IBusinessServices.cs` (mở rộng), `Infrastructure/Payments/{VnPayProvider,StripeProvider,MockPaymentProvider,PaymentProviderFactory,PaymentOptions}.cs`, `Infrastructure/Storage/LocalFileStorage.cs`, `API/Controllers/{PaymentsController,CouponsController}.cs`, migration `AddCouponsAndDiscounts`.
+`Domain/Entities/Coupon.cs`, `Application/DTOs/Coupons/*`, `Application/Services/CouponService.cs`, `Application/Services/PaymentService.cs` (viết lại), `Application/Interfaces/IServices.cs` + `IBusinessServices.cs` (mở rộng), `Infrastructure/Payments/{MoMoProvider,MockPaymentProvider,PaymentProviderFactory,PaymentOptions}.cs`, `Infrastructure/Storage/LocalFileStorage.cs`, `API/Controllers/{PaymentsController,CouponsController}.cs`, migration `AddCouponsAndDiscounts`.
 
 **Frontend:**
 `pages/{AdminProductsPage,AdminCouponsPage}.tsx` (mới), `pages/{CheckoutPage,OrdersPage}.tsx` (viết lại), `api/hooks.ts` (mở rộng ~15 hook mới), `types.ts` (mở rộng).
@@ -169,7 +168,7 @@ Backend — `Domain/Enums/FulfillmentStatus.cs` (mới), `Domain/Entities/OrderI
 
 ## 7. Giới hạn & khuyến nghị tiếp theo
 
-- VNPay/Stripe hiện chạy chế độ demo khi chưa có key thật — cần merchant account thật để test end-to-end với cổng thật (sandbox VNPay hoặc Stripe test mode).
+- MoMo chạy trên sandbox (test credentials công khai) — IPN server-to-server không gọi tới được `localhost` nên phần xác nhận đơn dựa vào redirect callback; khi deploy public (hoặc dùng ngrok) IPN mới hoạt động đầy đủ. Lên production cần đăng ký merchant MoMo để lấy key thật.
 - File upload lưu local disk (`wwwroot/uploads`) — khi cần scale nhiều instance nên chuyển sang object storage (S3/Azure Blob).
 - CI/CD chỉ build + test, chưa có bước deploy — có thể bổ sung khi có môi trường staging/production.
 - Ứng dụng chạy local; nếu cần triển khai lên server có thể đóng gói lại (Docker hoặc publish trực tiếp) về sau.

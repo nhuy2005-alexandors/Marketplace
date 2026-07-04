@@ -6,10 +6,12 @@ export interface User {
   fullName: string;
   role: Role;
   shopName?: string;
+  sellerStatus?: "Pending" | "Approved";
 }
 
 export interface AuthResponse {
   token: string;
+  refreshToken: string;
   user: User;
 }
 
@@ -32,6 +34,22 @@ export interface Category {
   id: number;
   name: string;
   description?: string;
+}
+
+export interface SellerShop {
+  sellerId: number;
+  shopName: string;
+}
+
+export type SellerStatus = "Pending" | "Approved";
+
+export interface SellerApplication {
+  id: number;
+  email: string;
+  fullName: string;
+  shopName?: string;
+  status: SellerStatus;
+  createdAt: string;
 }
 
 export interface Paged<T> {
@@ -97,6 +115,23 @@ export interface PayResult {
   requiresRedirect: boolean;
   redirectUrl?: string;
   order?: Order;
+}
+
+export interface SellerSplit {
+  sellerId: number;
+  shopName: string;
+  subtotal: number;
+  discountShare: number;
+  netTotal: number;
+  items: OrderItem[];
+}
+
+export interface OrderSplit {
+  orderId: number;
+  subtotal: number;
+  discountAmount: number;
+  total: number;
+  sellers: SellerSplit[];
 }
 
 export interface Coupon {

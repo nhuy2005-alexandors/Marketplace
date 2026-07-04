@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { Package } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { useCancelOrder, useOrders, useUpdateOrderStatus } from "../api/hooks";
 import { useAuth } from "../store/auth";
 import { StatusBadge } from "../components/StatusBadge";
+import { OrderSplitPanel } from "../components/OrderSplitPanel";
 import type { OrderStatus } from "../types";
 import { Button, Card, EmptyState, PageHeader, Spinner } from "../components/ui";
 
@@ -14,7 +16,7 @@ const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
 export function OrdersPage() {
   const [page, setPage] = useState(1);
   const [params] = useSearchParams();
-  const paymentResult = params.get("payment"); // success | failed (redirect từ VNPay/Stripe)
+  const paymentResult = params.get("payment"); // success | failed (redirect từ MoMo)
   const { data, isLoading } = useOrders(page, 5);
   const isAdmin = useAuth((s) => s.user?.role === "Admin");
   const updateStatus = useUpdateOrderStatus();
@@ -34,7 +36,7 @@ export function OrdersPage() {
       )}
 
       <div className="space-y-4">
-        {data?.items.length === 0 && <EmptyState icon="📦" title="Chưa có đơn hàng" />}
+        {data?.items.length === 0 && <EmptyState icon={Package} title="Chưa có đơn hàng" />}
         {data?.items.map((order) => (
           <Card key={order.id} className="p-5">
             <div className="flex items-center justify-between mb-3">
@@ -65,6 +67,7 @@ export function OrdersPage() {
                 </div>
               )}
             </div>
+            <OrderSplitPanel orderId={order.id} />
             <div className="flex items-center justify-between mt-3">
               <span className="font-bold text-brand-600 dark:text-brand-400">Tổng: ${order.total.toFixed(2)}</span>
               <div className="flex gap-2">

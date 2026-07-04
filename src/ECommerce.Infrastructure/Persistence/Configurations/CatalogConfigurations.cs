@@ -15,6 +15,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         b.Property(u => u.FullName).IsRequired().HasMaxLength(100);
         b.Property(u => u.ShopName).HasMaxLength(150);
         b.Property(u => u.Role).HasConversion<int>();
+        b.Property(u => u.SellerStatus).HasConversion<int>();
         b.HasOne(u => u.Cart).WithOne(c => c.User).HasForeignKey<Cart>(c => c.UserId);
     }
 }
@@ -69,5 +70,18 @@ public class CartItemConfiguration : IEntityTypeConfiguration<CartItem>
         b.HasOne(i => i.Product).WithMany()
             .HasForeignKey(i => i.ProductId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(i => new { i.CartId, i.ProductId }).IsUnique();
+    }
+}
+
+public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
+{
+    public void Configure(EntityTypeBuilder<RefreshToken> b)
+    {
+        b.HasKey(t => t.Id);
+        b.Property(t => t.Token).IsRequired().HasMaxLength(200);
+        b.HasIndex(t => t.Token).IsUnique();
+        b.Ignore(t => t.IsActive);
+        b.HasOne(t => t.User).WithMany()
+            .HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 }

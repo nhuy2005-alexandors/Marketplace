@@ -5,6 +5,8 @@ namespace ECommerce.Application.Interfaces;
 public interface IJwtTokenGenerator
 {
     string Generate(User user);
+    // Sinh refresh token ngẫu nhiên (opaque) kèm thời điểm hết hạn.
+    (string Token, DateTime ExpiresAt) GenerateRefreshToken();
 }
 
 public interface IPasswordHasher
@@ -25,13 +27,19 @@ public interface IFileStorage
     Task<string> SaveImageAsync(Stream content, string fileName, CancellationToken ct = default);
 }
 
-// Một provider thanh toán: mock, VNPay, Stripe...
+// Gửi email/notification. Mock hiện tại chỉ log; sau này swap sang SMTP thật.
+public interface IEmailSender
+{
+    Task SendAsync(string toEmail, string subject, string body, CancellationToken ct = default);
+}
+
+// Một provider thanh toán: mock, COD, MoMo...
 public interface IPaymentProvider
 {
     // Khóa định danh provider, khớp với PaymentMethod hoặc config
     string Key { get; }
 
-    // Khởi tạo thanh toán. Provider redirect (VNPay/Stripe) trả RedirectUrl + Pending.
+    // Khởi tạo thanh toán. Provider redirect (MoMo) trả RedirectUrl + Pending.
     // Provider tức thời (mock/COD) trả Completed ngay.
     Task<PaymentInitResult> CreatePaymentAsync(PaymentContext context, CancellationToken ct = default);
 

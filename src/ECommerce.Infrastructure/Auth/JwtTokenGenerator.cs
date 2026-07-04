@@ -37,6 +37,14 @@ public class JwtTokenGenerator : IJwtTokenGenerator
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    public (string Token, DateTime ExpiresAt) GenerateRefreshToken()
+    {
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        var token = Convert.ToBase64String(bytes)
+            .Replace("+", "-").Replace("/", "_").TrimEnd('=');
+        return (token, DateTime.UtcNow.AddDays(_settings.RefreshExpiryDays));
+    }
 }
 
 public class BCryptPasswordHasher : IPasswordHasher

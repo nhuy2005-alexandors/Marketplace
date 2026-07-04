@@ -16,13 +16,29 @@ public record OrderDto(
     IReadOnlyList<OrderItemDto> Items,
     PaymentDto? Payment);
 
+// Phần chia của một seller trong đơn: giảm giá coupon toàn đơn chia tỉ lệ theo subtotal của seller.
+public record SellerSplitDto(
+    int SellerId,
+    string ShopName,
+    decimal Subtotal,
+    decimal DiscountShare,
+    decimal NetTotal,
+    IReadOnlyList<OrderItemDto> Items);
+
+public record OrderSplitDto(
+    int OrderId,
+    decimal Subtotal,
+    decimal DiscountAmount,
+    decimal Total,
+    IReadOnlyList<SellerSplitDto> Sellers);
+
 public record CheckoutRequest(string ShippingAddress, string? CouponCode = null);
 
 public record UpdateOrderStatusRequest(string Status);
 
 public record UpdateFulfillmentStatusRequest(string Status);
 
-// Method: mock | cod | vnpay | stripe. ReturnUrl: nơi cổng redirect về sau thanh toán.
+// Method: mock | cod | momo. ReturnUrl: nơi cổng redirect về sau thanh toán.
 public record PayOrderRequest(string Method, string? ReturnUrl);
 
 // Kết quả khởi tạo thanh toán: hoặc hoàn tất ngay (Order), hoặc cần redirect.
