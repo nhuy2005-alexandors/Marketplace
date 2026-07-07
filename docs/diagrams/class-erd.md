@@ -16,6 +16,15 @@ classDiagram
         +string FullName
         +UserRole Role
         +string? ShopName
+        +SellerStatus? SellerStatus
+    }
+
+    class RefreshToken {
+        +int UserId
+        +string Token
+        +DateTime ExpiresAt
+        +DateTime? RevokedAt
+        +bool IsActive
     }
 
     class Category {
@@ -116,6 +125,7 @@ classDiagram
     BaseEntity <|-- Review
     BaseEntity <|-- WishlistItem
     BaseEntity <|-- Coupon
+    BaseEntity <|-- RefreshToken
 
     %% Coupon: khong co FK/association den entity khac.
     %% Order chi luu CouponCode (string snapshot), khong phai FK.
@@ -125,6 +135,7 @@ classDiagram
     User "1" --> "*" Review
     User "1" --> "*" WishlistItem
     User "1" --> "*" Product : sells (Seller)
+    User "1" --> "*" RefreshToken
     Category "1" --> "*" Product
     Cart "1" --> "*" CartItem
     CartItem "*" --> "1" Product
@@ -143,7 +154,8 @@ classDiagram
 
 | Enum | Giá trị | Dùng ở |
 |------|---------|--------|
-| `UserRole` | Customer, Seller, Admin | `User.Role` |
+| `UserRole` | Customer, Admin, Seller | `User.Role` |
+| `SellerStatus` | Pending, Approved | `User.SellerStatus` (nullable — null = không phải seller; seller mới = Pending, chờ Admin duyệt) |
 | `OrderStatus` | Pending, Paid, Shipped, Delivered, Cancelled | `Order.Status` |
 | `FulfillmentStatus` | Pending, Shipped, Delivered, Cancelled | `OrderItem.Status` — độc lập với `OrderStatus`, do Seller sở hữu item tự đổi |
 | `PaymentMethod` | CreditCard, PayPal, CashOnDelivery, EWallet | `Payment.Method` (MoMo → EWallet) |
@@ -159,6 +171,7 @@ erDiagram
     USERS ||--o{ REVIEWS : writes
     USERS ||--o{ WISHLIST_ITEMS : saves
     USERS ||--o{ PRODUCTS : sells
+    USERS ||--o{ REFRESH_TOKENS : owns
     CATEGORIES ||--o{ PRODUCTS : contains
     CARTS ||--o{ CART_ITEMS : holds
     PRODUCTS ||--o{ CART_ITEMS : in
@@ -250,6 +263,13 @@ erDiagram
         int MaxUses
         int TimesUsed
         bool IsActive
+    }
+    REFRESH_TOKENS {
+        int Id PK
+        int UserId FK
+        string Token
+        datetime ExpiresAt
+        datetime RevokedAt "nullable"
     }
 ```
 

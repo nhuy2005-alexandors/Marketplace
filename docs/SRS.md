@@ -37,11 +37,12 @@ MiniShop hiện là **marketplace đa người bán (multi-seller)**: hỗ trợ
 | RBAC | Role-Based Access Control |
 
 ### 1.4 Tài liệu liên quan
-- `use-cases.md` — sơ đồ và đặc tả use case
-- `sequence-diagrams.md` — sơ đồ tuần tự
-- `activity-diagrams.md` — sơ đồ hoạt động
-- `state-machine.md` — sơ đồ máy trạng thái
-- `class-erd.md` — sơ đồ lớp / ERD
+- `diagrams/use-cases.md` — sơ đồ và đặc tả use case
+- `diagrams/sequence-diagrams.md` — sơ đồ tuần tự
+- `diagrams/activity-diagrams.md` — sơ đồ hoạt động
+- `diagrams/state-machine.md` — sơ đồ máy trạng thái
+- `diagrams/class-erd.md` — sơ đồ lớp / ERD
+- `diagrams/architecture-diagrams.md` — sơ đồ component / deployment
 
 ---
 
@@ -94,13 +95,13 @@ Kiến trúc 4 lớp (Clean Architecture):
 ### 3.1 Chi tiết một số quy tắc
 - **FR-05:** Checkout thất bại nếu giỏ rỗng hoặc tồn kho không đủ; khi đủ, tồn kho giảm và giỏ được làm rỗng. Mỗi `OrderItem` lưu snapshot `SellerId` (seller sở hữu sản phẩm tại thời điểm đặt hàng) — giỏ hàng và đơn hàng **không** bị giới hạn theo một seller, một đơn có thể chứa item từ nhiều shop khác nhau.
 - **FR-06:** `IPaymentProvider` trừu tượng hóa cổng — MoMo gọi API tạo giao dịch, trả `RedirectUrl` (payUrl, chuyển hướng khách sang cổng), callback xác minh chữ ký HMAC-SHA256 rồi chốt `Order → Paid`. Mock/COD hoàn tất tức thì. MoMo dùng test credentials sandbox công khai nên chạy cổng thật ngay; nếu chưa cấu hình key và bật `AllowDemo` → chạy chế độ demo (hoàn tất ngay).
-- **FR-07:** Chuyển trạng thái chỉ theo các cạnh hợp lệ (xem `state-machine.md`); chuyển sai trả HTTP 409. Trạng thái được quản lý ở cấp toàn Order, chỉ Admin thực hiện — kể cả khi đơn có item của nhiều seller, Seller không tự đổi trạng thái phần của mình.
+- **FR-07:** Chuyển trạng thái chỉ theo các cạnh hợp lệ (xem `diagrams/state-machine.md`); chuyển sai trả HTTP 409. Trạng thái được quản lý ở cấp toàn Order, chỉ Admin thực hiện — kể cả khi đơn có item của nhiều seller, Seller không tự đổi trạng thái phần của mình.
 - **FR-08:** Đánh giá yêu cầu tồn tại đơn (khác Cancelled) chứa sản phẩm đó; trùng đánh giá trả 409.
 - **FR-11 (Seller ownership):** `POST/PUT/DELETE /api/products` và `upload-image` cho phép role `Admin,Seller`. Với Seller, hệ thống kiểm tra `product.SellerId == currentUserId` trước khi sửa/xóa — không khớp trả 403 Forbidden. Admin bỏ qua kiểm tra này (sửa/xóa sản phẩm của bất kỳ seller nào). Khi tạo sản phẩm, `SellerId` luôn gán bằng id của người tạo (Seller tự tạo cho mình; Admin tạo thì gán chính Admin làm seller).
 - **FR-10/FR-15 (Seller scope):** `DashboardService.GetAsync(int? sellerId)` — truyền `null` trả số liệu toàn hệ thống (Admin dùng), truyền id trả số liệu đã lọc theo `OrderItem.SellerId`/`Product.SellerId` của seller đó (doanh thu, số sản phẩm, số đơn liên quan, phân bố trạng thái, top sản phẩm). `SellerOrderService.GetForSellerAsync` trả đơn có chứa item của seller nhưng lọc `Order.Items` chỉ còn item của seller đó và tính lại subtotal/total trên phần này.
 - **FR-12:** Coupon áp dụng tại bước checkout; hệ thống validate hạn dùng, đơn tối thiểu, số lượt còn lại trước khi trừ giảm giá vào `Order.DiscountAmount`.
 - **FR-10/FR-15 (Pro-rate giảm giá coupon theo seller):** `Order.DiscountAmount` là giảm giá **toàn đơn**, không gắn riêng seller nào. Cả `SellerOrderService.GetForSellerAsync` và `DashboardService.GetAsync(sellerId)` chia tỉ lệ giảm giá này theo tỉ trọng subtotal của seller trong đơn: `sellerDiscount = DiscountAmount × (sellerSubtotal / orderSubtotal)`, sau đó `sellerTotal = sellerSubtotal - sellerDiscount`. Doanh thu hệ thống (`sellerId = null`) dùng trực tiếp `Order.Total` (đã trừ giảm giá) của các đơn đã thanh toán. Ví dụ đã verify: đơn $100 (seller A $60 + seller B $40), coupon giảm $20 → A thấy discount $12/total $48, B thấy discount $8/total $32, tổng $80 khớp `Order.Total` thực nhận.
-- **FR-16 (Giao hàng theo item):** `OrderItem.ChangeStatus()` là máy trạng thái riêng (xem `state-machine.md` mục 3), tách biệt hoàn toàn khỏi `Order.ChangeStatus()`. Seller chỉ đổi được `FulfillmentStatus` của item có `SellerId == currentUserId`; sai chủ → 403. Chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi Customer hủy đơn (`OrderService.CancelAsync`), mọi `OrderItem` còn ở `Pending` được tự động chuyển sang `Cancelled`.
+- **FR-16 (Giao hàng theo item):** `OrderItem.ChangeStatus()` là máy trạng thái riêng (xem `diagrams/state-machine.md` mục 3), tách biệt hoàn toàn khỏi `Order.ChangeStatus()`. Seller chỉ đổi được `FulfillmentStatus` của item có `SellerId == currentUserId`; sai chủ → 403. Chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi Customer hủy đơn (`OrderService.CancelAsync`), mọi `OrderItem` còn ở `Pending` được tự động chuyển sang `Cancelled`.
 - **Hủy đơn:** Customer hủy được khi đơn ở Pending/Paid; tồn kho được hoàn lại; các item còn Pending chuyển `FulfillmentStatus → Cancelled`.
 
 ---

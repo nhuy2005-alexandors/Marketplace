@@ -1,0 +1,24 @@
+# .NET build output
+bin/
+obj/
+*.user
+
+# EF / SQL data files
+*.mdf
+*.ldf
+
+# Runtime uploads
+src/ECommerce.API/wwwroot/uploads/
+
+# Frontend
+client/node_modules/
+client/dist/
+client/.vite/
+
+# IDE
+.vs/
+.idea/
+.vscode/
+
+# Logs
+*.log

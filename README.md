@@ -13,7 +13,10 @@ ECommerce.sln
 │   └── ECommerce.Infrastructure # DbContext, EF config, migrations, JWT/BCrypt, payment providers, storage, seed
 ├── tests/ECommerce.Tests        # xUnit: state machine, checkout, coupon, payment, review, auth
 ├── client/                      # React SPA
-├── docs/                        # SRS + UML (use-case, sequence, activity, state-machine, class/ERD, component/deployment)
+├── docs/                        # SRS, báo cáo, phân tích bài toán
+│   ├── specs/                   # Đặc tả từng feature (yêu cầu/ràng buộc/quyết định)
+│   ├── tech_specs/              # As-built (đã build thế nào, theo mẻ)
+│   └── diagrams/                # UML (use-case, sequence, activity, state-machine, class/ERD, component/deployment)
 └── .github/workflows/ci.yml     # GitHub Actions: build + test backend/frontend
 ```
 
