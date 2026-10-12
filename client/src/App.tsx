@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Navbar } from "./components/Navbar";
 import { Footer } from "./components/Footer";
+import { ChatBot } from "./components/ChatBot";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { HomePage } from "./pages/HomePage";
 import { ProductListPage } from "./pages/ProductListPage";
@@ -51,6 +52,7 @@ export default function App() {
       </Routes>
       </main>
       <Footer />
+      <ChatBot />
       </div>
     </BrowserRouter>
   );
