@@ -1,13 +1,22 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Flame, Headphones, PackageCheck, ShieldCheck, Shirt, ShoppingBag, Sparkles, Star, Tag, Truck } from "lucide-react";
-import { useActiveCoupons, useCategories, useProducts } from "../api/hooks";
+import { useActiveCoupons, useCategories, useProducts, useOrders, useWishlist, useCart } from "../api/hooks";
+import { useAuth } from "../store/auth";
 import { ProductCard } from "../components/ProductCard";
 import { HeroBanners } from "../components/home/HeroBanners";
 import { VoucherStrip } from "../components/home/VoucherStrip";
 import { FlashSale } from "../components/home/FlashSale";
 import { LowStockSection, ProductSection } from "../components/home/ProductSection";
+import { RecommendationSection } from "../components/home/RecommendationSection";
 import { Spinner } from "../components/ui";
 import type { Category } from "../types";
+import { useRecommendationStore } from "../store/recommendation";
+import {
+  buildUserProfileFromData,
+  computePersonalizedRecommendations,
+  computeSimilarProducts,
+} from "../services/recommendationService";
+import { useMemo, useEffect } from "react";
 
 const CATEGORY_ICONS = [ShoppingBag, Shirt, Sparkles, Headphones, Tag];
 
@@ -30,12 +39,86 @@ function CategoryCircle({ category, index }: { category: Category; index: number
 }
 
 export function HomePage() {
+  const { user } = useAuth();
   const { data: categories } = useCategories();
   const { data: coupons } = useActiveCoupons();
-  const { data: featured, isLoading } = useProducts({ page: 1, pageSize: 10, sortBy: "price", desc: true });
+  const { data: featured, isLoading } = useProducts({ page: 1, pageSize: 20, sortBy: "price", desc: true });
   const { data: topRated } = useProducts({ page: 1, pageSize: 5, sortBy: "rating", desc: true });
   const { data: newest } = useProducts({ page: 1, pageSize: 10, sortBy: "createdAt", desc: true });
   const { data: lowStock } = useProducts({ page: 1, pageSize: 8, sortBy: "stock", desc: false });
+
+  // Tín hiệu người dùng để phục vụ Recommendation Engine
+  const isCustomer = user?.role === "Customer";
+  const { data: myOrders } = useOrders(1, 20);
+  const { data: wishlist } = useWishlist();
+  const { data: cart } = useCart();
+
+  const {
+    sessionSearches,
+    viewedProductIds,
+    activeRecommendations,
+    recommendationReason,
+    recommendationType,
+    setRecommendations,
+  } = useRecommendationStore();
+
+  const allAvailableProducts = useMemo(() => {
+    return featured?.items ?? [];
+  }, [featured]);
+
+  // Tính toán đề xuất cá nhân hóa kiểu Netflix
+  const recommendationResult = useMemo(() => {
+    if (allAvailableProducts.length === 0) {
+      return { products: [], reason: "", type: "trending" as const };
+    }
+
+    const wishlistIds = wishlist?.map((w) => w.productId) ?? [];
+    const cartIds = cart?.items.map((i) => i.productId) ?? [];
+    const ordersList = isCustomer && myOrders?.items ? myOrders.items : [];
+
+    const profile = buildUserProfileFromData(
+      user?.id,
+      user?.fullName,
+      ordersList,
+      wishlistIds,
+      cartIds,
+      sessionSearches,
+      viewedProductIds,
+      allAvailableProducts
+    );
+
+    return computePersonalizedRecommendations(allAvailableProducts, profile, 8);
+  }, [
+    allAvailableProducts,
+    isCustomer,
+    myOrders,
+    wishlist,
+    cart,
+    sessionSearches,
+    viewedProductIds,
+    user,
+  ]);
+
+  // Cập nhật kết quả vào Zustand store dùng chung cho cả Màn hình và ChatBot
+  useEffect(() => {
+    if (recommendationResult.products.length > 0) {
+      setRecommendations(
+        recommendationResult.products,
+        recommendationResult.reason,
+        recommendationResult.type
+      );
+    }
+  }, [recommendationResult, setRecommendations]);
+
+  // Tính toán khối "Vì bạn vừa xem..." nếu có sản phẩm vừa xem
+  const similarToLastViewed = useMemo(() => {
+    if (viewedProductIds.length === 0 || allAvailableProducts.length === 0) return null;
+    const lastId = viewedProductIds[viewedProductIds.length - 1];
+    const source = allAvailableProducts.find((p) => p.id === lastId);
+    if (!source) return null;
+    const similarItems = computeSimilarProducts(source, allAvailableProducts, 5);
+    return { sourceProduct: source, similarItems };
+  }, [viewedProductIds, allAvailableProducts]);
 
   const heroProducts = featured?.items ?? [];
   const flashProducts = newest?.items.slice(0, 8) ?? [];
@@ -78,6 +161,14 @@ export function HomePage() {
       )}
 
       <FlashSale products={flashProducts} />
+
+      {/* Khối gợi ý AI cá nhân hóa (Netflix-style Recommendation) */}
+      <RecommendationSection
+        products={activeRecommendations.length > 0 ? activeRecommendations : recommendationResult.products}
+        reason={recommendationReason || recommendationResult.reason}
+        type={recommendationType || recommendationResult.type}
+        similarToLastViewed={similarToLastViewed}
+      />
 
       {topRated && <ProductSection title="Được yêu thích nhất" icon={Star} products={topRated.items} to="/products?sortBy=rating&desc=true" />}
 

@@ -17,8 +17,10 @@ import {
 } from "lucide-react";
 import type { Product } from "../types";
 import { executeRagQuery, fetchMarketProducts, type RagResult } from "../services/ragService";
-import { useAddToCart } from "../api/hooks";
+import { useAddToCart, useOrders, useWishlist, useCart } from "../api/hooks";
 import { useAuth } from "../store/auth";
+import { useRecommendationStore } from "../store/recommendation";
+import { buildUserProfileFromData } from "../services/recommendationService";
 
 interface ChatMessage {
   id: string;
@@ -29,12 +31,12 @@ interface ChatMessage {
 }
 
 const QUICK_PROMPTS = [
+  "✨ Gợi ý món phù hợp theo sở thích",
+  "🎯 Mấy món đang gợi ý trên màn hình có gì hay?",
   "🎧 Tìm tai nghe chống ồn",
   "⌨️ Có bàn phím cơ không?",
   "📚 Gợi ý sách lập trình",
   "👕 Áo thun dưới $30",
-  "🖱️ Có chuột gaming không?", // Test gợi ý na ná
-  "🚗 Có bán xe ô tô không?",   // Test thông báo chưa có
 ];
 
 export function ChatBot() {
@@ -47,24 +49,36 @@ export function ChatBot() {
     return localStorage.getItem("minishop_gemini_key") || "";
   });
 
+  const {
+    activeRecommendations,
+    recommendationReason,
+    sessionSearches,
+    viewedProductIds,
+  } = useRecommendationStore();
+
+  const user = useAuth((s) => s.user);
+  const isCustomer = user?.role === "Customer";
+  const { data: myOrders } = useOrders(1, 20);
+  const { data: wishlist } = useWishlist();
+  const { data: cart } = useCart();
+  const addToCart = useAddToCart();
+
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: "welcome-1",
       sender: "bot",
       text:
-        "Xin chào! Tôi là **Trợ lý AI (RAG)** của sàn thương mại điện tử MiniShop.\n\n" +
-        "Tôi đã được kết nối và đọc toàn bộ dữ liệu sản phẩm trong kho của sàn.\n" +
-        "• Nếu sản phẩm có trên sàn: Tôi sẽ **đề xuất chi tiết** cho bạn.\n" +
-        "• Nếu chưa có đúng mẫu: Tôi sẽ **gợi ý sản phẩm na ná / cùng loại**.\n" +
-        "• Nếu hoàn toàn không có: Tôi sẽ **thông báo rõ ràng** để bạn tiết kiệm thời gian.\n\n" +
+        "Xin chào! Tôi là **Trợ lý AI Mua sắm (RAG & Recommendation)** của sàn MiniShop.\n\n" +
+        "Tôi đã được kết nối đồng bộ với kho hàng và hệ thống gợi ý trên màn hình của bạn:\n" +
+        "• **Gợi ý cá nhân hóa**: Đề xuất món đồ phù hợp nhất với sở thích & lịch sử mua của bạn.\n" +
+        "• **Giải thích màn hình**: Bạn có thể hỏi tôi về bất kỳ món nào đang gợi ý trên màn hình.\n" +
+        "• **Tìm kiếm chính xác**: Báo giá, thông số và tình trạng kho ngay lập tức.\n\n" +
         "Bạn cần tìm sản phẩm gì hôm nay?",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const addToCart = useAddToCart();
-  const isCustomer = useAuth((s) => s.user?.role === "Customer");
 
   // Tải danh sách toàn bộ sản phẩm trên sàn để phục vụ RAG
   useEffect(() => {
@@ -72,6 +86,20 @@ export function ChatBot() {
       setProducts(data);
     });
   }, []);
+
+  // Lắng nghe sự kiện click "Hỏi AI Chatbot về món này" từ màn hình chính
+  useEffect(() => {
+    const handleCustomAsk = (e: Event) => {
+      const customEvent = e as CustomEvent<{ query: string }>;
+      if (customEvent.detail?.query) {
+        setIsOpen(true);
+        handleSend(customEvent.detail.query);
+      }
+    };
+
+    window.addEventListener("minishop:ask-bot", handleCustomAsk);
+    return () => window.removeEventListener("minishop:ask-bot", handleCustomAsk);
+  }, [products]);
 
   useEffect(() => {
     if (isOpen) {
@@ -108,8 +136,30 @@ export function ChatBot() {
         setProducts(currentProducts);
       }
 
-      // Thực thi bộ máy RAG
-      const ragResult = await executeRagQuery(userMsg.text, currentProducts, geminiKey);
+      // Tổng hợp hồ sơ khách hàng để gửi cho RAG & Recommendation
+      const wishlistIds = wishlist?.map((w) => w.productId) ?? [];
+      const cartIds = cart?.items.map((i) => i.productId) ?? [];
+      const ordersList = isCustomer && myOrders?.items ? myOrders.items : [];
+
+      const userProfile = buildUserProfileFromData(
+        user?.id,
+        user?.fullName,
+        ordersList,
+        wishlistIds,
+        cartIds,
+        sessionSearches,
+        viewedProductIds,
+        currentProducts
+      );
+
+      // Thực thi bộ máy RAG kết hợp gợi ý màn hình
+      const ragResult = await executeRagQuery(
+        userMsg.text,
+        currentProducts,
+        geminiKey,
+        userProfile,
+        activeRecommendations
+      );
 
       const botMsg: ChatMessage = {
         id: "b-" + Date.now(),
@@ -141,7 +191,7 @@ export function ChatBot() {
       {
         id: "welcome-reset",
         sender: "bot",
-        text: "Hộp thoại đã được làm mới. Bạn cần tìm kiếm hay so sánh sản phẩm nào trên sàn?",
+        text: "Hộp thoại đã được làm mới. Bạn cần tìm kiếm hay muốn nhận gợi ý sản phẩm nào trên sàn?",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       },
     ]);
@@ -153,8 +203,8 @@ export function ChatBot() {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          aria-label="Mở Trợ lý AI Mua sắm (RAG)"
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full shadow-2xl hover:shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all duration-200 group border border-white/20"
+          aria-label="Mở Trợ lý AI Mua sắm (RAG & Recommendation)"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-gradient-to-r from-indigo-600 via-blue-600 to-sky-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-full shadow-2xl hover:shadow-indigo-500/30 hover:scale-105 active:scale-95 transition-all duration-200 group border border-white/20"
         >
           <div className="relative">
             <Bot className="w-6 h-6 animate-pulse" />
@@ -167,16 +217,16 @@ export function ChatBot() {
             <div className="text-xs font-semibold leading-none flex items-center gap-1">
               AI Chatbot <Sparkles className="w-3 h-3 text-amber-300" />
             </div>
-            <div className="text-[10px] text-white/80 mt-0.5">Hỏi đáp RAG sản phẩm</div>
+            <div className="text-[10px] text-white/80 mt-0.5">RAG & Gợi ý theo sở thích</div>
           </div>
         </button>
       )}
 
       {/* Cửa sổ Chatbot chính */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 w-[95vw] sm:w-[440px] h-[620px] max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden backdrop-blur-md animate-in fade-in slide-in-from-bottom-5 duration-300">
+        <div className="fixed bottom-6 right-6 z-50 w-[95vw] sm:w-[450px] h-[640px] max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden backdrop-blur-md animate-in fade-in slide-in-from-bottom-5 duration-300">
           {/* Header */}
-          <div className="px-4 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 text-white flex items-center justify-between shrink-0 shadow-md">
+          <div className="px-4 py-3.5 bg-gradient-to-r from-indigo-600 via-blue-600 to-sky-600 text-white flex items-center justify-between shrink-0 shadow-md">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm border border-white/30">
                 <Bot className="w-5 h-5 text-white" />
@@ -184,13 +234,15 @@ export function ChatBot() {
               <div>
                 <div className="font-bold text-sm leading-tight flex items-center gap-1.5">
                   MiniShop AI Assistant
-                  <span className="text-[10px] bg-emerald-400/20 text-emerald-100 font-mono px-1.5 py-0.5 rounded-full border border-emerald-300/30">
-                    RAG
+                  <span className="text-[10px] bg-emerald-400/25 text-emerald-100 font-mono px-1.5 py-0.2 rounded-full border border-emerald-300/30">
+                    RAG + Rec
                   </span>
                 </div>
-                <div className="text-[11px] text-white/80 flex items-center gap-1 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-ping"></span>
-                  Đọc {products.length} sản phẩm theo thời gian thực
+                <div className="text-[11px] text-white/80 flex items-center gap-1 mt-0.5 truncate max-w-[220px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-ping shrink-0"></span>
+                  <span className="truncate" title={recommendationReason || "Đồng bộ SP & Gợi ý Màn hình"}>
+                    {recommendationReason || `Đồng bộ ${products.length} SP & Gợi ý`}
+                  </span>
                 </div>
               </div>
             </div>
@@ -220,7 +272,7 @@ export function ChatBot() {
             </div>
           </div>
 
-          {/* Modal / Bảng cấu hình Gemini Key (Tùy chọn nâng cao) */}
+          {/* Modal / Bảng cấu hình Gemini Key */}
           {showSettings && (
             <div className="p-3.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs">
               <div className="font-semibold text-slate-800 dark:text-slate-200 mb-1 flex items-center justify-between">
@@ -233,7 +285,7 @@ export function ChatBot() {
                 </button>
               </div>
               <p className="text-slate-500 dark:text-slate-400 text-[11px] mb-2 leading-relaxed">
-                Mặc định Chatbot đã tích hợp sẵn <strong>bộ máy RAG cục bộ</strong> cực nhanh & không cần key. Nếu bạn muốn LLM Gemini sinh câu văn mượt mà hơn, hãy dán API key của Google vào đây:
+                Mặc định Chatbot đã tích hợp <strong>RAG + Gợi ý thông minh cục bộ</strong>. Bạn có thể dán thêm Google Gemini API Key để câu trả lời mượt mà và cá nhân hóa hơn nữa:
               </p>
               <div className="flex gap-2">
                 <input
@@ -245,7 +297,7 @@ export function ChatBot() {
                 />
                 <button
                   onClick={() => handleSaveKey(geminiKey)}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition"
+                  className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition"
                 >
                   Lưu
                 </button>
@@ -255,72 +307,98 @@ export function ChatBot() {
 
           {/* Danh sách tin nhắn */}
           <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/50 dark:bg-slate-950/40">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
-              >
+            {messages.map((msg) => {
+              const allItemCards = [
+                ...(msg.result?.matchedProducts || []),
+                ...(msg.result?.similarProducts || []),
+                ...(msg.result?.recommendedProducts || []),
+              ];
+
+              return (
                 <div
-                  className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
-                    msg.sender === "user"
-                      ? "bg-blue-600 text-white rounded-br-none"
-                      : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200/80 dark:border-slate-700/80 rounded-bl-none"
-                  }`}
+                  key={msg.id}
+                  className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
                 >
-                  {/* Badge phân loại phản hồi RAG nếu là Bot */}
-                  {msg.sender === "bot" && msg.result && (
-                    <div className="mb-2">
-                      {msg.result.type === "matched" && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 px-2.5 py-0.5 rounded-full">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Có sản phẩm trên sàn
-                        </span>
-                      )}
-                      {msg.result.type === "similar" && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 px-2.5 py-0.5 rounded-full">
-                          <AlertTriangle className="w-3.5 h-3.5" /> Gợi ý sản phẩm na ná / liên quan
-                        </span>
-                      )}
-                      {msg.result.type === "not_found" && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 px-2.5 py-0.5 rounded-full">
-                          <HelpCircle className="w-3.5 h-3.5" /> Chưa có trên thị trường
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  <div
+                    className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                      msg.sender === "user"
+                        ? "bg-indigo-600 text-white rounded-br-none"
+                        : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200/80 dark:border-slate-700/80 rounded-bl-none"
+                    }`}
+                  >
+                    {/* Badge phân loại phản hồi RAG & Recommendation */}
+                    {msg.sender === "bot" && msg.result && (
+                      <div className="mb-2">
+                        {msg.result.type === "recommendation" && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-gradient-to-r from-indigo-100 to-sky-100 text-indigo-800 dark:from-indigo-950/80 dark:to-sky-950/80 dark:text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            Gợi ý cá nhân hóa (Đồng bộ Màn hình)
+                          </span>
+                        )}
+                        {msg.result.type === "matched" && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 px-2.5 py-0.5 rounded-full">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Có sản phẩm trên sàn
+                          </span>
+                        )}
+                        {msg.result.type === "similar" && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 px-2.5 py-0.5 rounded-full">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Gợi ý sản phẩm na ná / liên quan
+                          </span>
+                        )}
+                        {msg.result.type === "not_found" && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 px-2.5 py-0.5 rounded-full">
+                            <HelpCircle className="w-3.5 h-3.5" /> Chưa có trên thị trường
+                          </span>
+                        )}
+                      </div>
+                    )}
 
-                  {/* Nội dung tin nhắn hiển thị định dạng */}
-                  <div className="whitespace-pre-line text-sm">
-                    {msg.text.split("\n").map((line, idx) => {
-                      // Xử lý các dòng gạch đầu dòng và in đậm cơ bản
-                      if (line.startsWith("• ") || line.startsWith("🔹 ") || line.startsWith("🔸 ")) {
+                    {/* Nội dung tin nhắn */}
+                    <div className="whitespace-pre-line text-sm">
+                      {msg.text.split("\n").map((line, idx) => {
+                        if (
+                          line.startsWith("• ") ||
+                          line.startsWith("🔹 ") ||
+                          line.startsWith("🔸 ") ||
+                          line.startsWith("🌟 ")
+                        ) {
+                          return (
+                            <div key={idx} className="my-0.5 pl-1">
+                              {formatRichText(line)}
+                            </div>
+                          );
+                        }
                         return (
-                          <div key={idx} className="my-0.5 pl-1">
+                          <p key={idx} className={line === "" ? "h-2" : "my-0.5"}>
                             {formatRichText(line)}
-                          </div>
+                          </p>
                         );
-                      }
-                      return (
-                        <p key={idx} className={line === "" ? "h-2" : "my-0.5"}>
-                          {formatRichText(line)}
-                        </p>
-                      );
-                    })}
-                  </div>
+                      })}
+                    </div>
 
-                  {/* Hiển thị thẻ sản phẩm tương tác nếu có kết quả phù hợp hoặc na ná */}
-                  {msg.result &&
-                    (msg.result.matchedProducts.length > 0 || msg.result.similarProducts.length > 0) && (
+                    {/* Hiển thị thẻ sản phẩm tương tác */}
+                    {allItemCards.length > 0 && (
                       <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-700/60 space-y-2.5">
-                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                          {msg.result.matchedProducts.length > 0
-                            ? "Sản phẩm tìm thấy:"
-                            : "Sản phẩm gợi ý tương tự:"}
+                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                          <span>
+                            {msg.result?.type === "recommendation"
+                              ? "Sản phẩm AI gợi ý cho bạn:"
+                              : msg.result?.matchedProducts && msg.result.matchedProducts.length > 0
+                              ? "Sản phẩm tìm thấy:"
+                              : "Sản phẩm gợi ý tương tự:"}
+                          </span>
+                          {msg.result?.type === "recommendation" && (
+                            <span className="text-[10px] text-indigo-500 font-normal lowercase">
+                              (đang có trên màn hình)
+                            </span>
+                          )}
                         </div>
+
                         <div className="grid grid-cols-1 gap-2">
-                          {[...msg.result.matchedProducts, ...msg.result.similarProducts].map((p) => (
+                          {allItemCards.slice(0, 4).map((p) => (
                             <div
                               key={p.id}
-                              className="flex items-center gap-3 p-2.5 bg-slate-50 dark:bg-slate-900/80 rounded-xl border border-slate-200/70 dark:border-slate-700/60 hover:border-blue-400 dark:hover:border-blue-500 transition group"
+                              className="flex items-center gap-3 p-2.5 bg-slate-50 dark:bg-slate-900/80 rounded-xl border border-slate-200/70 dark:border-slate-700/60 hover:border-indigo-400 dark:hover:border-indigo-500 transition group"
                             >
                               <img
                                 src={p.imageUrl || "https://via.placeholder.com/100"}
@@ -330,7 +408,7 @@ export function ChatBot() {
                               <div className="flex-1 min-w-0">
                                 <Link
                                   to={`/products/${p.id}`}
-                                  className="text-xs font-bold text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 line-clamp-1 flex items-center gap-1"
+                                  className="text-xs font-bold text-slate-800 dark:text-slate-100 hover:text-indigo-600 dark:hover:text-indigo-400 line-clamp-1 flex items-center gap-1"
                                 >
                                   {p.name}
                                   <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition shrink-0" />
@@ -344,7 +422,7 @@ export function ChatBot() {
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between mt-1">
-                                  <span className="font-extrabold text-blue-600 dark:text-blue-400 text-xs">
+                                  <span className="font-extrabold text-indigo-600 dark:text-indigo-400 text-xs">
                                     ${p.price.toFixed(2)}
                                   </span>
                                   {p.stock > 0 ? (
@@ -362,7 +440,7 @@ export function ChatBot() {
                                   onClick={() => addToCart.mutate({ productId: p.id, quantity: 1 })}
                                   disabled={addToCart.isPending}
                                   title="Thêm vào giỏ"
-                                  className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shrink-0 transition hover:scale-105 active:scale-95 disabled:opacity-50"
+                                  className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 transition hover:scale-105 active:scale-95 disabled:opacity-50"
                                 >
                                   <ShoppingCart className="w-3.5 h-3.5" />
                                 </button>
@@ -372,16 +450,17 @@ export function ChatBot() {
                         </div>
                       </div>
                     )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.timestamp}</span>
                 </div>
-                <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.timestamp}</span>
-              </div>
-            ))}
+              );
+            })}
 
             {isLoading && (
               <div className="flex items-center gap-2 p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 max-w-[80%] shadow-sm">
-                <Bot className="w-4 h-4 text-blue-600 animate-spin" />
+                <Bot className="w-4 h-4 text-indigo-600 animate-spin" />
                 <span className="text-xs text-slate-500 dark:text-slate-400 animate-pulse">
-                  Đang truy xuất và đối chiếu dữ liệu sản phẩm...
+                  Đang đối chiếu dữ liệu kho & gợi ý cá nhân hóa...
                 </span>
               </div>
             )}
@@ -395,7 +474,7 @@ export function ChatBot() {
                 key={i}
                 onClick={() => handleSend(prompt)}
                 disabled={isLoading}
-                className="whitespace-nowrap text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-600 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition"
+                className="whitespace-nowrap text-[11px] px-2.5 py-1 rounded-full bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition"
               >
                 {prompt}
               </button>
@@ -409,14 +488,14 @@ export function ChatBot() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Hỏi về sản phẩm, giá, gợi ý mua sắm..."
+              placeholder="Hỏi về sản phẩm, gợi ý sở thích, màn hình..."
               disabled={isLoading}
-              className="flex-1 px-3.5 py-2.5 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none transition"
+              className="flex-1 px-3.5 py-2.5 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none transition"
             />
             <button
               onClick={() => handleSend()}
               disabled={!input.trim() || isLoading}
-              className="p-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white rounded-xl transition hover:scale-105 active:scale-95 disabled:scale-100 shadow-sm"
+              className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white rounded-xl transition hover:scale-105 active:scale-95 disabled:scale-100 shadow-sm"
             >
               <Send className="w-4 h-4" />
             </button>

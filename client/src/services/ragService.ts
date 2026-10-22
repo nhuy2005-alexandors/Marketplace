@@ -1,11 +1,13 @@
 import type { Product } from "../types";
 import { api } from "../api/client";
+import type { UserShoppingProfile } from "./recommendationService";
 
 export interface RagResult {
-  type: "matched" | "similar" | "not_found" | "general";
+  type: "matched" | "similar" | "recommendation" | "not_found" | "general";
   message: string;
   matchedProducts: Product[];
   similarProducts: Product[];
+  recommendedProducts?: Product[];
   confidence: number;
 }
 
@@ -22,8 +24,8 @@ export function normalizeText(str: string): string {
     .trim();
 }
 
-// Từ điển ngữ nghĩa & đồng nghĩa mở rộng cho RAG
-const SYNONYM_MAP: Record<string, string[]> = {
+// Từ điển ngữ nghĩa & đồng nghĩa mở rộng cho RAG & Recommendation
+export const SYNONYM_MAP: Record<string, string[]> = {
   // Electronics
   headphone: ["tai nghe", "headphone", "headphones", "chong on", "earphone", "bluetooth", "am thanh", "nghe nhac"],
   keyboard: ["ban phim", "keyboard", "ban phim co", "switch", "go phim", "keycap", "rgb"],
@@ -102,17 +104,13 @@ function scoreProduct(
   }
 
   // 2. So khớp từng token
-  let tokenMatches = 0;
   for (const token of queryTokens) {
     if (token.length <= 1) continue;
     if (nameNorm.includes(token)) {
-      tokenMatches++;
       score += 20;
     } else if (descNorm.includes(token)) {
-      tokenMatches++;
       score += 10;
     } else if (catNorm.includes(token)) {
-      tokenMatches++;
       score += 12;
     } else if (shopNorm.includes(token)) {
       score += 8;
@@ -156,29 +154,100 @@ export async function fetchMarketProducts(): Promise<Product[]> {
   }
 }
 
-// BỘ XỬ LÝ RAG CHÍNH (RETRIEVAL-AUGMENTED GENERATION)
+// BỘ XỬ LÝ RAG CHÍNH (RETRIEVAL-AUGMENTED GENERATION + RECOMMENDATION AWARE)
 export async function executeRagQuery(
   userQuery: string,
   products: Product[],
-  geminiApiKey?: string
+  geminiApiKey?: string,
+  userProfile?: UserShoppingProfile | null,
+  activeRecommendations?: Product[]
 ): Promise<RagResult> {
   const queryNorm = normalizeText(userQuery);
   const queryTokens = queryNorm.split(" ").filter((t) => t.length > 1);
 
+  // Nhận diện ý định nhờ tư vấn / gợi ý theo sở thích hoặc hỏi về các món trên màn hình
+  const recKeywords = [
+    "goi y", "de xuat", "phu hop", "nen mua", "tu van", "mon gi hay", "do gi hay",
+    "man hinh", "tai sao shop", "danh rieng", "so thich", "hot nhat", "ban chay"
+  ];
+  const isRecIntent = recKeywords.some((k) => queryNorm.includes(k));
+
   // Câu chào hỏi thông thường
   const greetingPatterns = ["xin chao", "chao ban", "hello", "hi bot", "tro giup", "menu", "gioi thieu"];
   if (greetingPatterns.some((g) => queryNorm === g || queryNorm.startsWith(g + " "))) {
+    const defaultRecs = activeRecommendations && activeRecommendations.length > 0
+      ? activeRecommendations.slice(0, 3)
+      : products.slice(0, 3);
+
     return {
       type: "general",
       confidence: 1.0,
       matchedProducts: [],
-      similarProducts: products.slice(0, 3),
+      similarProducts: [],
+      recommendedProducts: defaultRecs,
       message:
-        "Xin chào! Tôi là trợ lý mua sắm AI (RAG) của MiniShop. Tôi có thể đọc toàn bộ sản phẩm trên thị trường ảo này để:\n\n" +
-        "✨ **Tìm và đề xuất chính xác** sản phẩm bạn đang cần.\n" +
-        "💡 **Gợi ý sản phẩm tương tự** nếu mặt hàng bạn tìm chưa có mẫu chính xác.\n" +
-        "📢 **Thông báo rõ ràng** nếu sản phẩm đó chưa có trên sàn.\n\n" +
-        "Bạn đang muốn tìm mua món đồ gì hôm nay?",
+        "Xin chào! Tôi là **Trợ lý AI Mua sắm (RAG & Recommendation)** của MiniShop.\n\n" +
+        "Tôi được đồng bộ trực tiếp với hệ thống gợi ý thông minh trên màn hình của bạn để:\n" +
+        "✨ **Hiểu lịch sử mua sắm & tìm kiếm** của bạn để đề xuất sản phẩm phù hợp nhất.\n" +
+        "💡 **Giải thích chi tiết** các món đồ AI đang gợi ý trên màn hình của bạn.\n" +
+        "🔍 **Tìm kiếm chính xác** hoặc gợi ý mặt hàng thay thế nếu mẫu bạn cần chưa có.\n\n" +
+        "Bạn cần tư vấn sản phẩm gì hôm nay?",
+    };
+  }
+
+  // NẾU LÀ YÊU CẦU GỢI Ý / ĐỀ XUẤT CÁ NHÂN HÓA (NETFLIX STYLE RECOMMENDATION)
+  if (isRecIntent) {
+    const candidateRecs = (activeRecommendations && activeRecommendations.length > 0)
+      ? activeRecommendations
+      : products.slice(0, 4);
+
+    // Nếu có API key Gemini, gọi LLM kết hợp bối cảnh gợi ý
+    if (geminiApiKey?.trim()) {
+      try {
+        const llmResponse = await callGeminiWithRag(
+          userQuery,
+          products,
+          [],
+          [],
+          geminiApiKey,
+          userProfile,
+          candidateRecs
+        );
+        if (llmResponse) {
+          return {
+            type: "recommendation",
+            confidence: 0.95,
+            matchedProducts: [],
+            similarProducts: [],
+            recommendedProducts: candidateRecs.slice(0, 4),
+            message: llmResponse,
+          };
+        }
+      } catch (e) {
+        console.warn("Gemini call failed, falling back to local synthesizer:", e);
+      }
+    }
+
+    // Local Synthesizer cho Recommendation
+    let msg = `Dựa trên phân tích sở thích mua sắm và các lượt tìm kiếm gần đây của bạn, tôi xin **gợi ý các sản phẩm phù hợp nhất** (đang hiển thị đồng bộ trên màn hình của bạn):\n\n`;
+    if (userProfile?.purchasedProductNames && userProfile.purchasedProductNames.length > 0) {
+      msg = `Vì bạn đã từng sở hữu **"${userProfile.purchasedProductNames[userProfile.purchasedProductNames.length - 1]}"**, tôi xin **gợi ý các món đồ ăn khớp nhất** với góc trải nghiệm của bạn:\n\n`;
+    }
+
+    for (const p of candidateRecs.slice(0, 4)) {
+      msg += `🌟 **${p.name}** — Giá: **$${p.price.toFixed(2)}**\n`;
+      msg += `   • *Ngành hàng:* ${p.categoryName} | *Đánh giá:* ${p.averageRating}⭐ (${p.reviewCount} lượt)\n`;
+      msg += `   • *Điểm nổi bật:* ${p.description || "Chất lượng vượt trội, phù hợp nhu cầu"}\n\n`;
+    }
+    msg += `👉 Bạn có thể xem ngay các món này trên màn hình chính hoặc bấm nút thêm vào giỏ hàng bên dưới nhé!`;
+
+    return {
+      type: "recommendation",
+      confidence: 0.9,
+      matchedProducts: [],
+      similarProducts: [],
+      recommendedProducts: candidateRecs.slice(0, 4),
+      message: msg,
     };
   }
 
@@ -215,13 +284,11 @@ export async function executeRagQuery(
     .filter((sp) => sp.score >= 15 && sp.score < 40)
     .map((sp) => sp.product);
 
-  // Nếu không có direct match nhưng xác định được danh mục người dùng quan tâm (ví dụ: tìm "chuột" -> danh mục Electronics)
   let similar: Product[] = [];
   if (matched.length === 0) {
     if (partialMatches.length > 0) {
       similar = partialMatches.slice(0, 3);
     } else if (intendedCategories.length > 0) {
-      // Lấy các sản phẩm trong danh mục liên quan làm sản phẩm na ná
       similar = products
         .filter((p) => intendedCategories.includes(p.categoryName))
         .slice(0, 3);
@@ -231,13 +298,22 @@ export async function executeRagQuery(
   // Nếu có API key Gemini, gọi LLM với ngữ cảnh RAG (Context Augmentation)
   if (geminiApiKey?.trim()) {
     try {
-      const llmResponse = await callGeminiWithRag(userQuery, products, matched, similar, geminiApiKey);
+      const llmResponse = await callGeminiWithRag(
+        userQuery,
+        products,
+        matched,
+        similar,
+        geminiApiKey,
+        userProfile,
+        activeRecommendations
+      );
       if (llmResponse) {
         return {
           type: matched.length > 0 ? "matched" : similar.length > 0 ? "similar" : "not_found",
           confidence: matched.length > 0 ? 0.95 : 0.7,
           matchedProducts: matched,
           similarProducts: similar,
+          recommendedProducts: activeRecommendations?.slice(0, 3),
           message: llmResponse,
         };
       }
@@ -246,9 +322,8 @@ export async function executeRagQuery(
     }
   }
 
-  // 2. GENERATION PHASE (Local RAG Synthesizer): Tạo câu trả lời thông minh dựa trên kết quả truy xuất
+  // 2. GENERATION PHASE (Local RAG Synthesizer):
   if (matched.length > 0) {
-    // TRƯỜNG HỢP 1: CÓ SẢN PHẨM PHÙ HỢP -> Đề xuất & gợi ý
     let msg = `Tuyệt vời! Tôi đã tìm thấy **${matched.length} sản phẩm** rất phù hợp với nhu cầu của bạn trên sàn:\n\n`;
     for (const p of matched) {
       const stockInfo = p.stock > 0 ? `còn ${p.stock} sản phẩm` : "tạm hết hàng";
@@ -268,7 +343,6 @@ export async function executeRagQuery(
   }
 
   if (similar.length > 0) {
-    // TRƯỜNG HỢP 2: KHÔNG CÓ SẢN PHẨM CHÍNH XÁC -> Gợi ý sản phẩm na ná / cùng danh mục
     let msg = `Hiện tại trên thị trường ảo **chưa có chính xác sản phẩm "${userQuery}"** mà bạn tìm kiếm.\n\n`;
     msg += `💡 Tuy nhiên, dựa trên phân tích nhu cầu và danh mục liên quan, tôi xin **gợi ý các sản phẩm na ná / cùng loại** có thể bạn sẽ quan tâm:\n\n`;
 
@@ -296,7 +370,7 @@ export async function executeRagQuery(
     `• **Điện tử (Electronics):** Tai nghe không dây, Bàn phím cơ, Smart watch\n` +
     `• **Sách (Books):** Clean Code, The Pragmatic Programmer\n` +
     `• **Thời trang (Fashion):** Áo thun Cotton, Áo khoác Denim\n\n` +
-    `Bạn có thể thử tìm kiếm theo các ngành hàng trên hoặc nhập từ khóa khác để tôi hỗ trợ nhé!`;
+    `Bạn có thể thử tìm kiếm theo các ngành hàng trên hoặc yêu cầu tôi gợi ý các sản phẩm đang nổi bật nhé!`;
 
   return {
     type: "not_found",
@@ -307,13 +381,15 @@ export async function executeRagQuery(
   };
 }
 
-// Gọi LLM Gemini với Prompt RAG
+// Gọi LLM Gemini với Prompt RAG kết hợp Recommendation State
 async function callGeminiWithRag(
   userQuery: string,
   allProducts: Product[],
   _matched: Product[],
   _similar: Product[],
-  apiKey: string
+  apiKey: string,
+  userProfile?: UserShoppingProfile | null,
+  activeRecommendations?: Product[]
 ): Promise<string> {
   const contextData = allProducts.map((p) => ({
     id: p.id,
@@ -326,18 +402,40 @@ async function callGeminiWithRag(
     rating: p.averageRating,
   }));
 
+  const profileSummary = userProfile
+    ? `
+- Tên khách hàng: ${userProfile.userName || "Khách hàng thân thiết"}
+- Sản phẩm khách ĐÃ TỪNG MUA: ${userProfile.purchasedProductNames.join(", ") || "Chưa có"}
+- Các từ khóa khách VỪA TÌM KIẾM gần đây: ${userProfile.recentSearchQueries.join(", ") || "Chưa có"}
+- Danh mục yêu thích: ${userProfile.favoriteCategories.join(", ") || "Đa dạng"}`
+    : `
+- Khách vãng lai (Chưa đăng nhập)`;
+
+  const onScreenRecs = activeRecommendations && activeRecommendations.length > 0
+    ? activeRecommendations.map((p) => `${p.name} ($${p.price.toFixed(2)}, danh mục ${p.categoryName})`).join("; ")
+    : "Các sản phẩm nổi bật trên sàn";
+
   const systemPrompt = `
-Bạn là AI Shopping Assistant thông minh của sàn thương mại điện tử MiniShop.
-Dưới đây là TOÀN BỘ KHO DỮ LIỆU SẢN PHẨM hiện có trên thị trường ảo MiniShop (Ground Truth):
+Bạn là AI Shopping Assistant & Stylist thông minh của sàn thương mại điện tử MiniShop.
+Bạn được tích hợp hệ thống Recommendation System kiểu Netflix để gợi ý sản phẩm đồng bộ giữa Màn hình và ChatBot.
+
+HỒ SƠ KHÁCH HÀNG:
+${profileSummary}
+
+CÁC SẢN PHẨM ĐANG ĐƯỢC HIỂN THỊ GỢI Ý TRÊN MÀN HÌNH CHÍNH (Active Screen Recommendations):
+${onScreenRecs}
+
+TOÀN BỘ KHO DỮ LIỆU SẢN PHẨM TRÊN SÀN (Ground Truth):
 ${JSON.stringify(contextData, null, 2)}
 
 NHIỆM VỤ CỦA BẠN:
-1. Đọc kỹ câu hỏi/nhu cầu của khách hàng: "${userQuery}"
-2. Áp dụng quy tắc RAG:
-   - NẾU SẢN PHẨM CÓ TRÊN THỊ TRƯỜNG: Đề xuất cụ thể tên sản phẩm, giá bán ($), ưu điểm, đánh giá và tình trạng kho.
-   - NẾU KHÔNG CÓ CHÍNH XÁC NHƯNG CÓ SẢN PHẨM NA NÁ / CÙNG DANH MỤC: Thông báo rõ là sàn chưa có đúng mẫu đó, nhưng đề xuất ngay các sản phẩm tương tự có thể thay thế và nêu lý do tại sao nên chọn.
-   - NẾU HOÀN TOÀN KHÔNG CÓ SẢN PHẨM NÀO PHÙ HỢP TRÊN SÀN: Thông báo lịch sự là trên thị trường hiện chưa có sản phẩm đó, và giới thiệu ngắn gọn các ngành hàng sàn đang có.
-3. Phong cách trả lời: Thân thiện, lịch sự, chuyên nghiệp, dùng định dạng Markdown rõ ràng bằng tiếng Việt.
+1. Đọc kỹ câu hỏi/nhu cầu của khách: "${userQuery}"
+2. Nếu khách hỏi gợi ý ("Gợi ý cho tôi", "Nên mua gì", "Mấy món trên màn hình có tốt không"):
+   - Hãy liên kết khéo léo với các món đang hiển thị trên màn hình và giải thích vì sao món đó phù hợp (phong cách Netflix: "Vì bạn đã có X / thích Y nên món Z trên màn hình sẽ rất hợp...").
+3. Nếu khách tìm sản phẩm cụ thể:
+   - Nếu có: Báo giá, mô tả, ưu điểm.
+   - Nếu chưa có: Thông báo rõ và gợi ý sản phẩm na ná có cùng công năng.
+4. Giọng điệu: Thân thiện, lịch sự, nhiệt tình, dùng định dạng Markdown và emoji đẹp mắt bằng tiếng Việt.
 `.trim();
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;

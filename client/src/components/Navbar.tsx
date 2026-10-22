@@ -5,6 +5,7 @@ import { useAuth } from "../store/auth";
 import { useTheme } from "../store/theme";
 import { useCart, useCategories } from "../api/hooks";
 import { api } from "../api/client";
+import { useRecommendationStore } from "../store/recommendation";
 
 function navClass({ isActive }: { isActive: boolean }) {
   return `text-sm whitespace-nowrap transition-colors ${
@@ -22,6 +23,7 @@ export function Navbar() {
   const { data: cart } = useCart();
   const { data: categories } = useCategories();
   const cartCount = cart?.items.reduce((n, i) => n + i.quantity, 0) ?? 0;
+  const trackSearch = useRecommendationStore((s) => s.trackSearch);
 
   const handleLogout = () => {
     if (refreshToken) api.post("/auth/logout", { refreshToken }).catch(() => {});
@@ -31,7 +33,13 @@ export function Navbar() {
 
   const submitSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    navigate(`/products${search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`);
+    const query = search.trim();
+    if (query) {
+      trackSearch(query);
+      navigate(`/products?search=${encodeURIComponent(query)}`);
+    } else {
+      navigate("/products");
+    }
   };
 
   const roleLinks = (() => {
