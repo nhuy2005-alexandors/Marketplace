@@ -3,10 +3,8 @@ import { Link } from "react-router-dom";
 import {
   Bot,
   Sparkles,
-  X,
   Send,
   RotateCcw,
-  Settings,
   ShoppingCart,
   Store,
   CheckCircle2,
@@ -39,15 +37,42 @@ const QUICK_PROMPTS = [
   "👕 Áo thun dưới $30",
 ];
 
+function resolveProductFollowUp(query: string, previousProducts: Product[], allProducts: Product[]): RagResult | null {
+  if (!previousProducts.length) return null;
+  const normalized = query.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+  const asksFirstPrice = (normalized.includes("dau tien") || normalized.includes("first one")) &&
+    (normalized.includes("gia") || normalized.includes("price") || normalized.includes("bao nhieu"));
+  if (asksFirstPrice) {
+    const product = previousProducts[0];
+    return {
+      type: "matched", confidence: 1, matchedProducts: [product], similarProducts: [],
+      message: `Sản phẩm đầu tiên là **${product.name}**, giá hiện tại **$${product.price.toFixed(2)}**. Tồn kho đang hiển thị: ${product.stock > 0 ? `còn ${product.stock}` : "hết hàng"}.`,
+    };
+  }
+
+  if (normalized.includes("re hon") || normalized.includes("cheaper")) {
+    const referencePrice = Math.min(...previousProducts.map((product) => product.price));
+    const categories = new Set(previousProducts.map((product) => product.categoryId));
+    const cheaper = allProducts
+      .filter((product) => product.stock > 0 && product.price < referencePrice && categories.has(product.categoryId))
+      .sort((a, b) => a.price - b.price)
+      .slice(0, 4);
+    return {
+      type: cheaper.length ? "similar" : "not_found", confidence: 0.9,
+      matchedProducts: [], similarProducts: cheaper,
+      message: cheaper.length
+        ? `Đây là các lựa chọn còn hàng, cùng danh mục và rẻ hơn $${referencePrice.toFixed(2)}:`
+        : `Mình chưa tìm thấy sản phẩm cùng danh mục, còn hàng và rẻ hơn $${referencePrice.toFixed(2)}.`,
+    };
+  }
+  return null;
+}
+
 export function ChatBot() {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
-  const [showSettings, setShowSettings] = useState(false);
-  const [geminiKey, setGeminiKey] = useState<string>(() => {
-    return localStorage.getItem("minishop_gemini_key") || "";
-  });
 
   const {
     activeRecommendations,
@@ -78,12 +103,26 @@ export function ChatBot() {
     },
   ]);
 
+  const messagesRef = useRef(messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Tải danh sách toàn bộ sản phẩm trên sàn để phục vụ RAG
   useEffect(() => {
+    // Xóa API key cũ mà các phiên bản trước từng lưu ở trình duyệt.
+    try {
+      localStorage.removeItem("minishop_gemini_key");
+      sessionStorage.removeItem("minishop_gemini_key");
+    } catch {
+      // Không để storage bị tắt làm hỏng việc tải catalog cho chatbot.
+    }
     fetchMarketProducts().then((data) => {
       setProducts(data);
+    }).catch((error) => {
+      console.error("Không thể tải danh sách sản phẩm cho chatbot:", error);
     });
   }, []);
 
@@ -106,12 +145,6 @@ export function ChatBot() {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, isOpen]);
-
-  const handleSaveKey = (key: string) => {
-    setGeminiKey(key);
-    localStorage.setItem("minishop_gemini_key", key.trim());
-    setShowSettings(false);
-  };
 
   const handleSend = async (queryText?: string) => {
     const textToSend = queryText || input;
@@ -153,10 +186,19 @@ export function ChatBot() {
       );
 
       // Thực thi bộ máy RAG kết hợp gợi ý màn hình
-      const ragResult = await executeRagQuery(
+      const previousReply = [...messagesRef.current].reverse()
+        .find((message) => message.sender === "bot" && message.result);
+      const previousProducts = previousReply?.result
+        ? [
+            ...previousReply.result.matchedProducts,
+            ...previousReply.result.similarProducts,
+            ...(previousReply.result.recommendedProducts || []),
+          ]
+        : [];
+      const followUp = resolveProductFollowUp(userMsg.text, previousProducts, currentProducts);
+      const ragResult = followUp || await executeRagQuery(
         userMsg.text,
         currentProducts,
-        geminiKey,
         userProfile,
         activeRecommendations
       );
@@ -249,13 +291,6 @@ export function ChatBot() {
 
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setShowSettings(!showSettings)}
-                title="Cài đặt Gemini API Key (Tùy chọn)"
-                className="p-1.5 hover:bg-white/20 rounded-lg transition text-white/90"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
-              <button
                 onClick={handleResetChat}
                 title="Xóa lịch sử chat"
                 className="p-1.5 hover:bg-white/20 rounded-lg transition text-white/90"
@@ -271,39 +306,6 @@ export function ChatBot() {
               </button>
             </div>
           </div>
-
-          {/* Modal / Bảng cấu hình Gemini Key */}
-          {showSettings && (
-            <div className="p-3.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs">
-              <div className="font-semibold text-slate-800 dark:text-slate-200 mb-1 flex items-center justify-between">
-                <span>Cấu hình Gemini API (Tùy chọn)</span>
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <p className="text-slate-500 dark:text-slate-400 text-[11px] mb-2 leading-relaxed">
-                Mặc định Chatbot đã tích hợp <strong>RAG + Gợi ý thông minh cục bộ</strong>. Bạn có thể dán thêm Google Gemini API Key để câu trả lời mượt mà và cá nhân hóa hơn nữa:
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  placeholder="AIzaSy..."
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
-                  className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-                <button
-                  onClick={() => handleSaveKey(geminiKey)}
-                  className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition"
-                >
-                  Lưu
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Danh sách tin nhắn */}
           <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/50 dark:bg-slate-950/40">

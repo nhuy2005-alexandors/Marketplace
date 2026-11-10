@@ -53,6 +53,8 @@ sqllocaldb create MSSQLLocalDB && sqllocaldb start MSSQLLocalDB
 dotnet run --project src/ECommerce.API
 ```
 
+**Gemini cho chatbot (tùy chọn):** điền API key vào `GEMINI_API_KEY` trong file `.env` ở thư mục gốc repo, rồi khởi động lại API. Mẫu nằm trong `.env.example`; `.env` đã được Git bỏ qua. Không đặt key trong biến `VITE_*` hoặc giao diện trình duyệt. Nếu chưa cấu hình key, chatbot vẫn dùng câu trả lời cục bộ.
+
 **Frontend:**
 ```bash
 cd client

@@ -2,6 +2,9 @@
 bin/
 obj/
 *.user
+.env
+.env.*
+!.env.example
 appsettings.*.local.json
 appsettings.Local.json
 

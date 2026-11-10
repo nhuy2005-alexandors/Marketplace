@@ -18,6 +18,32 @@ var builder = WebApplication.CreateBuilder(args);
 // Override secret/config nhạy cảm bằng file local (gitignored) khi deploy.
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
+// Tải GEMINI_API_KEY từ .env ở repo root nếu chưa được cấu hình bằng environment/appsettings.
+if (string.IsNullOrWhiteSpace(builder.Configuration["Gemini:ApiKey"]))
+{
+    for (DirectoryInfo? directory = new(builder.Environment.ContentRootPath); directory is not null; directory = directory.Parent)
+    {
+        var envPath = Path.Combine(directory.FullName, ".env");
+        if (!File.Exists(envPath)) continue;
+
+        var apiKeyLine = File.ReadLines(envPath)
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => line.StartsWith("GEMINI_API_KEY=", StringComparison.OrdinalIgnoreCase));
+        if (apiKeyLine is not null)
+        {
+            var apiKey = apiKeyLine[(apiKeyLine.IndexOf('=') + 1)..].Trim().Trim('"', '\'');
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Gemini:ApiKey"] = apiKey
+                });
+            }
+        }
+        break;
+    }
+}
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -26,6 +52,7 @@ builder.Services.PostConfigure<ECommerce.Infrastructure.Payments.PaymentOptions>
     o.AllowDemo = builder.Environment.IsDevelopment());
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
 builder.Services.AddControllers();

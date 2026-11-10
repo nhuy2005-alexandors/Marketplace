@@ -1,4 +1,4 @@
-import type { Product } from "../types";
+import type { Product, Paged } from "../types";
 import { api } from "../api/client";
 import type { UserShoppingProfile } from "./recommendationService";
 
@@ -11,455 +11,405 @@ export interface RagResult {
   confidence: number;
 }
 
-// Hàm chuẩn hóa chuỗi tiếng Việt và tiếng Anh để so sánh không dấu
-export function normalizeText(str: string): string {
-  if (!str) return "";
-  return str
+const MAX_CONTEXT_PRODUCTS = 4;
+const PAGE_SIZE = 100;
+
+const STOP_WORDS = new Set([
+  "toi", "minh", "ban", "cho", "voi", "la", "co", "khong", "nao", "gi", "nhe", "nha",
+  "va", "cua", "mot", "cac", "nhung", "hay", "duoc", "can", "muon", "tim", "mua", "loai",
+  "san", "pham", "hang", "shop", "gia", "re", "de", "duoi", "tren", "tam", "khoang",
+  "the", "please", "find", "show", "me", "some", "a", "an", "the", "for", "with", "under",
+  "over", "below", "above", "buy", "want", "looking",
+]);
+
+// Chuẩn hóa tiếng Việt có dấu/không dấu và tiếng Anh về cùng một dạng.
+export function normalizeText(value: string): string {
+  return (value || "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
+    .replace(/\btainghe\b/g, "tai nghe")
+    .replace(/\bbanphim\b/g, "ban phim")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-// Từ điển ngữ nghĩa & đồng nghĩa mở rộng cho RAG & Recommendation
+// Từ điển song ngữ nhỏ giúp truy xuất lexical hiểu các cách gọi phổ biến.
 export const SYNONYM_MAP: Record<string, string[]> = {
-  // Electronics
-  headphone: ["tai nghe", "headphone", "headphones", "chong on", "earphone", "bluetooth", "am thanh", "nghe nhac"],
-  keyboard: ["ban phim", "keyboard", "ban phim co", "switch", "go phim", "keycap", "rgb"],
+  headphone: ["tai nghe", "tai nghe khong day", "headphone", "headphones", "earphone", "earphones", "chong on", "noise cancelling", "noise cancellation", "nghe nhac"],
+  keyboard: ["ban phim", "keyboard", "ban phim co", "mechanical keyboard", "switch", "go phim", "keycap", "rgb"],
   watch: ["dong ho", "smart watch", "smartwatch", "dong ho thong minh", "the thao", "suc khoe", "dem buoc"],
-  mouse: ["chuot", "chuot gaming", "mouse", "chuot khong day", "chuot may tinh", "pad chuot"],
+  mouse: ["chuot", "mouse", "chuot gaming", "chuot khong day", "chuot may tinh"],
   computer: ["laptop", "may tinh", "pc", "macbook", "may tinh ban", "man hinh"],
-  
-  // Books
-  cleancode: ["clean code", "robert martin", "ma sach", "code sach", "refactor"],
-  pragmatic: ["pragmatic programmer", "pragmatic", "lap trinh thuc dung", "hunt", "thomas"],
-  book: ["sach", "book", "sach lap trinh", "sach code", "doc sach", "giao trinh", "sach ky thuat"],
-  other_book: ["sach python", "sach java", "sach toan", "truyen", "tieu thuyet", "sach kinh te"],
-
-  // Fashion
+  cleanCode: ["clean code", "robert martin", "uncle bob", "refactor"],
+  pragmaticProgrammer: ["pragmatic programmer", "lap trinh thuc dung", "david thomas", "andrew hunt"],
+  book: ["sach", "book", "sach lap trinh", "sach code", "giao trinh", "sach ky thuat"],
   tshirt: ["ao thun", "t shirt", "tshirt", "ao phong", "cotton", "ao ngan tay"],
-  jacket: ["ao khoac", "jacket", "denim", "ao bo", "khoac jean", "ao am"],
-  clothing: ["thoi trang", "quan ao", "ao", "do mac", "outfit"],
-  other_fashion: ["quan jean", "quan bo", "quan dai", "vay", "dam", "ao so mi", "hoodie", "ao len", "giay", "dep", "balo"]
+  jacket: ["ao khoac", "jacket", "denim", "khoac jean", "ao am"],
+  clothing: ["thoi trang", "quan ao", "outfit", "quan jean", "vay", "dam", "ao so mi", "hoodie", "ao len", "giay", "dep"],
 };
 
-// Phân loại danh mục dự đoán từ câu hỏi
-function detectIntendedCategories(queryNorm: string): string[] {
-  const categories: string[] = [];
-
-  const electronicsKeywords = [
-    "dien tu", "cong nghe", "tai nghe", "headphone", "ban phim", "keyboard",
-    "dong ho", "smart watch", "chuot", "laptop", "may tinh", "sac", "loa", "usb"
-  ];
-  const bookKeywords = [
-    "sach", "book", "doc", "lap trinh", "clean code", "pragmatic", "tac gia", "lap trinh vien"
-  ];
-  const fashionKeywords = [
-    "thoi trang", "quan ao", "ao", "khoac", "thun", "jacket", "t shirt", "jean", "denim", "mac"
-  ];
-
-  if (electronicsKeywords.some((k) => queryNorm.includes(k))) categories.push("Electronics");
-  if (bookKeywords.some((k) => queryNorm.includes(k))) categories.push("Books");
-  if (fashionKeywords.some((k) => queryNorm.includes(k))) categories.push("Fashion");
-
-  return categories;
+function containsPhrase(text: string, phrase: string): boolean {
+  if (!text || !phrase) return false;
+  return ` ${text} `.includes(` ${phrase} `);
 }
 
-// Trích xuất điều kiện giá từ câu hỏi (ví dụ: "dưới 50$", "dưới 100", "tầm 80")
-function extractPriceConstraint(queryNorm: string): { maxPrice?: number; minPrice?: number } {
-  const underMatch = queryNorm.match(/(duoi|nho hon|it hon|<)\s*(\d+(\.\d+)?)/);
-  if (underMatch) {
-    return { maxPrice: parseFloat(underMatch[2]) };
-  }
-  const overMatch = queryNorm.match(/(tren|lon hon|hon|>)\s*(\d+(\.\d+)?)/);
-  if (overMatch) {
-    return { minPrice: parseFloat(overMatch[2]) };
-  }
-  return {};
-}
+function getQueryTerms(queryNorm: string): string[] {
+  const terms = queryNorm.split(" ").filter((term) =>
+    term.length > 1 && !/^\d/.test(term) && !STOP_WORDS.has(term) &&
+    !(term === "phim" && !containsPhrase(queryNorm, "ban phim")) &&
+    !(term === "tai" && !containsPhrase(queryNorm, "tai nghe"))
+  );
+  const expanded = new Set(terms);
 
-// Tính điểm tương đồng giữa câu hỏi và sản phẩm
-function scoreProduct(
-  p: Product,
-  queryNorm: string,
-  queryTokens: string[]
-): { score: number; reasons: string[] } {
-  let score = 0;
-  const reasons: string[] = [];
-  const nameNorm = normalizeText(p.name);
-  const descNorm = normalizeText(p.description || "");
-  const catNorm = normalizeText(p.categoryName);
-  const shopNorm = normalizeText(p.sellerShopName);
-
-  // 1. Khớp chính xác tên sản phẩm
-  if (nameNorm === queryNorm) {
-    score += 100;
-    reasons.push("Khớp chính xác tên sản phẩm");
-  } else if (nameNorm.includes(queryNorm) || queryNorm.includes(nameNorm)) {
-    score += 60;
-    reasons.push("Tên sản phẩm trùng khớp từ khóa");
-  }
-
-  // 2. So khớp từng token
-  for (const token of queryTokens) {
-    if (token.length <= 1) continue;
-    if (nameNorm.includes(token)) {
-      score += 20;
-    } else if (descNorm.includes(token)) {
-      score += 10;
-    } else if (catNorm.includes(token)) {
-      score += 12;
-    } else if (shopNorm.includes(token)) {
-      score += 8;
-    }
-  }
-
-  // 3. So khớp từ điển đồng nghĩa (Synonyms)
-  for (const [key, synonyms] of Object.entries(SYNONYM_MAP)) {
-    const hasQueryMatch = synonyms.some((syn) => queryNorm.includes(normalizeText(syn)));
-    if (hasQueryMatch) {
-      if (
-        (key === "headphone" && nameNorm.includes("headphone")) ||
-        (key === "keyboard" && nameNorm.includes("keyboard")) ||
-        (key === "watch" && nameNorm.includes("watch")) ||
-        (key === "cleancode" && nameNorm.includes("clean code")) ||
-        (key === "pragmatic" && nameNorm.includes("pragmatic")) ||
-        (key === "tshirt" && nameNorm.includes("t shirt")) ||
-        (key === "jacket" && nameNorm.includes("jacket")) ||
-        (key === "book" && catNorm.includes("book")) ||
-        (key === "clothing" && catNorm.includes("fashion"))
-      ) {
-        score += 45;
-        reasons.push(`Phù hợp với nhóm sản phẩm ${p.name}`);
+  for (const aliases of Object.values(SYNONYM_MAP)) {
+    if (aliases.some((alias) => containsPhrase(queryNorm, normalizeText(alias)))) {
+      for (const alias of aliases) {
+        for (const term of normalizeText(alias).split(" ")) {
+          if (term.length > 1 && !STOP_WORDS.has(term)) expanded.add(term);
+        }
       }
     }
   }
-
-  return { score, reasons };
+  return [...expanded];
 }
 
-// Tải toàn bộ sản phẩm từ API
-export async function fetchMarketProducts(): Promise<Product[]> {
-  try {
-    const res = await api.get<{ items: Product[] }>("/products", {
-      params: { pageSize: 100 },
-    });
-    return res.data?.items || [];
-  } catch (err) {
-    console.error("Lỗi khi tải danh sách sản phẩm từ sàn:", err);
-    return [];
+function detectIntendedCategories(queryNorm: string, products: Product[]): string[] {
+  const requested = new Set<string>();
+  for (const product of products) {
+    const category = normalizeText(product.categoryName);
+    if (category && containsPhrase(queryNorm, category)) requested.add(category);
   }
+
+  const aliasesByCategory: Record<string, string[]> = {
+    electronics: ["dien tu", "cong nghe", "tai nghe", "ban phim", "dong ho", "chuot", "laptop", "may tinh", "sac", "loa"],
+    books: ["sach", "book", "doc sach", "lap trinh", "tac gia", "giao trinh"],
+    fashion: ["thoi trang", "quan ao", "ao dai", "ao thun", "ao khoac", "quan jean", "giay", "vay"],
+  };
+  for (const [category, aliases] of Object.entries(aliasesByCategory)) {
+    if (aliases.some((alias) => containsPhrase(queryNorm, normalizeText(alias)))) requested.add(category);
+  }
+
+  return [...requested];
 }
 
-// BỘ XỬ LÝ RAG CHÍNH (RETRIEVAL-AUGMENTED GENERATION + RECOMMENDATION AWARE)
+interface PriceConstraint {
+  min?: number;
+  max?: number;
+}
+
+function parseAmount(raw: string): number {
+  const normalized = raw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+  const suffix = normalized.match(/\s*(k|nghin|ngan|trieu|million|m)\b/)?.[1];
+  const numberText = normalized.match(/\d[\d.,]*/)?.[0] || "0";
+  let amount: number;
+  if (/^[\d]+(?:[.,]\d{3})+$/.test(numberText)) {
+    amount = Number(numberText.replace(/[.,]/g, ""));
+  } else {
+    amount = Number(numberText.replace(/,(?=\d{3}$)/, "").replace(",", "."));
+  }
+
+  if (["k", "nghin", "ngan"].includes(suffix || "")) amount *= 1000;
+  if (["trieu", "million", "m"].includes(suffix || "")) amount *= 1_000_000;
+  const isVnd = /(?:vnd|dong|(?<![a-z])d)\s*$/.test(normalized) || (suffix && !normalized.includes("$"));
+  return isVnd ? amount / 25_000 : amount;
+}
+
+function extractPriceConstraint(rawQuery: string): PriceConstraint {
+  const query = rawQuery.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+  const amount = String.raw`(\$?\s*\d[\d.,]*(?:\s*(?:k|nghin|ngan|trieu|million|m))?\s*(?:usd|vnd|dong|(?<![a-z])d(?=\s|$))?)`;
+  const result: PriceConstraint = {};
+
+  const range = query.match(new RegExp(`(?:tu|from)\\s*${amount}\\s*(?:den|toi|to|-)\\s*${amount}`));
+  if (range) {
+    result.min = parseAmount(range[1]);
+    result.max = parseAmount(range[2]);
+    return result;
+  }
+
+  const under = query.match(new RegExp(`(?:duoi|nho hon|it hon|under|below|<)\\s*${amount}`));
+  if (under) result.max = parseAmount(under[1]);
+  const over = query.match(new RegExp(`(?:tren|lon hon|above|over|>)\\s*${amount}`));
+  if (over) result.min = parseAmount(over[1]);
+
+  const around = query.match(new RegExp(`(?:tam|khoang|around|about)\\s*${amount}`));
+  if (around) {
+    const target = parseAmount(around[1]);
+    result.min = target * 0.8;
+    result.max = target * 1.2;
+  }
+  return result;
+}
+
+function scoreProduct(product: Product, terms: string[], queryNorm: string, categories: string[]) {
+  const name = normalizeText(product.name);
+  const description = normalizeText(product.description || "");
+  const category = normalizeText(product.categoryName);
+  const shop = normalizeText(product.sellerShopName || "");
+  let score = 0;
+
+  if (name && containsPhrase(name, queryNorm)) score += 30;
+  for (const term of terms) {
+    let termScore = 0;
+    if (containsPhrase(name, term)) termScore = 12;
+    else if (containsPhrase(category, term)) termScore = 9;
+    else if (containsPhrase(description, term)) termScore = 5;
+    else if (containsPhrase(shop, term)) termScore = 2;
+    if (termScore > 0) {
+      score += termScore;
+    }
+  }
+
+  if (categories.includes(category)) score += 8;
+  if (product.stock <= 0) score *= 0.6;
+
+  return score;
+}
+
+// Đọc đủ các trang để chatbot không bỏ sót sản phẩm ngoài 100 kết quả đầu.
+export async function fetchMarketProducts(): Promise<Product[]> {
+  const first = await api.get<Paged<Product>>("/products", { params: { page: 1, pageSize: PAGE_SIZE } });
+  const pageCount = Math.max(1, first.data.totalPages || 1);
+  const products = [...(first.data.items || [])];
+
+  for (let page = 2; page <= pageCount; page += 1) {
+    const response = await api.get<Paged<Product>>("/products", { params: { page, pageSize: PAGE_SIZE } });
+    products.push(...(response.data.items || []));
+  }
+  return products;
+}
+
 export async function executeRagQuery(
   userQuery: string,
   products: Product[],
-  geminiApiKey?: string,
   userProfile?: UserShoppingProfile | null,
   activeRecommendations?: Product[]
 ): Promise<RagResult> {
   const queryNorm = normalizeText(userQuery);
-  const queryTokens = queryNorm.split(" ").filter((t) => t.length > 1);
+  const greetings = new Set(["xin chao", "chao", "chao ban", "hello", "hi", "hi bot", "tro giup", "menu", "gioi thieu"]);
+  const purchasedIds = new Set(userProfile?.purchasedProductIds || []);
+  const recommendations = (activeRecommendations || []).filter((p) => p.stock > 0 && !purchasedIds.has(p.id));
 
-  // Nhận diện ý định nhờ tư vấn / gợi ý theo sở thích hoặc hỏi về các món trên màn hình
-  const recKeywords = [
-    "goi y", "de xuat", "phu hop", "nen mua", "tu van", "mon gi hay", "do gi hay",
-    "man hinh", "tai sao shop", "danh rieng", "so thich", "hot nhat", "ban chay"
-  ];
-  const isRecIntent = recKeywords.some((k) => queryNorm.includes(k));
-
-  // Câu chào hỏi thông thường
-  const greetingPatterns = ["xin chao", "chao ban", "hello", "hi bot", "tro giup", "menu", "gioi thieu"];
-  if (greetingPatterns.some((g) => queryNorm === g || queryNorm.startsWith(g + " "))) {
-    const defaultRecs = activeRecommendations && activeRecommendations.length > 0
-      ? activeRecommendations.slice(0, 3)
-      : products.slice(0, 3);
-
+  if (!queryNorm) {
     return {
-      type: "general",
-      confidence: 1.0,
-      matchedProducts: [],
-      similarProducts: [],
-      recommendedProducts: defaultRecs,
-      message:
-        "Xin chào! Tôi là **Trợ lý AI Mua sắm (RAG & Recommendation)** của MiniShop.\n\n" +
-        "Tôi được đồng bộ trực tiếp với hệ thống gợi ý thông minh trên màn hình của bạn để:\n" +
-        "✨ **Hiểu lịch sử mua sắm & tìm kiếm** của bạn để đề xuất sản phẩm phù hợp nhất.\n" +
-        "💡 **Giải thích chi tiết** các món đồ AI đang gợi ý trên màn hình của bạn.\n" +
-        "🔍 **Tìm kiếm chính xác** hoặc gợi ý mặt hàng thay thế nếu mẫu bạn cần chưa có.\n\n" +
-        "Bạn cần tư vấn sản phẩm gì hôm nay?",
+      type: "general", confidence: 1, matchedProducts: [], similarProducts: [], recommendedProducts: [],
+      message: "Mình chưa nhận được câu hỏi. Bạn hãy nhập tên sản phẩm hoặc nhu cầu mua sắm nhé.",
     };
   }
 
-  // NẾU LÀ YÊU CẦU GỢI Ý / ĐỀ XUẤT CÁ NHÂN HÓA (NETFLIX STYLE RECOMMENDATION)
-  if (isRecIntent) {
-    const candidateRecs = (activeRecommendations && activeRecommendations.length > 0)
-      ? activeRecommendations
-      : products.slice(0, 4);
-
-    // Nếu có API key Gemini, gọi LLM kết hợp bối cảnh gợi ý
-    if (geminiApiKey?.trim()) {
-      try {
-        const llmResponse = await callGeminiWithRag(
-          userQuery,
-          products,
-          [],
-          [],
-          geminiApiKey,
-          userProfile,
-          candidateRecs
-        );
-        if (llmResponse) {
-          return {
-            type: "recommendation",
-            confidence: 0.95,
-            matchedProducts: [],
-            similarProducts: [],
-            recommendedProducts: candidateRecs.slice(0, 4),
-            message: llmResponse,
-          };
-        }
-      } catch (e) {
-        console.warn("Gemini call failed, falling back to local synthesizer:", e);
-      }
-    }
-
-    // Local Synthesizer cho Recommendation
-    let msg = `Dựa trên phân tích sở thích mua sắm và các lượt tìm kiếm gần đây của bạn, tôi xin **gợi ý các sản phẩm phù hợp nhất** (đang hiển thị đồng bộ trên màn hình của bạn):\n\n`;
-    if (userProfile?.purchasedProductNames && userProfile.purchasedProductNames.length > 0) {
-      msg = `Vì bạn đã từng sở hữu **"${userProfile.purchasedProductNames[userProfile.purchasedProductNames.length - 1]}"**, tôi xin **gợi ý các món đồ ăn khớp nhất** với góc trải nghiệm của bạn:\n\n`;
-    }
-
-    for (const p of candidateRecs.slice(0, 4)) {
-      msg += `🌟 **${p.name}** — Giá: **$${p.price.toFixed(2)}**\n`;
-      msg += `   • *Ngành hàng:* ${p.categoryName} | *Đánh giá:* ${p.averageRating}⭐ (${p.reviewCount} lượt)\n`;
-      msg += `   • *Điểm nổi bật:* ${p.description || "Chất lượng vượt trội, phù hợp nhu cầu"}\n\n`;
-    }
-    msg += `👉 Bạn có thể xem ngay các món này trên màn hình chính hoặc bấm nút thêm vào giỏ hàng bên dưới nhé!`;
-
+  if (greetings.has(queryNorm) || queryNorm.startsWith("chao shop ") || queryNorm.startsWith("chao ban ") || queryNorm.startsWith("chao oi")) {
     return {
-      type: "recommendation",
-      confidence: 0.9,
-      matchedProducts: [],
-      similarProducts: [],
-      recommendedProducts: candidateRecs.slice(0, 4),
-      message: msg,
+      type: "general", confidence: 1, matchedProducts: [], similarProducts: [], recommendedProducts: [],
+      message: "Xin chào! Mình là trợ lý ảo MiniShop, hỗ trợ tìm kiếm và gợi ý sản phẩm. Bạn đang muốn tìm món nào?",
     };
   }
 
-  // 1. RETRIEVAL PHASE: Đánh giá và lọc sản phẩm
-  const priceFilter = extractPriceConstraint(queryNorm);
-  const intendedCategories = detectIntendedCategories(queryNorm);
+  if ([
+    "ban la ai", "ban la ai hay nguoi that", "ban la gi", "ai hay nguoi that", "ban la ai hay nguoi that",
+    "who are you", "what are you", "what can you do", "what is your name", "who created you",
+    "ten ban la gi", "ban ten gi", "ban lam gi", "ban lam duoc gi", "ban co the giup gi", "ban co the lam gi",
+    "ban co phai ai khong", "ban la ai hay nguoi that",
+  ]
+    .some((phrase) => containsPhrase(queryNorm, phrase))) {
+    return {
+      type: "general", confidence: 1, matchedProducts: [], similarProducts: [], recommendedProducts: [],
+      message: "Mình là trợ lý ảo của MiniShop, chuyên hỗ trợ tìm kiếm và gợi ý sản phẩm theo danh mục, giá và tình trạng còn hàng. Bạn hãy hỏi mình về một sản phẩm hoặc nhu cầu mua sắm nhé.",
+    };
+  }
 
-  const scoredProducts = products.map((p) => {
-    const { score, reasons } = scoreProduct(p, queryNorm, queryTokens);
-    let finalScore = score;
+  const price = extractPriceConstraint(userQuery);
+  const categories = detectIntendedCategories(queryNorm, products);
+  const terms = getQueryTerms(queryNorm);
+  const shoppingIntent = [
+    "san pham", "mat hang", "mua sam", "tim mua", "tim", "mua", "can mua", "muon mua", "can tim", "co ban", "dang ban", "con hang",
+    "het hang", "gia bao nhieu", "price", "product", "products", "cheapest", "re nhat", "gia thap nhat",
+  ].some((phrase) => containsPhrase(queryNorm, phrase));
+  const genericRecommendation = [
+    "goi y san pham", "de xuat san pham", "goi y mon phu hop theo so thich",
+    "goi y phu hop voi so thich", "goi y cho toi", "nen mua gi", "what should i buy",
+    "recommend products", "recommend me something nice", "recommend something", "goi y tren man hinh", "mon dang goi y tren man hinh",
+    "san pham ban chay", "mon nao ban chay", "mon ban chay", "ban chay nhat", "best seller", "best selling",
+  ].some((phrase) => containsPhrase(queryNorm, phrase));
+  const unsupportedCommerceIntent = [
+    "doi tra", "bao hanh", "freeship", "mien phi ship", "phi ship", "van chuyen", "ship ve", "don hang",
+    "lich su mua hang", "thanh toan", "momo", "khuyen mai", "nguoi ban", "tro thanh nguoi ban", "huy don",
+    "hotline", "so dien thoai", "shop o dau", "chinh sach", "tra hang", "hoan tien",
+  ].some((phrase) => containsPhrase(queryNorm, phrase));
+  const explicitNonProductIntent = [
+    "viet code", "code python", "python sap xep", "sap xep mang", "ke chuyen cuoi", "cau chuyen cuoi",
+    "dich giup", "translate", "write code", "write a poem", "bai tho", "thoi tiet", "tong thong",
+    "ti so", "ty so", "gia vang", "an gi hom nay", "hop thu dien tu", "system prompt", "api key",
+  ].some((phrase) => containsPhrase(queryNorm, phrase));
+  const isCheapestIntent = ["re nhat", "gia thap nhat", "cheapest", "most affordable", "gia re nhat"]
+    .some((phrase) => containsPhrase(queryNorm, phrase));
+  const isBestSellerIntent = ["san pham ban chay", "mon nao ban chay", "mon ban chay", "ban chay nhat", "best seller", "best selling"]
+    .some((phrase) => containsPhrase(queryNorm, phrase));
+  const ranked = products
+    .filter((product) => (price.min === undefined || product.price >= price.min) && (price.max === undefined || product.price <= price.max))
+    .map((product) => ({ product, score: scoreProduct(product, terms, queryNorm, categories) }))
+    .sort((a, b) => isCheapestIntent
+      ? a.product.price - b.product.price
+      : isBestSellerIntent
+        ? b.product.reviewCount - a.product.reviewCount || b.product.averageRating - a.product.averageRating
+        : b.score - a.score || b.product.averageRating - a.product.averageRating);
+  const hasProductEvidence = ranked.some((item) => item.score >= 12);
+  const recommendationIntent = genericRecommendation || (
+    ["goi y", "de xuat", "nen mua", "tu van", "so thich", "man hinh", "ban chay"]
+      .some((phrase) => containsPhrase(queryNorm, phrase)) && (shoppingIntent || categories.length > 0 || hasProductEvidence)
+  );
+  const hasCatalogCategory = categories.length > 0;
+  const hasShoppingContext = shoppingIntent || hasCatalogCategory || hasProductEvidence;
 
-    // Lọc theo giá nếu có
-    if (priceFilter.maxPrice !== undefined) {
-      if (p.price <= priceFilter.maxPrice) finalScore += 25;
-      else finalScore -= 30;
+  if (unsupportedCommerceIntent || explicitNonProductIntent) {
+    return {
+      type: "general", confidence: 1, matchedProducts: [], similarProducts: [], recommendedProducts: [],
+      message: "Mình là trợ lý ảo MiniShop, chỉ hỗ trợ tìm kiếm và tư vấn sản phẩm trong catalog. Mình chưa thể xử lý chính sách, đơn hàng, vận chuyển, thanh toán hoặc yêu cầu ngoài phạm vi; bạn hãy hỏi về tên sản phẩm, danh mục, giá hay tồn kho nhé.",
+    };
+  }
+
+  // Không biến câu hỏi đời sống/ngoài catalog thành gợi ý sản phẩm mặc định.
+  if (!hasShoppingContext && !genericRecommendation) {
+    return {
+      type: "general", confidence: 1, matchedProducts: [], similarProducts: [], recommendedProducts: [],
+      message: "Mình là trợ lý ảo MiniShop, chỉ hỗ trợ tìm kiếm và tư vấn sản phẩm trên cửa hàng. Câu hỏi này nằm ngoài phạm vi của mình; bạn hãy hỏi về sản phẩm, danh mục, giá hoặc tồn kho nhé.",
+    };
+  }
+
+  if (recommendationIntent) {
+    const hasConstraints = price.min !== undefined || price.max !== undefined || categories.length > 0;
+    const recommendationPool = hasConstraints
+      ? products.filter((p) => p.stock > 0 && !purchasedIds.has(p.id))
+      : recommendations.length ? recommendations : products.filter((p) => p.stock > 0 && !purchasedIds.has(p.id));
+    const filteredPool = recommendationPool.filter((product) =>
+      (price.min === undefined || product.price >= price.min) &&
+      (price.max === undefined || product.price <= price.max) &&
+      (!categories.length || categories.includes(normalizeText(product.categoryName)))
+    );
+    const candidates = (filteredPool.length ? filteredPool : hasConstraints ? [] : recommendationPool)
+      .map((product) => ({ product, score: scoreProduct(product, terms, queryNorm, categories) }))
+      .sort((a, b) => isBestSellerIntent
+        ? b.product.reviewCount - a.product.reviewCount || b.product.averageRating - a.product.averageRating
+        : b.score - a.score || b.product.averageRating - a.product.averageRating)
+      .slice(0, MAX_CONTEXT_PRODUCTS)
+      .map((item) => item.product);
+    const generated = candidates.length
+      ? await generateGroundedAnswer(userQuery, candidates, userProfile).catch((error) => {
+          console.warn("Gemini call failed; using grounded local response:", error);
+          return "";
+        })
+      : "";
+    const message = generated || (candidates.length
+      ? buildRecommendationMessage(candidates, userProfile, isBestSellerIntent)
+      : "Chưa có sản phẩm còn hàng khớp danh mục hoặc ngân sách bạn vừa chọn.");
+    return {
+      type: "recommendation", confidence: candidates.length ? 0.82 : 0.2,
+      matchedProducts: [], similarProducts: [], recommendedProducts: candidates.slice(0, 4), message,
+    };
+  }
+
+  if (containsPhrase(queryNorm, "het hang")) {
+    const scopedOutOfStock = ranked.filter((item) => item.product.stock <= 0 && item.score >= 5).map((item) => item.product);
+    const outOfStock = (scopedOutOfStock.length ? scopedOutOfStock : categories.length
+      ? products.filter((product) => product.stock <= 0 && categories.includes(normalizeText(product.categoryName)))
+      : products.filter((product) => product.stock <= 0)).slice(0, MAX_CONTEXT_PRODUCTS);
+    if (!outOfStock.length) {
+      return { type: "not_found", confidence: 0.9, matchedProducts: [], similarProducts: [], message: "Hiện không có sản phẩm nào trong catalog đang hết hàng." };
     }
-    if (priceFilter.minPrice !== undefined) {
-      if (p.price >= priceFilter.minPrice) finalScore += 25;
-      else finalScore -= 30;
+    return {
+      type: "matched", confidence: 0.9, matchedProducts: outOfStock, similarProducts: [],
+      message: buildProductMessage("Các sản phẩm đang hết hàng:", outOfStock),
+    };
+  }
+
+  if (isCheapestIntent && !ranked.some((item) => item.score >= 12)) {
+    const cheapest = ranked.filter((item) => item.product.stock > 0).slice(0, MAX_CONTEXT_PRODUCTS).map((item) => item.product);
+    if (cheapest.length) {
+      return { type: "matched", confidence: 0.7, matchedProducts: cheapest, similarProducts: [], message: buildProductMessage("Các sản phẩm còn hàng có giá thấp nhất:", cheapest) };
     }
+  }
 
-    // Lọc theo category
-    if (intendedCategories.includes(p.categoryName)) {
-      finalScore += 20;
-    }
-
-    return { product: p, score: finalScore, reasons };
-  });
-
-  scoredProducts.sort((a, b) => b.score - a.score);
-
-  const matched = scoredProducts.filter((sp) => sp.score >= 40).map((sp) => sp.product);
-  const partialMatches = scoredProducts
-    .filter((sp) => sp.score >= 15 && sp.score < 40)
-    .map((sp) => sp.product);
-
+  const matched = ranked.filter((item) => item.score >= 12).slice(0, MAX_CONTEXT_PRODUCTS).map((item) => item.product);
   let similar: Product[] = [];
-  if (matched.length === 0) {
-    if (partialMatches.length > 0) {
-      similar = partialMatches.slice(0, 3);
-    } else if (intendedCategories.length > 0) {
+  if (!matched.length) {
+    const related = ranked.filter((item) => item.score >= 5 && item.product.stock > 0);
+    if (related.length) similar = related.slice(0, 3).map((item) => item.product);
+    else if (categories.length) {
       similar = products
-        .filter((p) => intendedCategories.includes(p.categoryName))
+        .filter((p) => categories.includes(normalizeText(p.categoryName)) && p.stock > 0 &&
+          (price.min === undefined || p.price >= price.min) && (price.max === undefined || p.price <= price.max))
         .slice(0, 3);
     }
   }
 
-  // Nếu có API key Gemini, gọi LLM với ngữ cảnh RAG (Context Augmentation)
-  if (geminiApiKey?.trim()) {
+  const evidence = matched.length ? matched : similar;
+  if (evidence.length) {
     try {
-      const llmResponse = await callGeminiWithRag(
-        userQuery,
-        products,
-        matched,
-        similar,
-        geminiApiKey,
-        userProfile,
-        activeRecommendations
-      );
-      if (llmResponse) {
+      const generated = await generateGroundedAnswer(userQuery, evidence, userProfile);
+      if (generated) {
         return {
-          type: matched.length > 0 ? "matched" : similar.length > 0 ? "similar" : "not_found",
-          confidence: matched.length > 0 ? 0.95 : 0.7,
+          type: matched.length ? "matched" : "similar",
+          confidence: matched.length ? 0.86 : 0.62,
           matchedProducts: matched,
           similarProducts: similar,
-          recommendedProducts: activeRecommendations?.slice(0, 3),
-          message: llmResponse,
+          message: generated,
         };
       }
-    } catch (e) {
-      console.warn("Gemini API call failed, falling back to local RAG generator:", e);
+    } catch (error) {
+      console.warn("Gemini call failed; using grounded local response:", error);
     }
   }
 
-  // 2. GENERATION PHASE (Local RAG Synthesizer):
-  if (matched.length > 0) {
-    let msg = `Tuyệt vời! Tôi đã tìm thấy **${matched.length} sản phẩm** rất phù hợp với nhu cầu của bạn trên sàn:\n\n`;
-    for (const p of matched) {
-      const stockInfo = p.stock > 0 ? `còn ${p.stock} sản phẩm` : "tạm hết hàng";
-      msg += `🔹 **${p.name}** — Giá: **$${p.price.toFixed(2)}**\n`;
-      msg += `   • *Mô tả:* ${p.description || "Chất lượng cao"}\n`;
-      msg += `   • *Gian hàng:* ${p.sellerShopName} | *Đánh giá:* ${p.averageRating}⭐ (${p.reviewCount} lượt) | *Kho:* ${stockInfo}\n\n`;
-    }
-    msg += `👉 Bạn có thể xem chi tiết hoặc bấm thêm vào giỏ hàng ngay bên dưới nhé!`;
-
+  if (matched.length) {
     return {
-      type: "matched",
-      confidence: 0.95,
-      matchedProducts: matched,
-      similarProducts: [],
-      message: msg,
+      type: "matched", confidence: 0.82, matchedProducts: matched, similarProducts: [],
+      message: buildProductMessage("Mình tìm thấy các sản phẩm khớp nhất:", matched),
+    };
+  }
+  if (similar.length) {
+    return {
+      type: "similar", confidence: 0.58, matchedProducts: [], similarProducts: similar,
+      message: buildProductMessage("Chưa thấy kết quả khớp hoàn toàn. Đây là một số lựa chọn gần với nhu cầu của bạn:", similar),
     };
   }
 
-  if (similar.length > 0) {
-    let msg = `Hiện tại trên thị trường ảo **chưa có chính xác sản phẩm "${userQuery}"** mà bạn tìm kiếm.\n\n`;
-    msg += `💡 Tuy nhiên, dựa trên phân tích nhu cầu và danh mục liên quan, tôi xin **gợi ý các sản phẩm na ná / cùng loại** có thể bạn sẽ quan tâm:\n\n`;
-
-    for (const p of similar) {
-      msg += `🔸 **${p.name}** ($${p.price.toFixed(2)}) — Danh mục *${p.categoryName}*\n`;
-      msg += `   • *Đặc điểm:* ${p.description || "Sản phẩm chất lượng cao"}\n`;
-      msg += `   • *Gian hàng:* ${p.sellerShopName} (${p.stock > 0 ? `còn ${p.stock} cái` : "hết hàng"})\n\n`;
-    }
-    msg += `Bạn có muốn tham khảo các mẫu gợi ý này không?`;
-
-    return {
-      type: "similar",
-      confidence: 0.75,
-      matchedProducts: [],
-      similarProducts: similar,
-      message: msg,
-    };
-  }
-
-  // TRƯỜNG HỢP 3: HOÀN TOÀN KHÔNG CÓ TRÊN THỊ TRƯỜNG
-  const availableCategories = Array.from(new Set(products.map((p) => p.categoryName))).join(", ");
-  const fallbackMessage =
-    `Rất tiếc, hiện tại **trên thị trường chưa có sản phẩm "${userQuery}"** hoặc bất kỳ mặt hàng nào thuộc nhóm này.\n\n` +
-    `🛒 Các nhóm sản phẩm hiện có sẵn trên thị trường ảo MiniShop gồm: **${availableCategories}**\n` +
-    `• **Điện tử (Electronics):** Tai nghe không dây, Bàn phím cơ, Smart watch\n` +
-    `• **Sách (Books):** Clean Code, The Pragmatic Programmer\n` +
-    `• **Thời trang (Fashion):** Áo thun Cotton, Áo khoác Denim\n\n` +
-    `Bạn có thể thử tìm kiếm theo các ngành hàng trên hoặc yêu cầu tôi gợi ý các sản phẩm đang nổi bật nhé!`;
-
+  const availableCategories = [...new Set(products.map((p) => p.categoryName).filter(Boolean))];
+  const constraintText = price.max !== undefined ? ` trong ngân sách dưới $${price.max}` : price.min !== undefined ? ` từ $${price.min} trở lên` : "";
   return {
-    type: "not_found",
-    confidence: 0.9,
-    matchedProducts: [],
-    similarProducts: [],
-    message: fallbackMessage,
+    type: "not_found", confidence: products.length ? 0.75 : 0.1, matchedProducts: [], similarProducts: [],
+    message: products.length
+      ? `Mình chưa tìm thấy sản phẩm phù hợp với “${userQuery}”${constraintText}. Danh mục hiện có: ${availableCategories.join(", ") || "chưa có dữ liệu"}. Bạn thử đổi từ khóa hoặc ngân sách nhé.`
+      : "Mình chưa tải được danh sách sản phẩm để tìm kiếm. Bạn thử lại sau nhé.",
   };
 }
 
-// Gọi LLM Gemini với Prompt RAG kết hợp Recommendation State
-async function callGeminiWithRag(
+function buildProductMessage(intro: string, products: Product[]): string {
+  const details = products.map((p) =>
+    `• **${p.name}** — $${p.price.toFixed(2)} | ${p.categoryName} | ${p.stock > 0 ? `còn ${p.stock}` : "hết hàng"} | ${p.averageRating.toFixed(1)}⭐ (${p.reviewCount} đánh giá)\n  ${p.description || "Chưa có mô tả."}`
+  ).join("\n\n");
+  return `${intro}\n\n${details}\n\nGiá, tồn kho và đánh giá được lấy từ dữ liệu sản phẩm hiện có.`;
+}
+
+function buildRecommendationMessage(products: Product[], profile?: UserShoppingProfile | null, bestSellerIntent = false): string {
+  if (!products.length) return "Mình chưa tìm được gợi ý mới phù hợp trong catalog.";
+  const reason = bestSellerIntent
+    ? "Mình chưa có dữ liệu số lượng bán. Các sản phẩm dưới đây được xếp theo lượt đánh giá và điểm rating hiện có."
+    : profile?.favoriteCategories?.length
+    ? `Mình ưu tiên các sản phẩm thuộc nhóm bạn thường quan tâm (${profile.favoriteCategories.slice(0, 3).join(", ")}).`
+    : "Mình ưu tiên sản phẩm còn hàng và đang được hệ thống gợi ý.";
+  return `${reason}\n\n${buildProductMessage("Bạn có thể tham khảo:", products)}`;
+}
+
+async function generateGroundedAnswer(
   userQuery: string,
-  allProducts: Product[],
-  _matched: Product[],
-  _similar: Product[],
-  apiKey: string,
-  userProfile?: UserShoppingProfile | null,
-  activeRecommendations?: Product[]
+  retrievedProducts: Product[],
+  userProfile?: UserShoppingProfile | null
 ): Promise<string> {
-  const contextData = allProducts.map((p) => ({
-    id: p.id,
-    name: p.name,
-    category: p.categoryName,
-    price: p.price,
-    stock: p.stock,
-    description: p.description,
-    seller: p.sellerShopName,
-    rating: p.averageRating,
-  }));
-
-  const profileSummary = userProfile
-    ? `
-- Tên khách hàng: ${userProfile.userName || "Khách hàng thân thiết"}
-- Sản phẩm khách ĐÃ TỪNG MUA: ${userProfile.purchasedProductNames.join(", ") || "Chưa có"}
-- Các từ khóa khách VỪA TÌM KIẾM gần đây: ${userProfile.recentSearchQueries.join(", ") || "Chưa có"}
-- Danh mục yêu thích: ${userProfile.favoriteCategories.join(", ") || "Đa dạng"}`
-    : `
-- Khách vãng lai (Chưa đăng nhập)`;
-
-  const onScreenRecs = activeRecommendations && activeRecommendations.length > 0
-    ? activeRecommendations.map((p) => `${p.name} ($${p.price.toFixed(2)}, danh mục ${p.categoryName})`).join("; ")
-    : "Các sản phẩm nổi bật trên sàn";
-
-  const systemPrompt = `
-Bạn là AI Shopping Assistant & Stylist thông minh của sàn thương mại điện tử MiniShop.
-Bạn được tích hợp hệ thống Recommendation System kiểu Netflix để gợi ý sản phẩm đồng bộ giữa Màn hình và ChatBot.
-
-HỒ SƠ KHÁCH HÀNG:
-${profileSummary}
-
-CÁC SẢN PHẨM ĐANG ĐƯỢC HIỂN THỊ GỢI Ý TRÊN MÀN HÌNH CHÍNH (Active Screen Recommendations):
-${onScreenRecs}
-
-TOÀN BỘ KHO DỮ LIỆU SẢN PHẨM TRÊN SÀN (Ground Truth):
-${JSON.stringify(contextData, null, 2)}
-
-NHIỆM VỤ CỦA BẠN:
-1. Đọc kỹ câu hỏi/nhu cầu của khách: "${userQuery}"
-2. Nếu khách hỏi gợi ý ("Gợi ý cho tôi", "Nên mua gì", "Mấy món trên màn hình có tốt không"):
-   - Hãy liên kết khéo léo với các món đang hiển thị trên màn hình và giải thích vì sao món đó phù hợp (phong cách Netflix: "Vì bạn đã có X / thích Y nên món Z trên màn hình sẽ rất hợp...").
-3. Nếu khách tìm sản phẩm cụ thể:
-   - Nếu có: Báo giá, mô tả, ưu điểm.
-   - Nếu chưa có: Thông báo rõ và gợi ý sản phẩm na ná có cùng công năng.
-4. Giọng điệu: Thân thiện, lịch sự, nhiệt tình, dùng định dạng Markdown và emoji đẹp mắt bằng tiếng Việt.
-`.trim();
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [{ text: systemPrompt }],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 800,
-      },
-    }),
+  const response = await api.post<{ answer: string }>("/assistant/chat", {
+    query: userQuery.slice(0, 1000),
+    productIds: retrievedProducts.slice(0, MAX_CONTEXT_PRODUCTS).map((p) => p.id),
+    preferredCategories: userProfile?.favoriteCategories?.slice(0, 3) || [],
   });
-
-  if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.statusText}`);
-  }
-
-  const json = await response.json();
-  const candidate = json.candidates?.[0]?.content?.parts?.[0]?.text;
-  return candidate || "";
+  return response.data.answer?.trim() || "";
 }
