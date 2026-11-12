@@ -20,8 +20,8 @@ public class RefundService : IRefundService
         CancellationToken ct = default)
     {
         var reason = request.Reason?.Trim();
-        if (string.IsNullOrWhiteSpace(reason) || reason.Length > 1000)
-            return Result.Fail<RefundDto>("Refund reason is required and must not exceed 1000 characters.");
+        if (string.IsNullOrWhiteSpace(reason) || reason.Length < 5 || reason.Length > 1000)
+            return Result.Fail<RefundDto>("Refund reason must contain 5 to 1000 characters.");
 
         var order = await _db.Orders
             .Include(o => o.Items)
@@ -118,8 +118,8 @@ public class RefundService : IRefundService
     {
         var externalReference = request.ExternalReference?.Trim();
         var note = request.Note?.Trim();
-        if (string.IsNullOrWhiteSpace(externalReference) || externalReference.Length > 100)
-            return Result.Fail<RefundDto>("A refund transaction reference is required (maximum 100 characters).");
+        if (string.IsNullOrWhiteSpace(externalReference) || externalReference.Length < 3 || externalReference.Length > 100)
+            return Result.Fail<RefundDto>("Refund transaction reference must contain 3 to 100 characters.");
         if (note?.Length > 1000)
             return Result.Fail<RefundDto>("Refund note must not exceed 1000 characters.");
 
@@ -201,8 +201,8 @@ public class RefundService : IRefundService
         CancellationToken ct = default)
     {
         var reason = request.Reason?.Trim();
-        if (string.IsNullOrWhiteSpace(reason) || reason.Length > 1000)
-            return Result.Fail<RefundDto>("A rejection reason is required and must not exceed 1000 characters.");
+        if (string.IsNullOrWhiteSpace(reason) || reason.Length < 5 || reason.Length > 1000)
+            return Result.Fail<RefundDto>("Rejection reason must contain 5 to 1000 characters.");
 
         var refund = await _db.Refunds
             .Include(r => r.Order).ThenInclude(o => o.User)
