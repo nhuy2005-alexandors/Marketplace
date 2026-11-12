@@ -38,8 +38,21 @@ Cho phép thanh toán một order qua nhiều cổng (Mock demo, Cash-on-Deliver
 - `AllowDemo` gate ở `Program.cs` theo `IsDevelopment()`, không đọc trực tiếp từ config lúc chạy — tránh bật demo nhầm ở production dù config sai (src/ECommerce.API/Program.cs:24-26).
 - Idempotent theo `order.Status == Paid` (không theo `Payment.Status`) — đơn giản, đủ chặn double-finalize từ callback+IPN trùng (src/ECommerce.Application/Services/PaymentService.cs:95-96).
 
+## Refund MVP
+
+- [x] Customer tạo một yêu cầu hoàn tiền toàn bộ cho đơn đã thanh toán: `POST /api/refunds`; chỉ chủ đơn được yêu cầu.
+- [x] Điều kiện: `Order.Status = Paid`, `Payment.Status = Completed`, phương thức không phải COD, số tiền Payment khớp Order.Total và mọi OrderItem vẫn `FulfillmentStatus.Pending`.
+- [x] Một đơn / một Payment chỉ có tối đa một Refund; unique indexes trên `Refunds.OrderId` và `Refunds.PaymentId` chặn request trùng kể cả khi có race.
+- [x] Customer xem lịch sử tại `GET /api/refunds/mine`; Admin lọc/phân trang tại `GET /api/admin/refunds`.
+- [x] Admin từ chối yêu cầu bằng `POST /api/admin/refunds/{id}/reject`, bắt buộc lưu lý do; trạng thái Order, Payment và tồn kho không đổi.
+- [x] Admin chỉ xác nhận hoàn tất bằng `POST /api/admin/refunds/{id}/complete` sau khi đã chuyển tiền bên ngoài hệ thống và cung cấp mã giao dịch/chứng từ.
+- [x] Hoàn tất trong một `SaveChangesAsync`: Refund → Completed, Payment → Refunded, Order → Cancelled, các item Pending → Cancelled và cộng lại tồn kho.
+- [x] RowVersion trên Refund, Order, OrderItem và Product phát hiện xử lý đồng thời; xung đột trả 409 thay vì ghi đè trạng thái.
+- [x] COD không được nhận Refund trong MVP vì chưa có event ghi nhận tiền COD thực thu. COD chưa thu tiền được hủy trước khi fulfillment bắt đầu, không tạo Refund.
+- [x] MVP không hỗ trợ partial refund, return-after-delivery hoặc gọi API refund tự động của MoMo.
+
 ## Ngoài phạm vi
 - Stripe và VNPay đã có trong đặc tả gốc nhưng đã bị gỡ sạch khỏi code — chỉ còn Mock/COD/MoMo (docs/DECISIONS.md ADR-005 ghi chú; task.md dòng "Gỡ sạch Stripe + VNPay"; grep `Stripe|VNPay` trong `src/` không còn kết quả).
-- Không có luồng hoàn tiền (refund) dù `PaymentStatus.Refunded` đã khai enum sẵn (src/ECommerce.Domain/Enums/PaymentStatus.cs:8).
+- Refund MVP đã có `Refund` entity, customer/admin endpoints và trạng thái `PaymentStatus.Refunded`; Admin ghi nhận kết quả chuyển tiền ngoài hệ thống. Chưa tích hợp API refund tự động.
 - Không lưu lịch sử nhiều lần thử thanh toán cho một order — `Payment` là 1-1 với `Order` (src/ECommerce.Domain/Entities/Payment.cs:8-9), lần init sau ghi đè lần trước.
 - Không có webhook/retry queue nếu IPN lỗi tạm thời — lỗi verify chỉ set `Failed` một lần, không tự retry (src/ECommerce.Application/Services/PaymentService.cs:88-93).
