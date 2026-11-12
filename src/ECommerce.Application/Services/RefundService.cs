@@ -94,7 +94,7 @@ public class RefundService : IRefundService
         int pageSize,
         CancellationToken ct = default)
     {
-        var query = _db.Refunds
+        IQueryable<Refund> query = _db.Refunds
             .AsNoTracking()
             .Include(r => r.Order).ThenInclude(o => o.User)
             .Include(r => r.ProcessedByUser);
