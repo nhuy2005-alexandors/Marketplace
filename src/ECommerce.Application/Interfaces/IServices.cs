@@ -1,4 +1,6 @@
 using ECommerce.Domain.Entities;
+using ECommerce.Application.Common;
+using ECommerce.Application.DTOs.Refunds;
 
 namespace ECommerce.Application.Interfaces;
 
@@ -65,4 +67,13 @@ public record PaymentVerifyResult(
 public interface IPaymentProviderFactory
 {
     IPaymentProvider Resolve(string methodOrProvider);
+}
+
+public interface IRefundService
+{
+    Task<Result<RefundDto>> RequestAsync(int userId, RequestRefundRequest request, CancellationToken ct = default);
+    Task<Result<PagedResult<RefundDto>>> GetForUserAsync(int userId, int page, int pageSize, CancellationToken ct = default);
+    Task<Result<PagedResult<RefundDto>>> GetAllAsync(string? status, int page, int pageSize, CancellationToken ct = default);
+    Task<Result<RefundDto>> CompleteAsync(int adminId, int refundId, CompleteRefundRequest request, CancellationToken ct = default);
+    Task<Result<RefundDto>> RejectAsync(int adminId, int refundId, RejectRefundRequest request, CancellationToken ct = default);
 }
