@@ -1,8 +1,8 @@
 # Software Requirements Specification (SRS)
 ## Nền tảng Thương mại điện tử tối giản — "MiniShop"
 
-**Phiên bản:** 1.0
-**Ngày:** 2026-06-29
+**Phiên bản:** 1.1
+**Ngày:** 2026-11-12
 
 ---
 
@@ -33,6 +33,7 @@ MiniShop hiện là **marketplace đa người bán (multi-seller)**: hỗ trợ
 | FulfillmentStatus | Trạng thái giao hàng riêng của từng `OrderItem` (Pending/Shipped/Delivered/Cancelled) — do Seller sở hữu item tự đổi, độc lập với `Order.Status` |
 | Payment | Bản ghi thanh toán gắn với đơn |
 | Verified purchase | Khách đã mua sản phẩm — điều kiện để đánh giá |
+| Refund | Yêu cầu hoàn tiền toàn bộ đơn đã thanh toán, do Admin xử lý |
 | JWT | JSON Web Token dùng xác thực |
 | RBAC | Role-Based Access Control |
 
@@ -101,8 +102,9 @@ Kiến trúc 4 lớp (Clean Architecture):
 - **FR-10/FR-15 (Seller scope):** `DashboardService.GetAsync(int? sellerId)` — truyền `null` trả số liệu toàn hệ thống (Admin dùng), truyền id trả số liệu đã lọc theo `OrderItem.SellerId`/`Product.SellerId` của seller đó (doanh thu, số sản phẩm, số đơn liên quan, phân bố trạng thái, top sản phẩm). `SellerOrderService.GetForSellerAsync` trả đơn có chứa item của seller nhưng lọc `Order.Items` chỉ còn item của seller đó và tính lại subtotal/total trên phần này.
 - **FR-12:** Coupon áp dụng tại bước checkout; hệ thống validate hạn dùng, đơn tối thiểu, số lượt còn lại trước khi trừ giảm giá vào `Order.DiscountAmount`.
 - **FR-10/FR-15 (Pro-rate giảm giá coupon theo seller):** `Order.DiscountAmount` là giảm giá **toàn đơn**, không gắn riêng seller nào. Cả `SellerOrderService.GetForSellerAsync` và `DashboardService.GetAsync(sellerId)` chia tỉ lệ giảm giá này theo tỉ trọng subtotal của seller trong đơn: `sellerDiscount = DiscountAmount × (sellerSubtotal / orderSubtotal)`, sau đó `sellerTotal = sellerSubtotal - sellerDiscount`. Doanh thu hệ thống (`sellerId = null`) dùng trực tiếp `Order.Total` (đã trừ giảm giá) của các đơn đã thanh toán. Ví dụ đã verify: đơn $100 (seller A $60 + seller B $40), coupon giảm $20 → A thấy discount $12/total $48, B thấy discount $8/total $32, tổng $80 khớp `Order.Total` thực nhận.
-- **FR-16 (Giao hàng theo item):** `OrderItem.ChangeStatus()` là máy trạng thái riêng (xem `diagrams/state-machine.md` mục 3), tách biệt hoàn toàn khỏi `Order.ChangeStatus()`. Seller chỉ đổi được `FulfillmentStatus` của item có `SellerId == currentUserId`; sai chủ → 403. Chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi Customer hủy đơn (`OrderService.CancelAsync`), mọi `OrderItem` còn ở `Pending` được tự động chuyển sang `Cancelled`.
-- **Hủy đơn:** Customer hủy được khi đơn ở Pending/Paid; tồn kho được hoàn lại; các item còn Pending chuyển `FulfillmentStatus → Cancelled`.
+- **FR-16 (Giao hàng theo item):** `OrderItem.ChangeStatus()` là máy trạng thái riêng (xem `diagrams/state-machine.md` mục 4), tách biệt hoàn toàn khỏi `Order.ChangeStatus()`. Seller chỉ đổi được `FulfillmentStatus` của item có `SellerId == currentUserId`; sai chủ → 403. Chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi đơn được hủy hợp lệ, các item còn Pending được chuyển sang Cancelled.
+- **FR-17 (Refund MVP):** Customer chỉ được yêu cầu hoàn tiền cho đơn thuộc mình, Order Paid, Payment Completed (không phải COD), Payment.Amount khớp Order.Total và tất cả OrderItem còn Pending. Refund là hoàn toàn bộ đơn, một Refund tối đa trên mỗi Order/Payment. Customer dùng `POST /api/refunds` và `GET /api/refunds/mine`; Admin dùng `GET /api/admin/refunds`, `POST /api/admin/refunds/{id}/complete` hoặc `/reject`. Admin bắt buộc ghi mã giao dịch/chứng từ sau khi chuyển tiền bên ngoài hệ thống; khi Completed, Refund/Payment/Order/OrderItems/tồn kho được cập nhật trong một SaveChanges transaction. Rejected không thay đổi Order/Payment/tồn kho. Không partial refund, COD refund hoặc refund sau khi fulfillment bắt đầu.
+- **Hủy đơn:** Customer tự hủy Pending; COD chưa thu tiền có thể hủy trước khi fulfillment bắt đầu, không tạo Refund. Đơn Paid online phải đi qua Refund workflow; Admin không được bỏ qua workflow này bằng cách đổi Order.Status trực tiếp. Tồn kho chỉ hoàn khi mọi item vẫn Pending.
 
 ---
 
@@ -124,7 +126,7 @@ Kiến trúc 4 lớp (Clean Architecture):
 ## 5. Giao diện ngoài
 
 ### 5.1 API
-REST/JSON. Nhóm endpoint chính: `/api/auth` (gồm `register-seller`), `/api/products`, `/api/categories` (`POST` nay cho `Admin,Seller`; `DELETE` vẫn `Admin`), `/api/cart`, `/api/orders`, `/api/wishlist`, `/api/admin`, `/api/seller` (`dashboard`, `orders`, `PUT orders/items/{itemId}/status` — riêng cho vai trò Seller, đổi `FulfillmentStatus` của item thuộc chính seller đó). Tài liệu tương tác qua Swagger UI (`/swagger`).
+REST/JSON. Nhóm endpoint chính: `/api/auth` (gồm `register-seller`), `/api/products`, `/api/categories` (`POST` nay cho `Admin,Seller`; `DELETE` vẫn `Admin`), `/api/cart`, `/api/orders`, `/api/refunds`, `/api/wishlist`, `/api/admin` (gồm refund management), `/api/seller` (`dashboard`, `orders`, `PUT orders/items/{itemId}/status` — riêng cho vai trò Seller, đổi `FulfillmentStatus` của item thuộc chính seller đó). Tài liệu tương tác qua Swagger UI (`/swagger`).
 
 ### 5.2 Người dùng
 SPA React: trang sản phẩm, chi tiết, giỏ, thanh toán, đơn hàng, wishlist, dashboard admin.
