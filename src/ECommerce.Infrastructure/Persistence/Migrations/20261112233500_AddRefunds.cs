@@ -12,6 +12,20 @@ public partial class AddRefunds : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.AddColumn<byte[]>(
+            name: "RowVersion",
+            table: "Orders",
+            type: "rowversion",
+            rowVersion: true,
+            nullable: false);
+
+        migrationBuilder.AddColumn<byte[]>(
+            name: "RowVersion",
+            table: "OrderItems",
+            type: "rowversion",
+            rowVersion: true,
+            nullable: false);
+
         migrationBuilder.CreateTable(
             name: "Refunds",
             columns: table => new
@@ -29,7 +43,8 @@ public partial class AddRefunds : Migration
                 ExternalReference = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
                 Note = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
                 CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
+                UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: false)
             },
             constraints: table =>
             {
@@ -82,5 +97,7 @@ public partial class AddRefunds : Migration
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.DropTable(name: "Refunds");
+        migrationBuilder.DropColumn(name: "RowVersion", table: "OrderItems");
+        migrationBuilder.DropColumn(name: "RowVersion", table: "Orders");
     }
 }
