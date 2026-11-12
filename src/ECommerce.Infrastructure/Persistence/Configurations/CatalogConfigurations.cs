@@ -35,7 +35,12 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
 {
     public void Configure(EntityTypeBuilder<Product> b)
     {
+        b.ToTable("Products", t => { t.HasCheckConstraint("CK_Products_Price", "[Price] >= 0"); t.HasCheckConstraint("CK_Products_Stock", "[Stock] >= 0"); t.HasCheckConstraint("CK_Products_Sku", "LTRIM(RTRIM([Sku])) <> ''"); });
         b.HasKey(p => p.Id);
+        b.HasAlternateKey(p => new { p.Id, p.CategoryId });
+        b.Property(p => p.Sku).HasMaxLength(100).IsRequired();
+        b.HasIndex(p => p.Sku).IsUnique();
+        b.HasOne(p => p.Brand).WithMany().HasForeignKey(p => p.BrandId).OnDelete(DeleteBehavior.Restrict);
         b.Property(p => p.Name).IsRequired().HasMaxLength(200);
         b.Property(p => p.Description).HasMaxLength(2000);
         b.Property(p => p.Price).HasColumnType("decimal(18,2)");
@@ -65,6 +70,7 @@ public class CartItemConfiguration : IEntityTypeConfiguration<CartItem>
 {
     public void Configure(EntityTypeBuilder<CartItem> b)
     {
+        b.ToTable("CartItems", t => t.HasCheckConstraint("CK_CartItems_Quantity", "[Quantity] > 0"));
         b.HasKey(i => i.Id);
         b.Ignore(i => i.Subtotal);
         b.HasOne(i => i.Product).WithMany()
