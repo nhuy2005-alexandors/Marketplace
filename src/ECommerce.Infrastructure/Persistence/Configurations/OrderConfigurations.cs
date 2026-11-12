@@ -14,6 +14,7 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
         b.Property(o => o.ShippingAddress).IsRequired().HasMaxLength(500);
         b.Property(o => o.CouponCode).HasMaxLength(40);
         b.Property(o => o.DiscountAmount).HasColumnType("decimal(18,2)");
+        b.Property(o => o.RowVersion).IsRowVersion();
         b.Ignore(o => o.Total);
         b.Ignore(o => o.Subtotal);
         b.HasOne(o => o.User).WithMany(u => u.Orders)
@@ -33,8 +34,9 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
         b.HasKey(i => i.Id);
         b.Property(i => i.ProductName).IsRequired().HasMaxLength(200);
         b.Property(i => i.UnitPrice).HasColumnType("decimal(18,2)");
-        b.Ignore(i => i.Subtotal);
         b.Property(i => i.Status).HasConversion<int>();
+        b.Property(i => i.RowVersion).IsRowVersion();
+        b.Ignore(i => i.Subtotal);
         b.HasOne(i => i.Product).WithMany()
             .HasForeignKey(i => i.ProductId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(i => i.SellerId);

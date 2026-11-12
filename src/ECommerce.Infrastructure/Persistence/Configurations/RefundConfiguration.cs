@@ -21,6 +21,7 @@ public class RefundConfiguration : IEntityTypeConfiguration<Refund>
         b.Property(r => r.RequestedAt).IsRequired();
         b.Property(r => r.ExternalReference).HasMaxLength(100);
         b.Property(r => r.Note).HasMaxLength(1000);
+        b.Property(r => r.RowVersion).IsRowVersion();
 
         // MVP is full-order refund: one request per order and per captured payment.
         b.HasIndex(r => r.OrderId).IsUnique();

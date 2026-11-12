@@ -24,6 +24,9 @@ public class Refund : BaseEntity
     public string? ExternalReference { get; set; }
     public string? Note { get; set; }
 
+    // Protects the single Pending -> Completed/Rejected decision from concurrent admins.
+    public byte[]? RowVersion { get; set; }
+
     public void Complete(int adminId, string externalReference, string? note)
     {
         EnsurePending();

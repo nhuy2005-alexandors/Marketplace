@@ -18,6 +18,9 @@ public class Order : BaseEntity
     public string? CouponCode { get; set; }
     public decimal DiscountAmount { get; set; }
 
+    // Concurrency token: protects refund/cancel transitions against concurrent fulfillment updates.
+    public byte[]? RowVersion { get; set; }
+
     public decimal Subtotal => Items.Sum(i => i.Subtotal);
     public decimal Total => Math.Max(0, Subtotal - DiscountAmount);
 
