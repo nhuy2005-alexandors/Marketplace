@@ -111,6 +111,22 @@ export interface Order {
   payment?: Payment;
 }
 
+export type RefundStatus = "Pending" | "Completed" | "Rejected";
+
+export interface Refund {
+  id: number;
+  orderId: number;
+  customerName: string;
+  amount: number;
+  reason: string;
+  status: RefundStatus;
+  requestedAt: string;
+  processedAt?: string;
+  externalReference?: string;
+  note?: string;
+  processedByName?: string;
+}
+
 export interface PayResult {
   requiresRedirect: boolean;
   redirectUrl?: string;

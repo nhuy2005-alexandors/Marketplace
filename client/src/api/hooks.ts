@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
   AuthResponse, Cart, Category, Coupon, CouponPreview, Dashboard, Order, Paged, PayResult,
-  OrderSplit, Product, Review, SellerApplication, SellerShop, User, WishlistItem,
+  OrderSplit, Product, Refund, Review, SellerApplication, SellerShop, User, WishlistItem,
 } from "../types";
 import { useAuth } from "../store/auth";
 
@@ -294,6 +294,61 @@ export function useUpdateOrderStatus() {
     mutationFn: ({ id, status }: { id: number; status: string }) =>
       api.put<Order>(`/orders/${id}/status`, { status }).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+  });
+}
+
+// ---- Refunds ----
+export function useMyRefunds(page = 1, pageSize = 100) {
+  return useQuery({
+    queryKey: ["refunds", "mine", page, pageSize],
+    queryFn: () => api.get<Paged<Refund>>("/refunds/mine", { params: { page, pageSize } }).then((r) => r.data),
+  });
+}
+
+export function useRequestRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { orderId: number; reason: string }) =>
+      api.post<Refund>("/refunds", body).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["refunds"] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
+}
+
+export function useAdminRefunds(status?: string, page = 1, pageSize = 20) {
+  return useQuery({
+    queryKey: ["admin-refunds", status ?? "all", page, pageSize],
+    queryFn: () => api.get<Paged<Refund>>("/admin/refunds", {
+      params: { ...(status ? { status } : {}), page, pageSize },
+    }).then((r) => r.data),
+  });
+}
+
+export function useCompleteRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, externalReference, note }: { id: number; externalReference: string; note?: string }) =>
+      api.post<Refund>(`/admin/refunds/${id}/complete`, { externalReference, note }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-refunds"] });
+      qc.invalidateQueries({ queryKey: ["refunds"] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useRejectRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      api.post<Refund>(`/admin/refunds/${id}/reject`, { reason }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-refunds"] });
+      qc.invalidateQueries({ queryKey: ["refunds"] });
+    },
   });
 }
 
