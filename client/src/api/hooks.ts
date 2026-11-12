@@ -298,10 +298,11 @@ export function useUpdateOrderStatus() {
 }
 
 // ---- Refunds ----
-export function useMyRefunds(page = 1, pageSize = 100) {
+export function useMyRefunds(page = 1, pageSize = 100, enabled = true) {
   return useQuery({
     queryKey: ["refunds", "mine", page, pageSize],
     queryFn: () => api.get<Paged<Refund>>("/refunds/mine", { params: { page, pageSize } }).then((r) => r.data),
+    enabled,
   });
 }
 

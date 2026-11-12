@@ -19,8 +19,8 @@ export function OrdersPage() {
   const [params] = useSearchParams();
   const paymentResult = params.get("payment"); // success | failed (redirect từ MoMo)
   const { data, isLoading } = useOrders(page, 5);
-  const { data: refundData, isLoading: refundsLoading } = useMyRefunds();
   const isAdmin = useAuth((s) => s.user?.role === "Admin");
+  const { data: refundData, isLoading: refundsLoading } = useMyRefunds(1, 100, !isAdmin);
   const updateStatus = useUpdateOrderStatus();
   const cancelOrder = useCancelOrder();
   const requestRefund = useRequestRefund();
@@ -39,7 +39,7 @@ export function OrdersPage() {
     }
   };
 
-  if (isLoading || refundsLoading) return <Spinner />;
+  if (isLoading || (!isAdmin && refundsLoading)) return <Spinner />;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 animate-fade-in">
