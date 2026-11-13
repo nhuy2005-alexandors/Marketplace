@@ -86,7 +86,14 @@ public class SellerOrderService : ISellerOrderService
         {
             return Result.Fail<OrderItemDto>(ex.Message, ErrorType.Conflict);
         }
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Result.Fail<OrderItemDto>("The order item changed concurrently. Reload and retry.", ErrorType.Conflict);
+        }
         return Result.Ok(item.ToDto());
     }
 }

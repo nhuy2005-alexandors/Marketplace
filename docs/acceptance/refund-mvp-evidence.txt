@@ -1,0 +1,39 @@
+Refund local acceptance — 2026-11-13
+Sanitized execution transcript: fixture data only; no auth headers, tokens or customer records.
+
+SQL SERVER SERVICE TEST
+BEFORE stock=5;order=Paid;item=Pending;payment=Completed;refund=Pending;refunds=1
+AFTER_SQL_ERROR stock=5;order=Paid;item=Pending;payment=Completed;refund=Pending;refunds=1
+ROWVERSION_CONFLICT PASS
+AFTER_RACE stock=7;order=Cancelled;item=Cancelled;payment=Refunded;refund=Completed;refunds=1
+NO_DOUBLE_RESTOCK_OR_TRANSITION PASS
+Test Run Successful. Total tests: 1. Passed: 1.
+
+REAL BROWSER -> API -> SQL SERVER
+GET /api/refunds/mine?page=1&pageSize=100 200
+POST /api/refunds 200
+GET /api/refunds/mine?page=1&pageSize=100 200
+POST /api/refunds 200
+GET /api/refunds/mine?page=1&pageSize=100 200
+GET /api/admin/refunds?status=Pending&page=1&pageSize=20 200
+POST /api/admin/refunds/2/complete 200
+GET /api/admin/refunds?status=Pending&page=1&pageSize=20 200
+POST /api/admin/refunds/1/reject 200
+GET /api/admin/refunds?status=Pending&page=1&pageSize=20 200
+GET /api/admin/refunds?status=Rejected&page=1&pageSize=20 200
+
+REAL SQL ASSERTIONS
+OrderId RefundStatus OrderStatus PaymentStatus ItemStatus Quantity Stock
+5001    1            4           3             3          2        7
+5002    2            1           1             0          2        7
+Refund count: 2
+REAL_BROWSER_SQL_ASSERTIONS_PASS
+CUSTOMER_HISTORY_ASSERTIONS_PASS
+
+Enum legend: Refund 1=Completed,2=Rejected; Order 1=Paid,4=Cancelled;
+Payment 1=Completed,3=Refunded; Item 0=Pending,3=Cancelled.
+
+LOCAL REGRESSION
+Backend: Failed 0, Passed 95, Skipped 0, Total 95.
+Frontend node test: Passed 1, Failed 0.
+Frontend TypeScript/Vite build: passed.

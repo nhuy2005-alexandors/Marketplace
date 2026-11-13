@@ -113,7 +113,7 @@ function RefundCard({ refund }: { refund: Refund }) {
 export function AdminRefundsPage() {
   const [filter, setFilter] = useState<FilterStatus>("Pending");
   const [page, setPage] = useState(1);
-  const { data, isLoading } = useAdminRefunds(filter, page, 20);
+  const { data, isLoading, isError, refetch } = useAdminRefunds(filter, page, 20);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 animate-fade-in">
@@ -133,6 +133,11 @@ export function AdminRefundsPage() {
       </div>
       {isLoading ? (
         <Spinner />
+      ) : isError ? (
+        <div role="alert" className="space-y-2 text-rose-500">
+          <p>Không thể tải danh sách hoàn tiền. Vui lòng thử lại.</p>
+          <Button type="button" onClick={() => { void refetch(); }}>Thử lại</Button>
+        </div>
       ) : data?.items.length === 0 ? (
         <EmptyState title="Không có yêu cầu hoàn tiền" hint="Không tìm thấy yêu cầu ở trạng thái này." />
       ) : (
