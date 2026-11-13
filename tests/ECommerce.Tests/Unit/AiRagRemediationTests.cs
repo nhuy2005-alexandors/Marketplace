@@ -246,6 +246,113 @@ public sealed class AiRagRemediationTests
         Assert.DoesNotContain("server-key-test", exception.Message);
     }
 
+    [Fact]
+    public async Task GeminiProvider_Retries429AndHonorsRetryAfter()
+    {
+        var calls = 0;
+        var handler = new FakeHttpHandler((_, _) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMilliseconds(80));
+                return Task.FromResult(limited);
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"embeddings\":[{\"values\":[0.25,0.75]}]}")
+            });
+        });
+        var provider = Provider(handler);
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+
+        var vectors = await provider.GenerateEmbeddingsAsync(["synthetic catalog item"], isQuery: false);
+
+        Assert.Equal(2, calls);
+        Assert.Equal(2, vectors[0].Length);
+        Assert.True(timer.Elapsed >= TimeSpan.FromMilliseconds(70));
+    }
+
+    [Fact]
+    public async Task GeminiProvider_Retries429WithExponentialBackoffWhenRetryAfterMissing()
+    {
+        var calls = 0;
+        var handler = new FakeHttpHandler((_, _) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"embeddings\":[{\"values\":[0.5,0.5]}]}")
+            });
+        });
+        var provider = Provider(handler);
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+
+        await provider.GenerateEmbeddingsAsync(["another synthetic catalog item"], isQuery: false);
+
+        Assert.Equal(2, calls);
+        Assert.True(timer.Elapsed >= TimeSpan.FromMilliseconds(450));
+    }
+
+    [Fact]
+    public async Task GeminiProvider_StopsAfterBounded429Attempts()
+    {
+        var calls = 0;
+        var provider = Provider(new FakeHttpHandler((_, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
+            return Task.FromResult(limited);
+        }));
+
+        await Assert.ThrowsAsync<AssistantProviderException>(() => provider.GenerateEmbeddingsAsync(["synthetic item"], isQuery: false));
+
+        Assert.Equal(3, calls);
+    }
+
+    [Fact]
+    public async Task LocalEmbeddingCache_HitsByHashModelAndDimensionsAndMissesWhenHashChanges()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"rag-cache-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new LocalEmbeddingCacheStore(path);
+            const string hash = "CONTENT-HASH-A";
+            const string model = "gemini-embedding-001";
+            var entry = new EmbeddingCacheEntry(LocalEmbeddingCacheStore.CreateKey(hash, model, 2),
+                hash, model, 2, 17, "summary", [0.25f, 0.75f]);
+            await store.WriteAsync([entry]);
+
+            var loaded = await store.ReadAsync();
+            Assert.Single(loaded);
+            Assert.Equal(entry.Vector, loaded[0].Vector);
+            Assert.DoesNotContain(loaded, item => item.CacheKey == LocalEmbeddingCacheStore.CreateKey("CONTENT-HASH-B", model, 2));
+            Assert.DoesNotContain(loaded, item => item.CacheKey == LocalEmbeddingCacheStore.CreateKey(hash, model, 3));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task LocalEmbeddingCache_IgnoresCorruptFileAndCanReplaceIt()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"rag-corrupt-cache-{Guid.NewGuid():N}.json");
+        try
+        {
+            await File.WriteAllTextAsync(path, "not-json");
+            var store = new LocalEmbeddingCacheStore(path);
+
+            Assert.Empty(await store.ReadAsync());
+            var entry = new EmbeddingCacheEntry(LocalEmbeddingCacheStore.CreateKey("hash", "model", 2),
+                "hash", "model", 2, 1, "description", [1f, 0f]);
+            await store.WriteAsync([entry]);
+
+            Assert.Single(await store.ReadAsync());
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
     private static Product Product(int id, string name, Category category, decimal price, int stock, User seller) => new()
     {
         Id = id,

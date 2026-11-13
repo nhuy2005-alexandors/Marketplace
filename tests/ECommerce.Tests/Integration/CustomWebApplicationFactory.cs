@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ECommerce.Tests.Integration;
 
@@ -67,6 +68,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                  d.ServiceType.FullName.Contains("AppDbContext"))).ToList();
             foreach (var descriptor in toRemove)
                 services.Remove(descriptor);
+
+            services.RemoveAll<IEmbeddingCacheStore>();
 
             services.AddDbContext<AppDbContext>(opt =>
                 opt.UseSqlite(_connection)

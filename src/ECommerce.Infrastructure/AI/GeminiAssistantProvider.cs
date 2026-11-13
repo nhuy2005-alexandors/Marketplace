@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -12,7 +14,10 @@ namespace ECommerce.Infrastructure.AI;
 
 public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnswerProvider
 {
-    private static readonly SemaphoreSlim ProviderConcurrency = new(4, 4);
+    private const int EmbeddingBatchSize = 16;
+    private const int MaxEmbeddingAttempts = 3;
+    private static readonly TimeSpan MaxEmbeddingRetryWindow = TimeSpan.FromSeconds(30);
+    private static readonly SemaphoreSlim ProviderConcurrency = new(1, 1);
     private readonly IHttpClientFactory _clients;
     private readonly GeminiOptions _options;
     private readonly ILogger<GeminiAssistantProvider> _logger;
@@ -37,8 +42,7 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         if (string.IsNullOrWhiteSpace(key)) throw new AssistantProviderException("Embedding provider is not configured.");
 
         var output = new List<float[]>(texts.Count);
-        // Keep requests small and bounded; Gemini's batch endpoint accepts multiple content entries.
-        foreach (var batch in texts.Select((value, index) => (value, index)).Chunk(32))
+        foreach (var batch in texts.Select((value, index) => (value, index)).Chunk(EmbeddingBatchSize))
         {
             var body = new
             {
@@ -50,16 +54,7 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
                     outputDimensionality = _options.EmbeddingDimensions
                 }).ToArray()
             };
-            using var request = new HttpRequestMessage(HttpMethod.Post,
-                $"v1beta/models/{_options.EmbeddingModel}:batchEmbedContents");
-            request.Headers.TryAddWithoutValidation("x-goog-api-key", key);
-            request.Content = JsonContent.Create(body);
-            using var response = await SendBoundedAsync(request, ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Gemini embedding request failed with status {StatusCode}.", response.StatusCode);
-                throw new AssistantProviderException("Embedding provider is temporarily unavailable.");
-            }
+            using var response = await SendEmbeddingBatchWithRetryAsync(body, key, ct);
             await using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var json = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
             if (!json.RootElement.TryGetProperty("embeddings", out var embeddings) || embeddings.GetArrayLength() != batch.Length)
@@ -151,6 +146,79 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         {
             ProviderConcurrency.Release();
         }
+    }
+
+    private async Task<HttpResponseMessage> SendEmbeddingBatchWithRetryAsync(object body, string key, CancellationToken ct)
+    {
+        using var retryCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        retryCts.CancelAfter(MaxEmbeddingRetryWindow);
+        var stopwatch = Stopwatch.StartNew();
+        var lastStatus = "none";
+
+        for (var attempt = 1; attempt <= MaxEmbeddingAttempts; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                $"v1beta/models/{_options.EmbeddingModel}:batchEmbedContents");
+            request.Headers.TryAddWithoutValidation("x-goog-api-key", key);
+            request.Content = JsonContent.Create(body);
+
+            HttpResponseMessage response;
+            await ProviderConcurrency.WaitAsync(retryCts.Token);
+            try { response = await _clients.CreateClient("GeminiClient").SendAsync(request, retryCts.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Gemini embedding stopped: HTTP status {StatusCode}, attempts {Attempts}, elapsed {ElapsedMs} ms.",
+                    lastStatus, attempt, stopwatch.ElapsedMilliseconds);
+                throw new AssistantProviderException("Embedding provider is temporarily unavailable.");
+            }
+            finally { ProviderConcurrency.Release(); }
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Gemini embedding completed: HTTP status {StatusCode}, attempts {Attempts}, elapsed {ElapsedMs} ms.",
+                    (int)response.StatusCode, attempt, stopwatch.ElapsedMilliseconds);
+                return response;
+            }
+
+            lastStatus = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
+            var retryable = response.StatusCode is System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.ServiceUnavailable;
+            var retryAfter = ReadRetryAfter(response);
+            response.Dispose();
+            if (!retryable || attempt == MaxEmbeddingAttempts)
+            {
+                _logger.LogWarning("Gemini embedding failed: HTTP status {StatusCode}, attempts {Attempts}, elapsed {ElapsedMs} ms.",
+                    lastStatus, attempt, stopwatch.ElapsedMilliseconds);
+                throw new AssistantProviderException("Embedding provider is temporarily unavailable.");
+            }
+
+            var delay = retryAfter ?? ExponentialBackoff(attempt);
+            if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
+            if (stopwatch.Elapsed + delay >= MaxEmbeddingRetryWindow)
+            {
+                _logger.LogWarning("Gemini embedding retry window ended: HTTP status {StatusCode}, attempts {Attempts}, elapsed {ElapsedMs} ms.",
+                    lastStatus, attempt, stopwatch.ElapsedMilliseconds);
+                throw new AssistantProviderException("Embedding provider is temporarily unavailable.");
+            }
+            _logger.LogWarning("Gemini embedding retry: HTTP status {StatusCode}, attempt {Attempt}, elapsed {ElapsedMs} ms.",
+                lastStatus, attempt, stopwatch.ElapsedMilliseconds);
+            await Task.Delay(delay, retryCts.Token);
+        }
+
+        throw new AssistantProviderException("Embedding provider is temporarily unavailable.");
+    }
+
+    private static TimeSpan? ReadRetryAfter(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is TimeSpan delta) return delta;
+        if (retryAfter?.Date is DateTimeOffset date) return date - DateTimeOffset.UtcNow;
+        return null;
+    }
+
+    private static TimeSpan ExponentialBackoff(int attempt)
+    {
+        var baseMilliseconds = Math.Min(500 * Math.Pow(2, attempt - 1), 8000);
+        return TimeSpan.FromMilliseconds(baseMilliseconds + Random.Shared.Next(0, 251));
     }
 }
 

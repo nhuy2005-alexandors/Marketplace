@@ -19,6 +19,7 @@ public static class DependencyInjection
             opt.UseSqlServer(config.GetConnectionString("DefaultConnection")));
 
         services.Configure<GeminiOptions>(config.GetSection(GeminiOptions.SectionName));
+        services.AddSingleton<IEmbeddingCacheStore>(_ => new LocalEmbeddingCacheStore(LocalEmbeddingCacheStore.ResolveDefaultPath()));
         services.AddScoped<GeminiAssistantProvider>();
         services.AddScoped<IEmbeddingProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
         services.AddScoped<IAssistantAnswerProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());

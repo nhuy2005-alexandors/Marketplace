@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using ECommerce.Application.DTOs.AI;
 using ECommerce.Application.DTOs.Catalog;
@@ -14,11 +15,12 @@ namespace ECommerce.Infrastructure.AI;
 public sealed class SemanticSearchService : ISemanticSearchService
 {
     private const int MaxCatalogCandidates = 1000;
-    private const int EmbeddingBatchSize = 32;
-    private const int MaxConcurrentEmbeddingBatches = 2;
+    private const int EmbeddingBatchSize = 16;
+    private const int MaxConcurrentEmbeddingBatches = 1;
     private static readonly Regex ExplicitSkuPattern = new(@"\b[A-Z0-9]{2,}(?:-[A-Z0-9]{2,}){2,}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly ConcurrentDictionary<string, float[]> EmbeddingCache = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim EmbeddingCachePopulationGate = new(1, 1);
+    private static bool EmbeddingCacheLoadedFromFile;
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "toi", "minh", "ban", "cho", "voi", "la", "co", "khong", "nao", "gi", "nhe", "nha", "va", "cua", "mot",
@@ -28,13 +30,19 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
     private readonly IAppDbContext _db;
     private readonly IEmbeddingProvider _embeddings;
+    private readonly IEmbeddingCacheStore? _cacheStore;
     private readonly ILogger<SemanticSearchService> _logger;
 
-    public SemanticSearchService(IAppDbContext db, IEmbeddingProvider embeddings, ILogger<SemanticSearchService> logger)
+    public SemanticSearchService(
+        IAppDbContext db,
+        IEmbeddingProvider embeddings,
+        ILogger<SemanticSearchService> logger,
+        IEmbeddingCacheStore? cacheStore = null)
     {
         _db = db;
         _embeddings = embeddings;
         _logger = logger;
+        _cacheStore = cacheStore;
     }
 
     public async Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
@@ -70,6 +78,23 @@ public sealed class SemanticSearchService : ISemanticSearchService
             await EmbeddingCachePopulationGate.WaitAsync(ct);
             try
             {
+                if (!EmbeddingCacheLoadedFromFile)
+                {
+                    try
+                    {
+                        if (_cacheStore is not null)
+                        {
+                            foreach (var entry in await _cacheStore.ReadAsync(ct))
+                                EmbeddingCache[entry.CacheKey] = entry.Vector;
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                    {
+                        _logger.LogWarning("Embedding file cache read skipped. Failure type: {FailureType}", ex.GetType().Name);
+                    }
+                    finally { EmbeddingCacheLoadedFromFile = true; }
+                }
+
                 var missing = chunks.GroupBy(CacheKey, StringComparer.Ordinal).Select(group => group.First())
                     .Where(chunk => !EmbeddingCache.ContainsKey(CacheKey(chunk))).ToArray();
                 using var batchGate = new SemaphoreSlim(MaxConcurrentEmbeddingBatches, MaxConcurrentEmbeddingBatches);
@@ -85,6 +110,24 @@ public sealed class SemanticSearchService : ISemanticSearchService
                     finally { batchGate.Release(); }
                 }).ToArray();
                 await Task.WhenAll(batchTasks);
+
+                if (_cacheStore is not null && missing.Length > 0)
+                {
+                    try
+                    {
+                        var entries = missing.Select(chunk =>
+                        {
+                            var parsed = ParseModelVersion(chunk.EmbeddingModelVersion);
+                            return new EmbeddingCacheEntry(CacheKey(chunk), chunk.ContentHash, parsed.Model,
+                                parsed.Dimensions, chunk.ProductId, chunk.ChunkType, EmbeddingCache[CacheKey(chunk)]);
+                        }).ToArray();
+                        await _cacheStore.WriteAsync(entries, ct);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                    {
+                        _logger.LogWarning("Embedding file cache write skipped. Failure type: {FailureType}", ex.GetType().Name);
+                    }
+                }
             }
             finally { EmbeddingCachePopulationGate.Release(); }
 
@@ -143,7 +186,21 @@ public sealed class SemanticSearchService : ISemanticSearchService
         _ => string.Empty
     };
 
-    private static string CacheKey(AssistantSourceChunk chunk) => $"{chunk.ContentHash}:{chunk.EmbeddingModelVersion}";
+    private static string CacheKey(AssistantSourceChunk chunk)
+    {
+        var parsed = ParseModelVersion(chunk.EmbeddingModelVersion);
+        return parsed.Dimensions > 0
+            ? LocalEmbeddingCacheStore.CreateKey(chunk.ContentHash, parsed.Model, parsed.Dimensions)
+            : $"{chunk.ContentHash}:{chunk.EmbeddingModelVersion}";
+    }
+
+    private static (string Model, int Dimensions) ParseModelVersion(string modelVersion)
+    {
+        var separator = modelVersion.LastIndexOf(':');
+        return separator > 0 && int.TryParse(modelVersion[(separator + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var dimensions)
+            ? (modelVersion[..separator], dimensions)
+            : (modelVersion, 0);
+    }
 
     private static ProductDto ToDto(Product p)
     {
