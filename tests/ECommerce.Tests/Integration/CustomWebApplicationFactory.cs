@@ -1,5 +1,6 @@
 using ECommerce.Infrastructure.Persistence;
 using ECommerce.Infrastructure.Auth;
+using ECommerce.Infrastructure.AI;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -70,6 +71,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddDbContext<AppDbContext>(opt =>
                 opt.UseSqlite(_connection)
                    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
+
+            // Integration tests must never discover a developer's repo-root .env and call Gemini.
+            services.PostConfigure<GeminiOptions>(options => options.ApiKey = string.Empty);
         });
     }
 

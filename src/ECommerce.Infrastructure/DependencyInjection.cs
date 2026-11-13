@@ -4,6 +4,7 @@ using ECommerce.Infrastructure.Notifications;
 using ECommerce.Infrastructure.Payments;
 using ECommerce.Infrastructure.Persistence;
 using ECommerce.Infrastructure.Storage;
+using ECommerce.Infrastructure.AI;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,13 @@ public static class DependencyInjection
     {
         services.AddDbContext<AppDbContext>(opt =>
             opt.UseSqlServer(config.GetConnectionString("DefaultConnection")));
+
+        services.Configure<GeminiOptions>(config.GetSection(GeminiOptions.SectionName));
+        services.AddScoped<GeminiAssistantProvider>();
+        services.AddScoped<IEmbeddingProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
+        services.AddScoped<IAssistantAnswerProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
+        services.AddScoped<ISemanticSearchService, SemanticSearchService>();
+        services.AddScoped<IAssistantService, AssistantService>();
 
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
