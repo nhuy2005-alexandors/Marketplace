@@ -1,4 +1,5 @@
 using ECommerce.Infrastructure.Persistence;
+using ECommerce.Infrastructure.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -49,6 +50,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 new HistoryRow(migrationId, typeof(AppDbContext).Assembly.GetName().Version!.ToString()));
             db.Database.ExecuteSqlRaw(insertScript);
         }
+        // Seed only the isolated SQLite test database; application startup never seeds.
+        DbSeeder.SeedAsync(db, new BCryptPasswordHasher()).GetAwaiter().GetResult();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

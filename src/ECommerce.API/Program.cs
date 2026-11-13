@@ -141,14 +141,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Auto-migrate + seed khi khởi động (idempotent) — khỏi phải chạy 'ef database update' tay.
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-    await DbSeeder.SeedAsync(db, hasher);
-}
-
 app.UseCors(CorsPolicy);
 app.UseRateLimiter();
 app.UseAuthentication();

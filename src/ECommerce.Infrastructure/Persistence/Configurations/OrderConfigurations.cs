@@ -8,6 +8,7 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
 {
     public void Configure(EntityTypeBuilder<Order> b)
     {
+        b.ToTable("Orders", t => t.HasCheckConstraint("CK_Orders_Discount", "[DiscountAmount] >= 0"));
         b.HasKey(o => o.Id);
         b.Property(o => o.Status).HasConversion<int>();
         b.Property(o => o.ShippingAddress).IsRequired().HasMaxLength(500);
@@ -28,6 +29,7 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
 {
     public void Configure(EntityTypeBuilder<OrderItem> b)
     {
+        b.ToTable("OrderItems", t => t.HasCheckConstraint("CK_OrderItems_Amounts", "[UnitPrice] >= 0 AND [Quantity] > 0"));
         b.HasKey(i => i.Id);
         b.Property(i => i.ProductName).IsRequired().HasMaxLength(200);
         b.Property(i => i.UnitPrice).HasColumnType("decimal(18,2)");
@@ -43,6 +45,7 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 {
     public void Configure(EntityTypeBuilder<Payment> b)
     {
+        b.ToTable("Payments", t => t.HasCheckConstraint("CK_Payments_Amount", "[Amount] >= 0"));
         b.HasKey(p => p.Id);
         b.Property(p => p.Amount).HasColumnType("decimal(18,2)");
         b.Property(p => p.Method).HasConversion<int>();
@@ -55,6 +58,7 @@ public class ReviewConfiguration : IEntityTypeConfiguration<Review>
 {
     public void Configure(EntityTypeBuilder<Review> b)
     {
+        b.ToTable("Reviews", t => t.HasCheckConstraint("CK_Reviews_Rating", "[Rating] BETWEEN 1 AND 5"));
         b.HasKey(r => r.Id);
         b.Property(r => r.Comment).HasMaxLength(1000);
         b.HasOne(r => r.Product).WithMany(p => p.Reviews)
