@@ -18,6 +18,7 @@ param(
     [string]$ExplainQuery,
     [switch]$NoEvidenceOnly,
     [switch]$AllowEmbeddingCall,
+    [switch]$UseFakeEmbedder,
     [ValidateRange(0,1000000)][int]$ExpectedDocumentChunks = 1395
 )
 
@@ -29,6 +30,7 @@ Add-Type -AssemblyName System.Data
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
 if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
 if ($AuthorK05Only -and ($LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly)) { throw '-AuthorK05Only must run by itself (it may be combined with -DryRunFromCache).' }
+if($NoEvidenceOnly -and ($AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-NoEvidenceOnly cannot be combined with K-05, diagnostics, development, holdout, or lexical-only modes.'}
 if ($Diagnostics) {
     if (-not $AuthorK05Only -or $LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly) { throw '-Diagnostics must be used with -AuthorK05Only only; it never runs provider or database paths.' }
     if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
@@ -40,6 +42,24 @@ if (($NoEvidenceOnly -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and 
     if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw 'Explain/no-evidence modes require the local cache-only obj/rag-dryrun-data.json fixture.' }
     $DryRunFromCache = $true
 }
+if($UseFakeEmbedder -and -not $DryRunFromCache){throw '-UseFakeEmbedder is test-only and requires -DryRunFromCache.'}
+if($ExplainQuery -and ($NoEvidenceOnly -or $AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-ExplainQuery accepts exactly one query and cannot be combined with other evaluation modes.'}
+
+function Get-FakeQueryEmbeddings([string[]]$Queries,[int]$Dimensions){
+    $result=New-Object 'System.Collections.Generic.List[object]';foreach($query in $Queries){$hash=[Security.Cryptography.SHA256]::Create();try{$bytes=$hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($query))}finally{$hash.Dispose()};$vector=New-Object 'single[]' $Dimensions;for($i=0;$i -lt $Dimensions;$i++){$vector[$i]=([single](([int]$bytes[$i % $bytes.Length]-128)/128.0))};$result.Add($vector)};return ,$result.ToArray()
+}
+
+function Get-GeminiQueryEmbeddings([string[]]$Queries,[string]$ModelName,[int]$Dimensions,[string]$RepoRoot){
+    $keyLine=Get-Content -LiteralPath (Join-Path $RepoRoot '.env')|Where-Object{$_ -match '^\s*GEMINI_API_KEY\s*='}|Select-Object -First 1
+    if(-not $keyLine){throw 'GEMINI_API_KEY is missing; configure it or use the test-only fake embedder.'}
+    $key=($keyLine -replace '^\s*GEMINI_API_KEY\s*=\s*','').Trim().Trim('"',"'");if([string]::IsNullOrWhiteSpace($key)){throw 'GEMINI_API_KEY is empty; configure it or use the test-only fake embedder.'}
+    $requests=@(foreach($query in $Queries){@{model="models/$ModelName";content=@{parts=@(@{text=$query})};taskType='RETRIEVAL_QUERY';outputDimensionality=$Dimensions}})
+    $payload=@{requests=$requests}|ConvertTo-Json -Depth 8 -Compress
+    try{$response=Invoke-RestMethod -Method Post -Uri ("https://generativelanguage.googleapis.com/v1beta/models/{0}:batchEmbedContents" -f $ModelName) -Headers @{'x-goog-api-key'=$key} -ContentType 'application/json' -Body $payload -TimeoutSec 40}
+    catch{throw ('Gemini query embedding failed safely (exception type: {0}); response body was suppressed.' -f $_.Exception.GetType().Name)}
+    if(@($response.embeddings).Count -ne $Queries.Count){throw 'Gemini query embedding count mismatch; cache was not updated.'}
+    $result=New-Object 'System.Collections.Generic.List[object]';foreach($item in $response.embeddings){$values=[single[]]$item.values;if($values.Count -ne $Dimensions){throw 'Gemini returned an unexpected query vector dimension; cache was not updated.'};$result.Add($values)};return ,$result.ToArray()
+}
 
 $scoringSource = Join-Path $RepoRoot 'src/ECommerce.Infrastructure/AI/RetrievalScoring.cs'
 if (-not ('ECommerce.Infrastructure.AI.RetrievalScoring' -as [type])) { Add-Type -Path $scoringSource }
@@ -48,9 +68,22 @@ $script:RankTimes = [System.Collections.Generic.List[double]]::new()
 $script:TrackRankTiming = $false
 
 if ($CacheForecastOnly) {
+    if($DryRunFromCache){
+        if([string]::IsNullOrWhiteSpace($DryRunDataPath) -or -not (Test-Path -LiteralPath $DryRunDataPath)){throw '-CacheForecastOnly -DryRunFromCache requires a valid -DryRunDataPath.'}
+        $forecastFixture=Get-Content -LiteralPath $DryRunDataPath -Raw|ConvertFrom-Json
+        $catalogCachePath=$forecastFixture.catalogCachePath;$queryCachePath=$forecastFixture.queryCachePath
+        $catalogEntries=if(Test-Path -LiteralPath $catalogCachePath){Get-Content -LiteralPath $catalogCachePath -Raw|ConvertFrom-Json}else{@()}
+        $validCatalogCount=@($catalogEntries|Where-Object{$_.cacheKey -eq "$($_.contentHash):$($_.modelName):$($_.dimensions)" -and @($_.vector).Count -eq [int]$_.dimensions}|Group-Object cacheKey).Count
+        $expectedCount=if($forecastFixture.expectedDocumentChunks){[int]$forecastFixture.expectedDocumentChunks}else{@($forecastFixture.chunks).Count}
+        $queryCache=Read-QueryVectorCache -Path $queryCachePath -ModelName $forecastFixture.modelName -Dimensions ([int]$forecastFixture.dimensions)
+        $forecastRows=@($forecastFixture.development)+@($forecastFixture.authorFixtures)+@($forecastFixture.authorK05Fixtures)+@($forecastFixture.noEvidenceFixtures)
+        $keys=@($forecastRows|ForEach-Object{Get-QueryVectorCacheKey ([string]$_.query) $forecastFixture.modelName ([int]$forecastFixture.dimensions)}|Sort-Object -Unique)
+        $missing=@($keys|Where-Object{-not $queryCache.ContainsKey($_)}).Count
+        Write-Output ('CacheForecastOnly mode=synthetic catalog_valid={0} catalog_expected={1} missing_chunks={2} query_valid={3} expected_unique_queries={4} missing_queries={5} estimated_batches={6} estimated_api_calls=0 cache_written=FALSE' -f $validCatalogCount,$expectedCount,[Math]::Max(0,$expectedCount-$validCatalogCount),$queryCache.Count,$keys.Count,$missing,[Math]::Ceiling($missing/16.0));exit 0
+    }
     $catalogCachePath = Join-Path $RepoRoot 'obj/rag-embedding-cache.json'
     $queryCachePath = Join-Path $RepoRoot 'obj/rag-query-embedding-cache.json'
-    if (-not [IO.File]::Exists($catalogCachePath)) { throw 'Catalog embedding cache is missing.' }
+    if (-not [IO.File]::Exists($catalogCachePath)) { throw "Catalog embedding cache is missing at '$catalogCachePath'. Prepare the catalog cache before forecasting; no DB or provider call was made." }
     $catalogEntries = Get-Content -LiteralPath $catalogCachePath -Raw | ConvertFrom-Json -ErrorAction Stop
     $validCatalogCount = @($catalogEntries | Where-Object {
         $_.modelName -eq 'gemini-embedding-001' -and [int]$_.dimensions -eq 768 -and
@@ -60,12 +93,14 @@ if ($CacheForecastOnly) {
     $fixturePath = Join-Path $RagInputs 'RAG_EVALUATION_QUERIES_V2.jsonl'
     $authorPath = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_K03_K05.jsonl'
     $k05Path = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_K05_PARAPHRASES.jsonl'
+    $noEvidencePath = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_NO_EVIDENCE.jsonl'
     $fixtureRows = @(Get-Content -LiteralPath $fixturePath | ForEach-Object { $_ | ConvertFrom-Json })
     $developmentRows = @($fixtureRows | Where-Object split -eq 'development')
     $authorRows = @(Get-Content -LiteralPath $authorPath | ForEach-Object { $_ | ConvertFrom-Json })
     $k05Rows = @(Get-Content -LiteralPath $k05Path | ForEach-Object { $_ | ConvertFrom-Json })
+    $noEvidenceRows = if(Test-Path -LiteralPath $noEvidencePath){@(Get-Content -LiteralPath $noEvidencePath | ForEach-Object { $_ | ConvertFrom-Json })}else{@()}
     $queryCache = Read-QueryVectorCache -Path $queryCachePath -ModelName 'gemini-embedding-001' -Dimensions 768
-    $queryTexts = @($developmentRows.query) + @($authorRows.query) + @($k05Rows.query)
+    $queryTexts = @($developmentRows.query) + @($authorRows.query) + @($k05Rows.query) + @($noEvidenceRows.query)
     $uniqueQueryKeys = @($queryTexts | ForEach-Object { Get-QueryVectorCacheKey ([string]$_) 'gemini-embedding-001' 768 } | Sort-Object -Unique)
     $missingQueries = @($uniqueQueryKeys | Where-Object { -not $queryCache.ContainsKey($_) }).Count
     Write-Output ('CacheForecastOnly catalog_cache_valid={0} expected_catalog_chunks={1} missing_chunks={2} query_cache_valid={3} expected_unique_queries={4} missing_queries={5} includes_author_k05={6} estimated_query_batches={7} estimated_api_calls=0' -f $validCatalogCount,$ExpectedDocumentChunks,$missingChunks,$queryCache.Count,$uniqueQueryKeys.Count,$missingQueries,[Math]::Ceiling($missingQueries/16.0))
@@ -84,7 +119,7 @@ if ($DryRunFromCache) {
     $chunks = New-Object 'System.Collections.Generic.List[ECommerce.Infrastructure.AI.RetrievalScoringChunk]'
     foreach ($item in $dry.chunks) {
         $key = "$($item.hash):$($dry.modelName):$($dry.dimensions)"
-        if (-not $docCache.ContainsKey($key)) { throw "Dry-run catalog cache miss for fixture chunk $($item.hash)." }
+        if (-not $docCache.ContainsKey($key)) { throw "Dry-run catalog cache is incomplete at chunk hash $($item.hash). Populate the local catalog-vector cache before scoring; no DB/provider call was made." }
         $chunks.Add([ECommerce.Infrastructure.AI.RetrievalScoringChunk]@{ ProductId=[int]$item.productId; Type=[string]$item.type; Content=[string]$item.content; ContentHash=[string]$item.hash; Vector=[single[]]$docCache[$key].vector })
     }
     $development = @($dry.development)
@@ -92,14 +127,26 @@ if ($DryRunFromCache) {
     $authorK05Fixtures = @($dry.authorK05Fixtures)
     $noEvidencePath = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_NO_EVIDENCE.jsonl'
     $noEvidenceRows = if($dry.noEvidenceFixtures){@($dry.noEvidenceFixtures)}elseif(Test-Path -LiteralPath $noEvidencePath){@(Get-Content -LiteralPath $noEvidencePath | ForEach-Object { $_ | ConvertFrom-Json })}else{@()}
-    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query)}
+    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
     $queryCache = Read-QueryVectorCache -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions)
     $script:TrackRankTiming = [bool]$DryRunTrackRankTiming
     $script:RankTimes = [System.Collections.Generic.List[double]]::new()
     $missingRequested=@($allQueries | Where-Object { -not $queryCache.ContainsKey((Get-QueryVectorCacheKey ([string]$_) $dry.modelName ([int]$dry.dimensions))) } | Sort-Object -Unique)
-    $queryVectors = if($Diagnostics -or (-not [string]::IsNullOrWhiteSpace($ExplainQuery) -and $missingRequested.Count -gt 0)){@()}else{Resolve-CachedQueryVectors -Queries $allQueries -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -Cache $queryCache -BatchDelaySeconds 0 -EmbedMissing { throw 'Dry-run is cache-only and cannot embed.' }}
+    $queryBatches=[int][Math]::Ceiling($missingRequested.Count/16.0)
+    if($missingRequested.Count -gt 0 -and -not $AllowEmbeddingCall -and -not $Diagnostics){
+        Write-Output ('CACHE_MISS_FORECAST mode={0} queries={1} missing_vectors={2} estimated_batches={3} estimated_api_calls={4} cache_written=FALSE' -f $(if($NoEvidenceOnly){'NoEvidenceOnly'}elseif($ExplainQuery){'ExplainQuery'}elseif($AuthorK05Only){'AuthorK05Only'}else{'DryRunFromCache'}),$allQueries.Count,$missingRequested.Count,$queryBatches,$queryBatches)
+        exit 0
+    }
+    if($missingRequested.Count -gt 0){
+        $embedBlock=if($UseFakeEmbedder){ { param($batch) Get-FakeQueryEmbeddings -Queries $batch -Dimensions ([int]$dry.dimensions) } }else{ { param($batch) Get-GeminiQueryEmbeddings -Queries $batch -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -RepoRoot $RepoRoot } }
+    }else{$embedBlock={param($batch) throw 'Unexpected query cache miss after preflight; no embedding invoked.'}}
+    if($Diagnostics){$queryVectors=@()}else{$queryVectors=Resolve-CachedQueryVectors -Queries $allQueries -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -Cache $queryCache -BatchDelaySeconds 0 -EmbedMissing $embedBlock}
+    if(-not $Diagnostics -and $null -eq $queryVectors){throw 'Query vector resolver returned null. Check cache entries and rerun; ranking was skipped.'}
+    if(-not $Diagnostics -and @($queryVectors).Count -ne $allQueries.Count){throw "Query vector count mismatch: requested=$($allQueries.Count), returned=$(@($queryVectors).Count). Ranking was skipped."}
     $vectorMap = @{}
     if($Diagnostics) { }
+    elseif($ExplainQuery){ }
+    elseif($NoEvidenceOnly){for($i=0;$i -lt $noEvidenceRows.Count;$i++){$vectorMap[[string]$noEvidenceRows[$i].id]=$queryVectors[$i]}}
     elseif($AuthorK05Only){for ($i=0; $i -lt $authorK05Fixtures.Count; $i++) { $vectorMap[[string]$authorK05Fixtures[$i].id] = $queryVectors[$i] }}
     else {
         for ($i=0; $i -lt $development.Count; $i++) { $vectorMap[[string]$development[$i].id] = $queryVectors[$i] }
@@ -113,8 +160,7 @@ if ($DryRunFromCache) {
     Write-Output ('DryRunCacheForecast missing_chunks=0 missing_queries={0} estimated_api_calls=0 chunks={1} queries={2}' -f $(if($Diagnostics){$missingK05Vectors}else{0}),$chunks.Count,$allQueries.Count)
     if($NoEvidenceOnly){
         $missing=@($missingRequested).Count; $calls=[Math]::Ceiling($missing/16.0)
-        Write-Output ('NO_EVIDENCE_FORECAST queries={0} missing_vectors={1} estimated_query_batches={2} estimated_api_calls={2} cache_only=TRUE' -f $noEvidenceRows.Count,$missing,$calls)
-        if($missing -gt 0){Write-Output 'NO_EVIDENCE_METRICS=NOT_RUN; rerun only after explicitly allowing embeddings and populating the local cache.';exit 0}
+        Write-Output ('NO_EVIDENCE_FORECAST queries={0} missing_vectors={1} estimated_query_batches={2} estimated_api_calls={2} cache_only={3}' -f $noEvidenceRows.Count,$missing,$calls,(-not $AllowEmbeddingCall))
         $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
         $vectors=@{};for($i=0;$i -lt $noEvidenceRows.Count;$i++){$vectors[[string]$noEvidenceRows[$i].id]=$queryVectors[$i]}
         $empty=0
@@ -123,18 +169,6 @@ if ($DryRunFromCache) {
     }
     if(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){
         $missing=@($missingRequested).Count
-        if($missing -gt 0 -and -not $AllowEmbeddingCall){Write-Output ('EXPLAIN_QUERY cache_miss=TRUE missing_vectors={0} forecast_api_calls=1 allow_embedding_call=FALSE; rerun with -AllowEmbeddingCall to request only this query vector' -f $missing);exit 0}
-        if($missing -gt 0 -and $AllowEmbeddingCall){
-            $envFile=Join-Path $RepoRoot '.env';$keyLine=Get-Content -LiteralPath $envFile|Where-Object{$_ -match '^\s*GEMINI_API_KEY\s*='}|Select-Object -First 1
-            if(-not $keyLine){throw 'GEMINI_API_KEY is missing; no query vector was requested.'}
-            $key=($keyLine -replace '^\s*GEMINI_API_KEY\s*=\s*','').Trim().Trim('"',"'");if([string]::IsNullOrWhiteSpace($key)){throw 'GEMINI_API_KEY is empty; no query vector was requested.'}
-            $payload=@{content=@{parts=@(@{text=$ExplainQuery})};taskType='RETRIEVAL_QUERY';outputDimensionality=[int]$dry.dimensions}|ConvertTo-Json -Depth 6 -Compress
-            try{$response=Invoke-RestMethod -Method Post -Uri ("https://generativelanguage.googleapis.com/v1beta/models/{0}:embedContent" -f $dry.modelName) -Headers @{'x-goog-api-key'=$key} -ContentType 'application/json' -Body $payload -TimeoutSec 30}
-            catch{throw ('Gemini query embedding failed safely (exception type: {0}); response content was not printed.' -f $_.Exception.GetType().Name)}
-            $vector=[single[]]$response.embedding.values;if($vector.Count -ne [int]$dry.dimensions){throw 'Gemini returned an unexpected vector dimension; query cache was not changed.'}
-            $cacheKey=Get-QueryVectorCacheKey $ExplainQuery $dry.modelName ([int]$dry.dimensions);$queryCache[$cacheKey]=[pscustomobject]@{cacheKey=$cacheKey;contentHash=($cacheKey -split ':')[0];modelName=$dry.modelName;dimensions=[int]$dry.dimensions;vector=$vector}
-            Write-AtomicCacheFile -Path $dry.queryCachePath -Content (ConvertTo-Json -InputObject @($queryCache.Values) -Depth 5)
-        }
         $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
         $qkey=Get-QueryVectorCacheKey $ExplainQuery $dry.modelName ([int]$dry.dimensions);$qvec=[single[]]$queryCache[$qkey].vector
         $token='';$sku=[ECommerce.Infrastructure.AI.RetrievalScoring]::TryResolveSkuIntent($ExplainQuery,$chunks.ToArray(),[ref]$token)
@@ -144,10 +178,10 @@ if ($DryRunFromCache) {
             $score=[ECommerce.Infrastructure.AI.RetrievalScoring]::ScoreProduct($ExplainQuery,$qvec,$pcs,$true,[double]$selection.threshold,[double]$selection.semanticWeight,[bool]$sku,[string]$token)
             if(-not $score.Included){continue}
             $terms=[ECommerce.Infrastructure.AI.RetrievalScoring]::Normalize($ExplainQuery).Split(' ',[StringSplitOptions]::RemoveEmptyEntries)|Where-Object Length -gt 1
-            $matches=@();foreach($chunk in $pcs){$norm=[ECommerce.Infrastructure.AI.RetrievalScoring]::Normalize($chunk.Content);$hit=@($terms|Where-Object{$norm -match ('(?<![a-z0-9])'+[regex]::Escape($_)+'(?![a-z0-9])')});if($hit.Count){$matches+=('{0}:[{1}]' -f $chunk.Type,($hit -join ','))}}
+            $termMatches=New-Object 'System.Collections.Generic.List[string]';foreach($chunk in $pcs){$norm=[ECommerce.Infrastructure.AI.RetrievalScoring]::Normalize($chunk.Content);$hit=@($terms|Where-Object{$norm -match ('(?<![a-z0-9])'+[regex]::Escape($_)+'(?![a-z0-9])')});if($hit.Count){$termMatches.Add(('{0}:[{1}]' -f $chunk.Type,($hit -join ',')))}}
             $reason=@();if($score.LexicalScore -gt 0){$reason+='lexical>0'};if($score.SemanticScore -ge [double]$selection.threshold){$reason+='semantic>=threshold'};if($score.CombinedScore -ge [ECommerce.Infrastructure.AI.RetrievalScoring]::MinimumCombinedScore){$reason+='combined>=0.22'}
             if($score.LexicalScore -gt 0){$lexicalBroad++}elseif($score.SemanticScore -ge [double]$selection.threshold){$semanticAbove++}else{$other++}
-            Write-Output ('EXPLAIN_PRODUCT id={0} lexical={1:F4} overlap={2} semantic_max={3:F4} combined={4:F4} reason={5}' -f $score.ProductId,$score.LexicalScore,($matches -join ';'),$score.SemanticScore,$score.CombinedScore,($reason -join ','))
+            Write-Output ('EXPLAIN_PRODUCT id={0} lexical={1:F4} overlap={2} semantic_max={3:F4} combined={4:F4} reason={5}' -f $score.ProductId,$score.LexicalScore,($termMatches -join ';'),$score.SemanticScore,$score.CombinedScore,($reason -join ','))
         }
         $hypothesis=if($lexicalBroad -gt 0){'a: lexical>0 includes products'}elseif($semanticAbove -gt 0){'b: semantic threshold includes products'}elseif($other -gt 0){'c: combined threshold or other inclusion path'}else{'none: no products included'}
         Write-Output ('EXPLAIN_SUMMARY hypothesis={0} lexical_only_count={1} semantic_only_count={2} other_count={3} sku_branch={4}; ranking unchanged' -f $hypothesis,$lexicalBroad,$semanticAbove,$other,$sku);exit 0

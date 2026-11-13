@@ -119,7 +119,60 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Explain-query dry-run failed: $output" }
     Assert-True ($output.Contains('EXPLAIN_SUMMARY') -and $output.Contains('ranking unchanged')) 'Explain-query diagnosis did not report its hypothesis.'
 
-    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Modes=lexical,hybrid,author-k05-only,diagnostics,no-evidence,explain;ExternalCalls=0;Database=0;SelectionWritten=TRUE'
+    $modeCases=@(
+        @{Name='ExplainQuery';Args=@('-ExplainQuery','red apple');Expected='EXPLAIN_SUMMARY'},
+        @{Name='NoEvidenceOnly';Args=@('-NoEvidenceOnly');Expected='NO_EVIDENCE_METRICS'},
+        @{Name='AuthorK05Only';Args=@('-AuthorK05Only');Expected='AUTHOR_K05 lexical'},
+        @{Name='DryRunFromCache';Args=@('-DevelopmentOnly');Expected='SelectedDevThreshold'},
+        @{Name='CacheForecastOnly';Args=@('-CacheForecastOnly');Expected='CacheForecastOnly mode=synthetic'}
+    )
+    foreach($modeCase in $modeCases){
+        foreach($cacheState in @('full','partial','empty')){
+            $targetQuery=if($modeCase.Name -eq 'ExplainQuery'){'red apple'}elseif($modeCase.Name -eq 'NoEvidenceOnly'){$noEvidence[0].query}elseif($modeCase.Name -eq 'AuthorK05Only'){$authorK05[0].query}else{$development[0].query}
+            $targetKey=Get-QueryVectorCacheKey $targetQuery $model $dimensions
+            $stateEntries=@($queryEntries)
+            if($cacheState -eq 'partial'){$stateEntries=@($queryEntries|Where-Object cacheKey -ne $targetKey)}elseif($cacheState -eq 'empty'){$stateEntries=@()}
+            Write-AtomicCacheFile -Path $queryCachePath -Content (ConvertTo-Json -InputObject @($stateEntries) -Depth 5)
+            $catalogState=@($catalogEntries)
+            if($modeCase.Name -eq 'CacheForecastOnly'){
+                if($cacheState -eq 'partial'){$catalogState=@($catalogEntries|Select-Object -Skip 1)}elseif($cacheState -eq 'empty'){$catalogState=@()}
+                Write-AtomicCacheFile -Path $catalogCachePath -Content (ConvertTo-Json -InputObject @($catalogState) -Depth 5)
+            }else{Write-AtomicCacheFile -Path $catalogCachePath -Content (ConvertTo-Json -InputObject @($catalogEntries) -Depth 5)}
+            $queryBefore=[IO.File]::ReadAllText($queryCachePath);$catalogBefore=[IO.File]::ReadAllText($catalogCachePath)
+            $common=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$evaluatorPath,'-RepoRoot',$repoRoot,'-RagInputs',$tempRoot,'-DryRunFromCache','-DryRunDataPath',$fixturePath)+$modeCase.Args
+            $withoutArgs=$common
+            $priorPreference=$ErrorActionPreference;$ErrorActionPreference='Continue';$withoutOutput=(& $powershell @withoutArgs 2>&1|Out-String);$withoutExit=$LASTEXITCODE;$ErrorActionPreference=$priorPreference
+            if($withoutExit -ne 0){throw "$($modeCase.Name) $cacheState without permission returned $($withoutExit): $withoutOutput"}
+            if($cacheState -eq 'full'){
+                if(-not $withoutOutput.Contains($modeCase.Expected)){throw "$($modeCase.Name) full-cache output was missing expected result: $withoutOutput"}
+            }elseif(-not $withoutOutput.Contains('CACHE_MISS_FORECAST') -and $modeCase.Name -ne 'CacheForecastOnly'){
+                throw "$($modeCase.Name) $cacheState did not print a cache-miss forecast: $withoutOutput"
+            }
+            if($cacheState -ne 'full' -and $modeCase.Name -eq 'CacheForecastOnly' -and (-not $withoutOutput.Contains('missing_chunks=') -or -not $withoutOutput.Contains('missing_queries='))){throw "CacheForecastOnly $cacheState did not report missing cache counts: $withoutOutput"}
+            if($cacheState -ne 'full' -and $modeCase.Name -ne 'CacheForecastOnly' -and (-not $withoutOutput.Contains('missing_vectors=') -or -not $withoutOutput.Contains('estimated_batches=') -or -not $withoutOutput.Contains('estimated_api_calls='))){throw "$($modeCase.Name) omitted detailed forecast counts: $withoutOutput"}
+            if([IO.File]::ReadAllText($queryCachePath) -cne $queryBefore){throw "${($modeCase.Name)} wrote query cache without AllowEmbeddingCall."}
+            if($modeCase.Name -ne 'CacheForecastOnly' -and $cacheState -ne 'full'){
+                $withArgs=$common+@('-AllowEmbeddingCall','-UseFakeEmbedder')
+                $priorPreference=$ErrorActionPreference;$ErrorActionPreference='Continue';$withOutput=(& $powershell @withArgs 2>&1|Out-String);$withExit=$LASTEXITCODE;$ErrorActionPreference=$priorPreference
+                if($withExit -ne 0 -or -not $withOutput.Contains($modeCase.Expected)){throw "$($modeCase.Name) $cacheState fake embed run failed ($withExit): $withOutput"}
+                if([IO.File]::ReadAllText($queryCachePath) -ceq $queryBefore){throw "$($modeCase.Name) did not cache fake embeddings after explicit permission."}
+            }elseif($modeCase.Name -eq 'CacheForecastOnly'){
+                $withArgs=$common+@('-AllowEmbeddingCall','-UseFakeEmbedder')
+                $withOutput=(& $powershell @withArgs 2>&1|Out-String);$withExit=$LASTEXITCODE
+                if($withExit -ne 0 -or -not $withOutput.Contains($modeCase.Expected)){throw "CacheForecastOnly $cacheState with permission failed: $withOutput"}
+                if([IO.File]::ReadAllText($queryCachePath) -cne $queryBefore -or [IO.File]::ReadAllText($catalogCachePath) -cne $catalogBefore){throw 'CacheForecastOnly wrote cache despite its read-only contract.'}
+            }
+            if($cacheState -eq 'full' -and $modeCase.Name -ne 'CacheForecastOnly'){
+                $withArgs=$common+@('-AllowEmbeddingCall','-UseFakeEmbedder')
+                $priorPreference=$ErrorActionPreference;$ErrorActionPreference='Continue';$withOutput=(& $powershell @withArgs 2>&1|Out-String);$withExit=$LASTEXITCODE;$ErrorActionPreference=$priorPreference
+                if($withExit -ne 0 -or -not $withOutput.Contains($modeCase.Expected)){throw "$($modeCase.Name) full-cache allowed run failed: $withOutput"}
+                if([IO.File]::ReadAllText($queryCachePath) -cne $queryBefore){throw "$($modeCase.Name) called embedder despite a full cache."}
+            }
+            if($modeCase.Name -eq 'CacheForecastOnly'){Write-AtomicCacheFile -Path $catalogCachePath -Content (ConvertTo-Json -InputObject @($catalogEntries) -Depth 5)}
+        }
+    }
+
+    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Modes=lexical,hybrid,author-k05-only,diagnostics,no-evidence,explain,cache-forecast;CacheStates=full,partial,empty;FakeEmbedder=allowed-only;ExternalCalls=0;Database=0'
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
