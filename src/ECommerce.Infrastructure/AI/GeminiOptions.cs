@@ -9,6 +9,9 @@ public sealed class GeminiOptions
     public int EmbeddingDimensions { get; set; } = 768;
     public string GenerationThinkingLevel { get; set; } = "low";
     public int MaxOutputTokens { get; set; } = 600;
+    public int GenerationTimeoutSeconds { get; set; } = 10;
+    public int GenerationFailureThreshold { get; set; } = 3;
+    public int GenerationCircuitOpenSeconds { get; set; } = 60;
     public int EmbeddingBatchDelaySeconds { get; set; } = 3;
     public int EmbeddingRetryMaxAttempts { get; set; } = 5;
     public int EmbeddingRetryBaseDelaySeconds { get; set; } = 15;

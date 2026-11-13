@@ -296,6 +296,7 @@ public sealed class AiRagRemediationTests
         Assert.False(response.Retrieval.HasEvidence);
         Assert.Empty(response.Products);
         Assert.Empty(response.Sources);
+        Assert.Equal("weak", response.EvidenceStrength);
     }
 
     [Fact]
@@ -342,6 +343,106 @@ public sealed class AiRagRemediationTests
     }
 
     [Fact]
+    public async Task Assistant_WeakEvidenceSkipsProviderButKeepsRetrievedProductsAndSources()
+    {
+        var product = ProductDto(31, "Possible headset");
+        var candidate = new AssistantRetrievalCandidate(product, 0, .64, .16,
+            [new AssistantSourceChunk(31, "Audio", null, "description", "Portable listening accessory", "SOURCE-31", "fake-v1")]);
+        var search = new FakeSearch([candidate]);
+        var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("should not be used", [31]));
+        var service = new AssistantService(search, answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+
+        var response = await service.ChatAsync(new AssistantChatRequest("zzqv-no-catalog-match"), null);
+
+        Assert.Equal("weak", response.EvidenceStrength);
+        Assert.Equal(0, answers.CallCount);
+        Assert.Equal(31, Assert.Single(response.Products).Id);
+        Assert.Contains(response.Sources, source => source.ProductId == 31 && source.ContentHash == "SOURCE-31");
+        Assert.StartsWith("Mình chưa tìm thấy sản phẩm khớp chắc chắn. Đây chỉ là gợi ý gần nhất:", response.Answer);
+        Assert.DoesNotContain("phù hợp với", response.Answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Assistant_LexicalEvidenceIsStrongAndCallsProvider()
+    {
+        var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("Có mẫu này.", [9]));
+        var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Wireless headset"))]), answers,
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+
+        var response = await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
+
+        Assert.Equal("strong", response.EvidenceStrength);
+        Assert.Equal(1, answers.CallCount);
+    }
+
+    [Fact]
+    public async Task Assistant_ExplicitSkuBranchIsStrongEvenWhenTheExactSkuIsMissing()
+    {
+        var search = new FakeSearch([]);
+        var answers = new FakeAnswerProvider(null);
+        var service = new AssistantService(search, answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+
+        var response = await service.ChatAsync(new AssistantChatRequest("Find SKU NONEXISTENT-V2-000"), null);
+
+        Assert.Equal("strong", response.EvidenceStrength);
+        Assert.False(response.Retrieval.HasEvidence);
+        Assert.Equal(0, answers.CallCount);
+    }
+
+    [Fact]
+    public async Task Assistant_RealCatalogSkuIsStrongEvenWithoutCueOrLexicalOverlap()
+    {
+        var product = ProductDto(17, "Wireless audio device");
+        var candidate = new AssistantRetrievalCandidate(product, 0, .64, .16,
+            [new AssistantSourceChunk(17, "Demo", null, "summary", "Wireless audio device. SKU: DEMO-V2-00038.", "HASH-SKU", "fake-v1")]);
+        var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("Found by exact SKU.", [17]));
+        var service = new AssistantService(new FakeSearch([candidate]), answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+
+        var response = await service.ChatAsync(new AssistantChatRequest("DEMO-V2-00038"), null);
+
+        Assert.Equal("strong", response.EvidenceStrength);
+        Assert.Equal(1, answers.CallCount);
+        Assert.Equal([17], response.Products.Select(product => product.Id));
+    }
+
+    [Fact]
+    public async Task Assistant_WeakEvidenceClassificationDoesNotRemoveStructuredFilters()
+    {
+        var search = new FakeSearch([new AssistantRetrievalCandidate(ProductDto(41, "Nearest result"), 0, .62, .155,
+            [new AssistantSourceChunk(41, "Audio", null, "summary", "A device category", "HASH-41", "fake-v1")])]);
+        var answers = new FakeAnswerProvider(null);
+        var service = new AssistantService(search, answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+
+        var response = await service.ChatAsync(new AssistantChatRequest("quiet meadow", new AssistantChatFilters(CategoryId: 1, SellerId: 2, MinPrice: 5, MaxPrice: 20, InStockOnly: true)), null);
+
+        Assert.Equal("weak", response.EvidenceStrength);
+        Assert.Equal(1, search.CallCount);
+        Assert.Equal(new AssistantChatFilters(CategoryId: 1, SellerId: 2, MinPrice: 5, MaxPrice: 20, InStockOnly: true), search.LastFilters);
+        Assert.Equal(0, answers.CallCount);
+    }
+
+    [Fact]
+    public async Task Assistant_GenerationCircuitOpensAndAllowsOneHalfOpenRetry()
+    {
+        var clock = new ManualTimeProvider(DateTimeOffset.Parse("2026-11-13T00:00:00Z"));
+        var options = new GeminiOptions { GenerationFailureThreshold = 2, GenerationCircuitOpenSeconds = 60 };
+        var breaker = new AssistantGenerationCircuitBreaker(options, clock);
+        var answers = new FakeAnswerProvider(null, fail: true);
+        var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Wireless headset"))]), answers,
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, breaker);
+
+        await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
+        await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
+        await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
+        Assert.Equal(2, answers.CallCount);
+
+        clock.Advance(TimeSpan.FromSeconds(60));
+        await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
+        await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
+        Assert.Equal(3, answers.CallCount);
+    }
+
+    [Fact]
     public async Task Assistant_PassesBoundedRecentTurnsForProductFollowUp()
     {
         var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("Yes, the catalog item is available.", [9]));
@@ -382,6 +483,7 @@ public sealed class AiRagRemediationTests
         Assert.Equal(0, answers.CallCount);
         Assert.DoesNotContain("server-key-test", response.Answer, StringComparison.Ordinal);
         Assert.DoesNotContain("system instruction", response.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("weak", response.EvidenceStrength);
     }
 
     [Fact]
@@ -519,6 +621,28 @@ public sealed class AiRagRemediationTests
         Assert.Equal("AI provider is temporarily unavailable.", exception.Message);
         Assert.DoesNotContain("invalid-key", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GeminiProvider_UsesConfiguredGenerationTimeoutAndReturnsSafeError()
+    {
+        var client = new HttpClient(new FakeHttpHandler(async (_, ct) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        })) { BaseAddress = new Uri("https://generativelanguage.googleapis.com/") };
+        var provider = new GeminiAssistantProvider(new FakeHttpClientFactory(client), Options.Create(new GeminiOptions
+        {
+            ApiKey = "server-key-test",
+            GenerationTimeoutSeconds = 1
+        }), NullLogger<GeminiAssistantProvider>.Instance);
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+
+        var exception = await Assert.ThrowsAsync<AssistantProviderException>(() => provider.GenerateAsync("question", [], []));
+
+        Assert.Equal("AI provider is temporarily unavailable.", exception.Message);
+        Assert.DoesNotContain("server-key-test", exception.Message, StringComparison.Ordinal);
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -664,6 +788,13 @@ public sealed class AiRagRemediationTests
     private static AssistantRetrievalCandidate Candidate(ProductDto product) => new(product, .8, .2, .5,
         [new AssistantSourceChunk(product.Id, "Demo", null, "summary", product.Name, "HASH", "fake-v1")]);
 
+    private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset _now = now;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan duration) => _now += duration;
+    }
+
     private static GeminiAssistantProvider Provider(FakeHttpHandler handler) => new(
         new FakeHttpClientFactory(new HttpClient(handler) { BaseAddress = new Uri("https://generativelanguage.googleapis.com/") }),
         Options.Create(new GeminiOptions
@@ -715,9 +846,10 @@ public sealed class AiRagRemediationTests
     private sealed class FakeSearch(IReadOnlyList<AssistantRetrievalCandidate> candidates) : ISemanticSearchService
     {
         public int CallCount { get; private set; }
+        public AssistantChatFilters? LastFilters { get; private set; }
         public Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(string query, AssistantChatFilters? filters, int limit, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<AssistantRetrievalCandidate>>(CountAndReturn());
-        private IReadOnlyList<AssistantRetrievalCandidate> CountAndReturn() { CallCount++; return candidates; }
+            Task.FromResult<IReadOnlyList<AssistantRetrievalCandidate>>(CountAndReturn(filters));
+        private IReadOnlyList<AssistantRetrievalCandidate> CountAndReturn(AssistantChatFilters? filters) { CallCount++; LastFilters = filters; return candidates; }
     }
 
     private sealed class FakeAnswerProvider(AssistantGeneratedAnswer? answer, bool fail = false) : IAssistantAnswerProvider

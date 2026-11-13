@@ -8,3 +8,7 @@
 4. **Anonymous behavior:** if Khánh provides an explicitly public, non-personalized popular/trending mode, the adapter may use that for a guest. Otherwise return an empty recommendation list and let the assistant continue with catalog retrieval or a text-only no-result response. Never substitute another customer's profile or history.
 5. **Fresh commerce fields:** populate price, stock, rating and seller display data from current backend DTO/catalog state. RAG uses only the product IDs and opaque retrieval evidence returned by its own candidate search.
 6. **Acceptance handshake:** Khánh confirms the owned service/interface and guest policy; both lanes agree that the adapter returns `IReadOnlyList<ProductDto>` and that integration is validated on the same commit. This proposal does not authorize a shared DTO/API change.
+
+## RAG response addition — evidence strength
+
+The RAG lane adds `evidenceStrength: "strong" | "weak"` to `AssistantChatResponse`. This is an additive response field owned by the RAG lane; it does not change the shared `ProductDto`, recommendation service contract, product order, or source IDs. Weak lexical evidence uses a local answer and skips Gemini generation. Recommendation behavior and the Recommendation lane's ranking remain unchanged.

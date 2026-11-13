@@ -147,14 +147,23 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
 
     private async Task<HttpResponseMessage> SendBoundedAsync(HttpRequestMessage request, CancellationToken ct)
     {
-        await ProviderConcurrency.WaitAsync(ct);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(_options.GenerationTimeoutSeconds, 1, 120)));
+        var acquired = false;
         try
         {
-            return await _clients.CreateClient("GeminiClient").SendAsync(request, ct);
+            await ProviderConcurrency.WaitAsync(timeout.Token);
+            acquired = true;
+            return await _clients.CreateClient("GeminiClient").SendAsync(request, timeout.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Gemini generation timed out after {TimeoutSeconds} seconds.", Math.Clamp(_options.GenerationTimeoutSeconds, 1, 120));
+            throw new AssistantProviderException("AI provider is temporarily unavailable.");
         }
         finally
         {
-            ProviderConcurrency.Release();
+            if (acquired) ProviderConcurrency.Release();
         }
     }
 

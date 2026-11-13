@@ -25,6 +25,7 @@ public sealed class AssistantEndpointTests
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Empty(body.RootElement.GetProperty("products").EnumerateArray());
         Assert.Empty(body.RootElement.GetProperty("sources").EnumerateArray());
+        Assert.Equal("weak", body.RootElement.GetProperty("evidenceStrength").GetString());
     }
 
     [Fact]

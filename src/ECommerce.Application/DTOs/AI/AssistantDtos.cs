@@ -29,7 +29,8 @@ public sealed record AssistantChatResponse(
     IReadOnlyList<ProductDto> Products,
     IReadOnlyList<ProductSourceDto> Sources,
     RetrievalMetadataDto Retrieval,
-    string? ConversationId = null);
+    string? ConversationId = null,
+    string EvidenceStrength = "strong");
 
 public sealed record ProductSourceDto(string Type, int ProductId, string ChunkType, string ContentHash);
 

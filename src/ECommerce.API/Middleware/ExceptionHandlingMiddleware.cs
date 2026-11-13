@@ -24,6 +24,13 @@ public class ExceptionHandlingMiddleware
         {
             await WriteAsync(context, StatusCodes.Status400BadRequest, ex.Message);
         }
+        catch (BadHttpRequestException ex)
+        {
+            var message = ex.StatusCode == StatusCodes.Status413PayloadTooLarge
+                ? "Request body is too large."
+                : "The request could not be processed.";
+            await WriteAsync(context, ex.StatusCode, message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception");

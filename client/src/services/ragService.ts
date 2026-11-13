@@ -9,6 +9,7 @@ export interface RagResult {
   similarProducts: Product[];
   recommendedProducts?: Product[];
   confidence: number;
+  evidenceStrength: "strong" | "weak";
   sources: { type: string; productId: number; chunkType: string; contentHash: string }[];
   conversationId?: string;
 }
@@ -18,6 +19,7 @@ interface AssistantResponse {
   products: Product[];
   sources: RagResult["sources"];
   retrieval: { mode: string; hasEvidence: boolean };
+  evidenceStrength?: "strong" | "weak";
   conversationId?: string;
 }
 
@@ -40,13 +42,15 @@ export async function executeRagQuery(
     const products = data.products || [];
     const isRecommendation = data.retrieval?.mode === "recommendation";
     const hasEvidence = data.retrieval?.hasEvidence ?? products.length > 0;
+    const evidenceStrength = data.evidenceStrength ?? (hasEvidence ? "strong" : "weak");
     return {
       type: isRecommendation ? "recommendation" : hasEvidence ? "matched" : "not_found",
       message: data.answer,
       matchedProducts: isRecommendation ? [] : products,
       similarProducts: [],
       recommendedProducts: isRecommendation ? products : [],
-      confidence: hasEvidence ? 0.9 : 0.2,
+      confidence: hasEvidence ? (evidenceStrength === "strong" ? 0.9 : 0.45) : 0.2,
+      evidenceStrength,
       sources: data.sources || [],
       conversationId: data.conversationId,
     };
@@ -59,6 +63,7 @@ export async function executeRagQuery(
       similarProducts: [],
       recommendedProducts: [],
       confidence: 0,
+      evidenceStrength: "weak",
       sources: [],
     };
   }

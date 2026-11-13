@@ -3,9 +3,11 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $dbScript = Join-Path $PSScriptRoot 'db-snapshot.ps1'
 $smokeScript = Join-Path $PSScriptRoot 'guest-smoke.ps1'
 $listenerTest = Join-Path $PSScriptRoot 'Test-GuestSmokeHttpListener.ps1'
+$probeScript = Join-Path $PSScriptRoot 'gemini-generation-probe.ps1'
+$probeTest = Join-Path $PSScriptRoot 'Test-GeminiGenerationProbeHttpListener.ps1'
 $powershell = (Get-Command powershell.exe).Source
 
-foreach ($path in @($dbScript,$smokeScript,$listenerTest)) {
+foreach ($path in @($dbScript,$smokeScript,$listenerTest,$probeScript,$probeTest)) {
     $tokens=$null; $errors=$null
     [System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)|Out-Null
     if ($errors.Count) { throw "PowerShell parser errors in ${path}: $($errors -join '; ')" }
@@ -17,13 +19,15 @@ if ($LASTEXITCODE -ne 0 -or -not $dbOutput.Contains('Mode=DRY_RUN;Server=FAKE-SQ
 }
 
 $smokeOutput = (& $powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -DryRun 2>&1 | Out-String)
-if ($LASTEXITCODE -ne 0 -or @([regex]::Matches($smokeOutput,'Case=')).Count -ne 11 -or -not $smokeOutput.Contains('Case=prompt-extraction-request;Result=PASS;HTTP=200;ProductCount=0') -or -not $smokeOutput.Contains('Case=payload-too-large-413;Result=PASS;HTTP=413')) {
+if ($LASTEXITCODE -ne 0 -or @([regex]::Matches($smokeOutput,'Case=')).Count -ne 16 -or -not $smokeOutput.Contains('Case=no-result;Result=PASS;HTTP=200') -or -not $smokeOutput.Contains('Case=rate-limit-intentional;Result=PASS;HTTP=429') -or -not $smokeOutput.Contains('Case=prompt-extraction-request;Result=PASS;HTTP=200;ProductCount=0') -or -not $smokeOutput.Contains('Case=payload-too-large-413;Result=PASS;HTTP=413')) {
     throw "Guest smoke fake dry-run failed: $smokeOutput"
 }
 $showAnswerOutput = (& $powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -DryRun -ShowAnswer 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0 -or -not $showAnswerOutput.Contains('[REDACTED]') -or $showAnswerOutput.Contains('AQ.ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')) {
     throw "Guest smoke answer redaction check failed: $showAnswerOutput"
 }
+$probeDryRun = (& $powershell -NoProfile -ExecutionPolicy Bypass -File $probeScript -DryRun 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0 -or -not $probeDryRun.Contains('KeyRead=FALSE;Network=0')) { throw "Gemini generation probe dry-run failed: $probeDryRun" }
 
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -35,4 +39,4 @@ $ErrorActionPreference = $previousErrorActionPreference
 if ($unsafeDbExitCode -eq 0 -or -not $unsafeDb.Contains('Safety stop')) { throw 'DB snapshot did not stop on a non-development database name.' }
 if ($unsafeHostExitCode -eq 0 -or -not $unsafeHost.Contains('Safety stop')) { throw 'Guest smoke did not stop for a non-localhost target.' }
 
-Write-Output 'LocalAcceptanceScripts=PASS;PowerShell=5.1;Parser=PASS;DbSnapshotFake=PASS;GuestSmokeFakeCases=11;UnsafeTargetGuards=PASS;Network=0;Database=0'
+Write-Output 'LocalAcceptanceScripts=PASS;PowerShell=5.1;Parser=PASS;DbSnapshotFake=PASS;GuestSmokeFakeCases=16;GeminiProbeDryRun=PASS;UnsafeTargetGuards=PASS;Network=0;Database=0'

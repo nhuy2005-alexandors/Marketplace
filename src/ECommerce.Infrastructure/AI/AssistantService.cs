@@ -15,17 +15,20 @@ public sealed class AssistantService : IAssistantService
     private readonly IAssistantAnswerProvider _answers;
     private readonly IRecommendationProvider _recommendations;
     private readonly ILogger<AssistantService> _logger;
+    private readonly AssistantGenerationCircuitBreaker _generationCircuitBreaker;
 
     public AssistantService(
         ISemanticSearchService search,
         IAssistantAnswerProvider answers,
         IRecommendationProvider recommendations,
-        ILogger<AssistantService> logger)
+        ILogger<AssistantService> logger,
+        AssistantGenerationCircuitBreaker? generationCircuitBreaker = null)
     {
         _search = search;
         _answers = answers;
         _recommendations = recommendations;
         _logger = logger;
+        _generationCircuitBreaker = generationCircuitBreaker ?? new AssistantGenerationCircuitBreaker(new GeminiOptions());
     }
 
     public async Task<AssistantChatResponse> ChatAsync(AssistantChatRequest request, int? customerId, CancellationToken ct = default)
@@ -43,26 +46,41 @@ public sealed class AssistantService : IAssistantService
             {
                 var sources = products.Select(product => new ProductSourceDto("recommendation", product.Id, "recommendation", string.Empty)).ToArray();
                 return new AssistantChatResponse("Đây là các sản phẩm được hệ thống gợi ý cho bạn.", products, sources,
-                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"));
+                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong");
             }
         }
+        var skuBranch = IsExplicitSkuBranch(query, candidates);
+        var evidenceStrength = skuBranch || candidates.Any(candidate => candidate.LexicalScore > 0) ? "strong" : "weak";
         if (candidates.Count == 0)
-            return NoEvidence(request.Conversation?.ConversationId);
+            return NoEvidence(request.Conversation?.ConversationId, evidenceStrength);
 
         AssistantGeneratedAnswer? generated = null;
-        try
+        var halfOpenProbe = false;
+        var generationAllowed = evidenceStrength == "strong" && _generationCircuitBreaker.TryAcquire(out halfOpenProbe);
+        if (generationAllowed)
         {
-            var turns = (request.Conversation?.RecentTurns ?? []).Where(turn =>
-                    (turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase) || turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase)) &&
-                    !string.IsNullOrWhiteSpace(turn.Content))
-                .TakeLast(4).Select(turn => turn with { Content = turn.Content.Trim()[..Math.Min(turn.Content.Trim().Length, 500)] }).ToArray();
-            generated = await _answers.GenerateAsync(query, candidates, turns, ct);
+            try
+            {
+                var turns = (request.Conversation?.RecentTurns ?? []).Where(turn =>
+                        (turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase) || turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase)) &&
+                        !string.IsNullOrWhiteSpace(turn.Content))
+                    .TakeLast(4).Select(turn => turn with { Content = turn.Content.Trim()[..Math.Min(turn.Content.Trim().Length, 500)] }).ToArray();
+                generated = await _answers.GenerateAsync(query, candidates, turns, ct);
+                _generationCircuitBreaker.RecordSuccess();
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                _generationCircuitBreaker.AbandonHalfOpenProbe(halfOpenProbe);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _generationCircuitBreaker.RecordFailure(halfOpenProbe);
+                _logger.LogWarning("Assistant generation failed; returning a grounded local response. Failure type: {FailureType}", ex.GetType().Name);
+            }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception ex)
-        {
-            _logger.LogWarning("Assistant generation failed; returning a grounded local response. Failure type: {FailureType}", ex.GetType().Name);
-        }
+        else if (evidenceStrength == "strong")
+            _logger.LogInformation("Assistant generation skipped because its in-memory circuit is open.");
 
         var allowedIds = candidates.Select(candidate => candidate.Product.Id).ToHashSet();
         var sourceIds = generated?.SourceProductIds.Where(allowedIds.Contains).Distinct().ToHashSet() ?? [];
@@ -74,9 +92,11 @@ public sealed class AssistantService : IAssistantService
             : candidates.ToArray();
         var sourcesOut = selected.SelectMany(candidate => candidate.Sources.Select(source =>
             new ProductSourceDto("product", candidate.Product.Id, source.ChunkType, source.ContentHash))).Distinct().ToArray();
-        var answer = hasValidGeneratedSources ? generated!.Answer.Trim() : BuildLocalAnswer(query, selected.Select(candidate => candidate.Product).ToArray());
+        var answer = hasValidGeneratedSources ? generated!.Answer.Trim()
+            : evidenceStrength == "weak" ? BuildWeakEvidenceAnswer(selected.Select(candidate => candidate.Product).ToArray())
+            : BuildLocalAnswer(query, selected.Select(candidate => candidate.Product).ToArray());
         return new AssistantChatResponse(answer, selected.Select(candidate => candidate.Product).ToArray(), sourcesOut,
-            new RetrievalMetadataDto("hybrid", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"));
+            new RetrievalMetadataDto("hybrid", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength);
     }
 
     private static bool IsRecommendationIntent(string query) =>
@@ -84,13 +104,30 @@ public sealed class AssistantService : IAssistantService
         query.Contains("đề xuất", StringComparison.OrdinalIgnoreCase) ||
         query.Contains("recommend", StringComparison.OrdinalIgnoreCase);
 
-    private static AssistantChatResponse NoEvidence(string? conversationId) => new(
+    private static AssistantChatResponse NoEvidence(string? conversationId, string evidenceStrength = "weak") => new(
         "Mình chưa tìm thấy sản phẩm có đủ thông tin phù hợp trong catalog. Bạn thử đổi từ khóa hoặc bộ lọc nhé.",
-        [], [], new RetrievalMetadataDto("hybrid", false), conversationId ?? Guid.NewGuid().ToString("N"));
+        [], [], new RetrievalMetadataDto("hybrid", false), conversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength);
+
+    private static bool IsExplicitSkuBranch(string query, IReadOnlyList<AssistantRetrievalCandidate> candidates)
+    {
+        if (RetrievalScoring.TryFindSkuCandidate(query, out var sku) && RetrievalScoring.HasNearbySkuCue(query, sku)) return true;
+        var chunks = candidates.SelectMany(candidate => candidate.Sources).Select(source => new RetrievalScoringChunk
+        {
+            ProductId = source.ProductId,
+            Type = source.ChunkType,
+            Content = source.Content
+        }).ToArray();
+        return RetrievalScoring.TryResolveSkuIntent(query, chunks, out _);
+    }
 
     private static string BuildLocalAnswer(string query, IReadOnlyList<ProductDto> products)
     {
-        var lines = products.Select(product => $"• {product.Name} — {product.CategoryName}");
-        return $"Các sản phẩm phù hợp với “{query}” trong catalog:\n{string.Join("\n", lines)}\nGiá và tồn kho được hiển thị từ dữ liệu sản phẩm hiện tại.";
+        return $"Các sản phẩm phù hợp với “{query}” trong catalog:\n{BuildProductLines(products)}\nGiá và tồn kho được hiển thị từ dữ liệu sản phẩm hiện tại.";
     }
+
+    private static string BuildWeakEvidenceAnswer(IReadOnlyList<ProductDto> products) =>
+        $"Mình chưa tìm thấy sản phẩm khớp chắc chắn. Đây chỉ là gợi ý gần nhất:\n{BuildProductLines(products)}\nGiá và tồn kho được hiển thị từ dữ liệu sản phẩm hiện tại.";
+
+    private static string BuildProductLines(IReadOnlyList<ProductDto> products) =>
+        string.Join("\n", products.Select(product => $"• {product.Name} — {product.CategoryName}"));
 }

@@ -17,6 +17,7 @@ param(
     [switch]$Diagnostics,
     [string]$ExplainQuery,
     [switch]$NoEvidenceOnly,
+    [switch]$EvidenceStrengthReport,
     [switch]$AllowEmbeddingCall,
     [switch]$UseFakeEmbedder,
     [ValidateRange(0,1000000)][int]$ExpectedDocumentChunks = 1395
@@ -28,18 +29,19 @@ Add-Type -AssemblyName System.Data
 . (Join-Path $PSScriptRoot 'EvaluationResilience.ps1')
 . (Join-Path $PSScriptRoot 'EvaluationMetrics.ps1')
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
-if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
+if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and -not $EvidenceStrengthReport -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
 if ($AuthorK05Only -and ($LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly)) { throw '-AuthorK05Only must run by itself (it may be combined with -DryRunFromCache).' }
 if($NoEvidenceOnly -and ($AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-NoEvidenceOnly cannot be combined with K-05, diagnostics, development, holdout, or lexical-only modes.'}
+if($EvidenceStrengthReport -and ($AllowEmbeddingCall -or $NoEvidenceOnly -or $AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-EvidenceStrengthReport is cache-only and runs by itself; it never embeds or evaluates holdout metrics.'}
 if ($Diagnostics) {
     if (-not $AuthorK05Only -or $LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly) { throw '-Diagnostics must be used with -AuthorK05Only only; it never runs provider or database paths.' }
     if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
     if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw '-Diagnostics requires a local cache-only dry-run fixture at -DryRunDataPath (default: obj/rag-dryrun-data.json).' }
     $DryRunFromCache = $true
 }
-if (($NoEvidenceOnly -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and -not $DryRunFromCache) {
+if (($NoEvidenceOnly -or $EvidenceStrengthReport -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and -not $DryRunFromCache) {
     if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
-    if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw 'Explain/no-evidence modes require the local cache-only obj/rag-dryrun-data.json fixture.' }
+    if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw 'Explain/no-evidence/evidence-strength modes require the local obj/rag-dryrun-data.json fixture.' }
     $DryRunFromCache = $true
 }
 if($UseFakeEmbedder -and -not $DryRunFromCache){throw '-UseFakeEmbedder is test-only and requires -DryRunFromCache.'}
@@ -127,14 +129,14 @@ if ($DryRunFromCache) {
     $authorK05Fixtures = @($dry.authorK05Fixtures)
     $noEvidencePath = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_NO_EVIDENCE.jsonl'
     $noEvidenceRows = if($dry.noEvidenceFixtures){@($dry.noEvidenceFixtures)}elseif(Test-Path -LiteralPath $noEvidencePath){@(Get-Content -LiteralPath $noEvidencePath | ForEach-Object { $_ | ConvertFrom-Json })}else{@()}
-    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
+    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif($EvidenceStrengthReport){@($development.query)+@($authorK05Fixtures.query)+@($noEvidenceRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
     $queryCache = Read-QueryVectorCache -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions)
     $script:TrackRankTiming = [bool]$DryRunTrackRankTiming
     $script:RankTimes = [System.Collections.Generic.List[double]]::new()
     $missingRequested=@($allQueries | Where-Object { -not $queryCache.ContainsKey((Get-QueryVectorCacheKey ([string]$_) $dry.modelName ([int]$dry.dimensions))) } | Sort-Object -Unique)
     $queryBatches=[int][Math]::Ceiling($missingRequested.Count/16.0)
     if($missingRequested.Count -gt 0 -and -not $AllowEmbeddingCall -and -not $Diagnostics){
-        Write-Output ('CACHE_MISS_FORECAST mode={0} queries={1} missing_vectors={2} estimated_batches={3} estimated_api_calls={4} cache_written=FALSE' -f $(if($NoEvidenceOnly){'NoEvidenceOnly'}elseif($ExplainQuery){'ExplainQuery'}elseif($AuthorK05Only){'AuthorK05Only'}else{'DryRunFromCache'}),$allQueries.Count,$missingRequested.Count,$queryBatches,$queryBatches)
+        Write-Output ('CACHE_MISS_FORECAST mode={0} queries={1} missing_vectors={2} estimated_batches={3} estimated_api_calls={4} cache_written=FALSE' -f $(if($EvidenceStrengthReport){'EvidenceStrengthReport'}elseif($NoEvidenceOnly){'NoEvidenceOnly'}elseif($ExplainQuery){'ExplainQuery'}elseif($AuthorK05Only){'AuthorK05Only'}else{'DryRunFromCache'}),$allQueries.Count,$missingRequested.Count,$queryBatches,$queryBatches)
         exit 0
     }
     if($missingRequested.Count -gt 0){
@@ -146,6 +148,7 @@ if ($DryRunFromCache) {
     $vectorMap = @{}
     if($Diagnostics) { }
     elseif($ExplainQuery){ }
+    elseif($EvidenceStrengthReport){ }
     elseif($NoEvidenceOnly){for($i=0;$i -lt $noEvidenceRows.Count;$i++){$vectorMap[[string]$noEvidenceRows[$i].id]=$queryVectors[$i]}}
     elseif($AuthorK05Only){for ($i=0; $i -lt $authorK05Fixtures.Count; $i++) { $vectorMap[[string]$authorK05Fixtures[$i].id] = $queryVectors[$i] }}
     else {
@@ -158,6 +161,37 @@ if ($DryRunFromCache) {
         foreach($row in $authorK05Fixtures){$key=Get-QueryVectorCacheKey ([string]$row.query) $dry.modelName ([int]$dry.dimensions);if($queryCache.ContainsKey($key)){$vectorMap[[string]$row.id]=[single[]]$queryCache[$key].vector}else{$missingK05Vectors++}}
     }
     Write-Output ('DryRunCacheForecast missing_chunks=0 missing_queries={0} estimated_api_calls=0 chunks={1} queries={2}' -f $(if($Diagnostics){$missingK05Vectors}else{0}),$chunks.Count,$allQueries.Count)
+    if($EvidenceStrengthReport){
+        $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
+        $report=New-Object 'System.Collections.Generic.List[object]'
+        $sets=@(
+            [pscustomobject]@{Name='development_answered';Rows=@($development|Where-Object{@($_.expected_product_ids).Count -gt 0});Offset=0},
+            [pscustomobject]@{Name='development_no_result';Rows=@($development|Where-Object{@($_.expected_product_ids).Count -eq 0});Offset=0},
+            [pscustomobject]@{Name='no_evidence_author';Rows=$noEvidenceRows;Offset=$development.Count+$authorK05Fixtures.Count},
+            [pscustomobject]@{Name='K05_reporting_only';Rows=$authorK05Fixtures;Offset=$development.Count}
+        )
+        foreach($set in $sets){
+            $weakCount=0
+            for($i=0;$i -lt $set.Rows.Count;$i++){
+                $row=$set.Rows[$i];$q=[string]$row.query;$skuText='';$skuBranch=[ECommerce.Infrastructure.AI.RetrievalScoring]::TryResolveSkuIntent($q,$chunks.ToArray(),[ref]$skuText)
+                $hasLexical=$false
+                if(-not $skuBranch){foreach($productGroup in ($chunks.ToArray()|Group-Object ProductId)){foreach($chunk in $productGroup.Group){if([ECommerce.Infrastructure.AI.RetrievalScoring]::LexicalScore($q,[string]$chunk.Content) -gt 0){$hasLexical=$true;break}};if($hasLexical){break}}}
+                $weak= -not ($skuBranch -or $hasLexical);if($weak){$weakCount++}
+                $rank='n/a';$expected=@($row.expected_product_ids|ForEach-Object{[int]$_})
+                if($set.Name -eq 'development_answered'){
+                    $vectorIndex=$set.Offset+$i;$queryVector=[single[]]$queryVectors[$vectorIndex]
+                    $ranked=[ECommerce.Infrastructure.AI.RetrievalScoring]::RankForEvaluation($q,$queryVector,$chunks.ToArray(),$true,[double]$selection.threshold,[double]$selection.semanticWeight,8)
+                    $rank='none';for($r=0;$r -lt $ranked.Count;$r++){if($expected -contains [int]$ranked[$r].ProductId){$rank=[string]($r+1);break}}
+                }
+                $report.Add([pscustomobject]@{Group=$set.Name;Id=[string]$row.id;Weak=$weak;SkuBranch=$skuBranch;FirstCorrectRank=$rank})
+                if($set.Name -eq 'development_answered' -and $weak){Write-Output ('EVIDENCE_WEAK_DEVELOPMENT id={0} first_correct_rank={1} sku_branch={2}' -f $row.id,$rank,$skuBranch)}
+            }
+            $rate=if($set.Rows.Count){$weakCount/[double]$set.Rows.Count}else{0}
+            Write-Output ('EVIDENCE_STRENGTH group={0} weak={1}/{2} weak_rate={3:P2}' -f $set.Name,$weakCount,$set.Rows.Count,$rate)
+        }
+        Write-Output 'EvidenceStrengthRule=weak_when_no_product_has_lexical_score_gt_0;explicit_SKU_branch_is_strong;thresholds=NONE;cache_only=TRUE;holdout_scored=FALSE;K05_tuning=FALSE'
+        exit 0
+    }
     if($NoEvidenceOnly){
         $missing=@($missingRequested).Count; $calls=[Math]::Ceiling($missing/16.0)
         Write-Output ('NO_EVIDENCE_FORECAST queries={0} missing_vectors={1} estimated_query_batches={2} estimated_api_calls={2} cache_only={3}' -f $noEvidenceRows.Count,$missing,$calls,(-not $AllowEmbeddingCall))
