@@ -14,4 +14,6 @@ public sealed class GeminiOptions
     public int EmbeddingRetryBaseDelaySeconds { get; set; } = 15;
     public int EmbeddingRetryMaxDelaySeconds { get; set; } = 90;
     public int EmbeddingRetryMaxTotalWaitSeconds { get; set; } = 300;
+    public double RetrievalSemanticThreshold { get; set; } = 0.38;
+    public double RetrievalSemanticWeight { get; set; } = 0.5;
 }

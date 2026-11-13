@@ -39,13 +39,19 @@ try {
         @{ id='author-1'; type='paraphrase'; query='green tea'; expected_product_ids=@(3) },
         @{ id='author-2'; type='paraphrase'; query='red apple'; expected_product_ids=@(1) }
     )
-    $queryEntries = foreach ($row in @($development) + @($authors)) {
+    $authorK05 = @(
+        @{ id='author-k05-1'; type='paraphrase'; query='portable visual machine'; expected_product_ids=@(1) },
+        @{ id='author-k05-2'; type='paraphrase'; query='untethered play controls'; expected_product_ids=@(2) }
+    )
+    $queryEntries = foreach ($row in @($development) + @($authors) + @($authorK05)) {
         $vector = switch ($row.id) {
             'dev-1' { @(1.0,0.0) }
             'dev-2' { @(0.0,1.0) }
             'dev-3' { @(0.0,0.0) }
             'author-1' { @(1.0,1.0) }
             'author-2' { @(1.0,0.0) }
+            'author-k05-1' { @(1.0,0.0) }
+            'author-k05-2' { @(0.0,1.0) }
         }
         $key = Get-QueryVectorCacheKey $row.query $model $dimensions
         @{ cacheKey=$key; contentHash=($key -split ':')[0]; modelName=$model; dimensions=$dimensions; vector=$vector }
@@ -53,7 +59,7 @@ try {
     Write-AtomicCacheFile -Path $queryCachePath -Content (ConvertTo-Json -InputObject @($queryEntries) -Depth 5)
     $fixture = @{
         modelName=$model; dimensions=$dimensions; catalogCachePath=$catalogCachePath; queryCachePath=$queryCachePath
-        selectionPath=$selectionPath; chunks=$chunks; development=$development; authorFixtures=$authors
+        selectionPath=$selectionPath; chunks=$chunks; development=$development; authorFixtures=$authors; authorK05Fixtures=$authorK05
     }
     Write-AtomicCacheFile -Path $fixturePath -Content (ConvertTo-Json -InputObject $fixture -Depth 8)
 
@@ -80,7 +86,14 @@ try {
         else { Assert-True ($output -match 'RankTimingEnabled=False;RankSamples=0') "Rank timing unexpectedly ran for $($scenario.Name)." }
     }
 
-    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Scenarios=4;Modes=lexical,hybrid;RankTiming=on,off;ExternalCalls=0;Database=0;SelectionWritten=TRUE'
+    $selection = @{ fixtureVersion='DRY_RUN_FIXTURE'; developmentCount=3; threshold=0.59; semanticWeight=0.25 }
+    Write-AtomicCacheFile -Path $selectionPath -Content (ConvertTo-Json -InputObject $selection -Depth 4)
+    $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$evaluatorPath,'-RepoRoot',$repoRoot,'-RagInputs',$tempRoot,'-DryRunFromCache','-DryRunDataPath',$fixturePath,'-AuthorK05Only')
+    $output = (& $powershell @arguments 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "Evaluator K-05-only dry-run failed: $output" }
+    Assert-True ($output.Contains('AUTHOR_K05 lexical') -and $output.Contains('UsedForTuning=FALSE') -and $output.Contains('AuthorK05Only=TRUE')) 'K-05-only report did not produce side-by-side lexical/hybrid results.'
+
+    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Scenarios=5;Modes=lexical,hybrid,author-k05-only;RankTiming=on,off;ExternalCalls=0;Database=0;SelectionWritten=TRUE'
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }

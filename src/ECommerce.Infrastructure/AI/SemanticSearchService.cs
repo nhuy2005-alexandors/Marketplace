@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ECommerce.Application.DTOs.AI;
@@ -21,18 +20,14 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private static readonly ConcurrentDictionary<string, float[]> EmbeddingCache = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim EmbeddingCachePopulationGate = new(1, 1);
     private static bool EmbeddingCacheLoadedFromFile;
-    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "toi", "minh", "ban", "cho", "voi", "la", "co", "khong", "nao", "gi", "nhe", "nha", "va", "cua", "mot",
-        "cac", "nhung", "hay", "duoc", "can", "muon", "tim", "mua", "loai", "san", "pham", "hang", "shop", "gia",
-        "re", "de", "duoi", "tren", "tam", "khoang", "the", "please", "find", "show", "me", "some", "for", "with", "under", "over"
-    };
 
     private readonly IAppDbContext _db;
     private readonly IEmbeddingProvider _embeddings;
     private readonly IEmbeddingCacheStore? _cacheStore;
     private readonly ILogger<SemanticSearchService> _logger;
     private readonly int _embeddingBatchDelaySeconds;
+    private readonly double _semanticThreshold;
+    private readonly double _semanticWeight;
 
     public SemanticSearchService(
         IAppDbContext db,
@@ -46,6 +41,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
         _logger = logger;
         _cacheStore = cacheStore;
         _embeddingBatchDelaySeconds = Math.Clamp(geminiOptions?.Value.EmbeddingBatchDelaySeconds ?? 3, 0, 60);
+        _semanticThreshold = Math.Clamp(geminiOptions?.Value.RetrievalSemanticThreshold ?? 0.38, 0, 1);
+        _semanticWeight = Math.Clamp(geminiOptions?.Value.RetrievalSemanticWeight ?? 0.5, 0, 1);
     }
 
     public async Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
@@ -70,12 +67,9 @@ public sealed class SemanticSearchService : ISemanticSearchService
             .ToListAsync(ct);
         var attributesByProduct = attributes.GroupBy(value => value.ProductId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<ProductAttributeValue>)group.ToArray());
-        var normalizedQuery = Normalize(query);
-        var terms = normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(term => term.Length > 1 && !StopWords.Contains(term)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var chunks = products.SelectMany(product => BuildChunks(product, attributesByProduct.GetValueOrDefault(product.Id, []))).ToArray();
 
-        var semanticByChunk = new Dictionary<string, double>(StringComparer.Ordinal);
+        float[] queryVector = [];
         try
         {
             await EmbeddingCachePopulationGate.WaitAsync(ct);
@@ -133,27 +127,33 @@ public sealed class SemanticSearchService : ISemanticSearchService
             var queryVectors = await _embeddings.GenerateEmbeddingsAsync([query], isQuery: true, ct);
             if (queryVectors.Count == 1)
             {
-                foreach (var chunk in chunks)
-                    semanticByChunk[CacheKey(chunk)] = Cosine(queryVectors[0], EmbeddingCache[CacheKey(chunk)]);
+                queryVector = queryVectors[0];
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning("Semantic retrieval unavailable; using lexical retrieval. Failure type: {FailureType}", ex.GetType().Name);
-            semanticByChunk.Clear();
+            queryVector = [];
         }
 
         var results = new List<AssistantRetrievalCandidate>();
         foreach (var product in products)
         {
             var productChunks = chunks.Where(chunk => chunk.ProductId == product.Id).ToArray();
-            var lexical = productChunks.Select(chunk => LexicalScore(normalizedQuery, terms, Normalize(chunk.Content))).DefaultIfEmpty().Max();
-            var semantic = productChunks.Select(chunk => semanticByChunk.GetValueOrDefault(CacheKey(chunk))).DefaultIfEmpty().Max();
-            var combined = semanticByChunk.Count == 0 ? lexical : (0.5 * lexical) + (0.5 * Math.Max(0, semantic));
-            if (lexical <= 0 && semantic < 0.38 && combined < 0.22) continue;
-            results.Add(new AssistantRetrievalCandidate(ToDto(product), lexical, semantic, combined,
-                productChunks.Where(chunk => lexical > 0 || semanticByChunk.GetValueOrDefault(CacheKey(chunk)) >= 0.38).ToArray()));
+            var scoringChunks = productChunks.Select(chunk => new RetrievalScoringChunk
+            {
+                ProductId = chunk.ProductId,
+                Type = chunk.ChunkType,
+                Content = chunk.Content,
+                Vector = EmbeddingCache.GetValueOrDefault(CacheKey(chunk), [])
+            }).ToArray();
+            var score = RetrievalScoring.ScoreProduct(query, queryVector, scoringChunks, queryVector.Length > 0,
+                _semanticThreshold, _semanticWeight);
+            if (!score.Included) continue;
+            var sources = score.IncludedChunkIndexes.Select(index => productChunks[index]).ToArray();
+            results.Add(new AssistantRetrievalCandidate(ToDto(product), score.LexicalScore, score.SemanticScore,
+                score.CombinedScore, sources));
         }
         return results.OrderByDescending(item => item.CombinedScore).ThenBy(item => item.Product.Id).Take(Math.Clamp(limit, 1, 8)).ToArray();
     }
@@ -209,30 +209,4 @@ public sealed class SemanticSearchService : ISemanticSearchService
             p.Category?.Name ?? string.Empty, p.SellerId, p.Seller?.ShopName ?? p.Seller?.FullName ?? string.Empty, average, count);
     }
 
-    private static double LexicalScore(string query, IReadOnlyList<string> terms, string content)
-    {
-        if (query.Length == 0 || content.Length == 0) return 0;
-        var score = content.Contains(query, StringComparison.OrdinalIgnoreCase) ? 0.8 : 0;
-        var contentWords = content.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (terms.Count > 0) score += terms.Count(term => contentWords.Contains(term)) / (double)terms.Count * 0.7;
-        return Math.Min(1, score);
-    }
-
-    private static string Normalize(string value)
-    {
-        var decomposed = value.ToLowerInvariant().Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(decomposed.Length);
-        foreach (var ch in decomposed)
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark) builder.Append(ch == 'đ' ? 'd' : ch);
-        return string.Join(' ', new string(builder.ToString().Select(ch => char.IsLetterOrDigit(ch) ? ch : ' ').ToArray())
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries));
-    }
-
-    private static double Cosine(IReadOnlyList<float> left, IReadOnlyList<float> right)
-    {
-        if (left.Count == 0 || left.Count != right.Count) return 0;
-        double dot = 0, leftNorm = 0, rightNorm = 0;
-        for (var i = 0; i < left.Count; i++) { dot += left[i] * right[i]; leftNorm += left[i] * left[i]; rightNorm += right[i] * right[i]; }
-        return leftNorm == 0 || rightNorm == 0 ? 0 : dot / (Math.Sqrt(leftNorm) * Math.Sqrt(rightNorm));
-    }
 }

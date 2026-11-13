@@ -5,7 +5,9 @@ function Get-Metrics($Rows, $Vectors, $Chunks, [bool]$Hybrid, [double]$Threshold
     $recall = 0.0; $recallCapped = 0.0; $ceiling = 0.0; $mrr = 0.0; $emptyCorrect = 0
     foreach ($row in $Rows) {
         $rankTimer = [Diagnostics.Stopwatch]::StartNew()
-        $ranked = [RagEvalKernel]::Rank([string]$row.query, $Vectors[[string]$row.id], [RagEvalChunk[]]$Chunks, $Hybrid, $Threshold, $Weight)
+        $ranked = [ECommerce.Infrastructure.AI.RetrievalScoring]::RankForEvaluation(
+            [string]$row.query, $Vectors[[string]$row.id], [ECommerce.Infrastructure.AI.RetrievalScoringChunk[]]$Chunks,
+            $Hybrid, $Threshold, $Weight, 8)
         $rankTimer.Stop()
         if ($TrackTiming) {
             if ($null -eq $RankTimes) { throw 'Rank timing is enabled but no timing collector was provided.' }

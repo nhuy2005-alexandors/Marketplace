@@ -64,6 +64,63 @@ public sealed class AiRagRemediationTests
         Assert.True(results[0].Product.Stock > 0);
     }
 
+    [Theory]
+    [InlineData(0.59, 0.25)]
+    [InlineData(0.38, 0.5)]
+    public async Task SemanticSearch_MatchesEvaluatorSharedScoringAndConfiguredThresholds(double threshold, double weight)
+    {
+        await using var db = TestDb.Create();
+        var category = new Category { Id = 1, Name = "Parity category" };
+        var seller = new User { Id = 10, Email = "parity@example.test", PasswordHash = "test-hash", FullName = "Seller" };
+        db.Categories.Add(category);
+        db.Users.Add(seller);
+        var suffix = Guid.NewGuid().ToString("N");
+        var similarities = new[] { 1.0f, 0.80f, 0.65f, 0.58f, 0.45f, 0.30f };
+        for (var i = 1; i <= similarities.Length; i++)
+        {
+            var product = Product(i, i == 1 ? "Red Speaker" : $"Parity Item {suffix} {i}", category, 10m, 1, seller);
+            product.Description = $"Unique parity description {suffix} {i}";
+            db.Products.Add(product);
+        }
+        await db.SaveChangesAsync();
+
+        float[] VectorFor(string text)
+        {
+            if (text == "red speaker") return [1f, 0f];
+            if (text.Contains("Red Speaker", StringComparison.Ordinal)) return [1f, 0f];
+            for (var i = 1; i <= similarities.Length; i++)
+                if (text.Contains($" {i} ", StringComparison.Ordinal) || text.EndsWith($" {i}", StringComparison.Ordinal))
+                    return [similarities[i - 1], MathF.Sqrt(1 - similarities[i - 1] * similarities[i - 1])];
+            return [0f, 1f];
+        }
+
+        var service = new SemanticSearchService(db, new FakeEmbeddingProvider(VectorFor), NullLogger<SemanticSearchService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { EmbeddingBatchDelaySeconds = 0, RetrievalSemanticThreshold = threshold, RetrievalSemanticWeight = weight }));
+        var runtime = await service.SearchCandidatesAsync("red speaker", null, 5);
+
+        var scoringChunks = db.Products.AsEnumerable().SelectMany(product => new[]
+        {
+            new RetrievalScoringChunk { ProductId = product.Id, Type = "summary", Content = $"{product.Name}. SKU: {product.Sku}. Brand: Unknown. Category: {category.Name}.", Vector = VectorFor($"{product.Name}. SKU: {product.Sku}. Brand: Unknown. Category: {category.Name}.") },
+            new RetrievalScoringChunk { ProductId = product.Id, Type = "description", Content = product.Description!, Vector = VectorFor(product.Description!) }
+        }).ToArray();
+        var evaluator = RetrievalScoring.RankForEvaluation("red speaker", [1f, 0f], scoringChunks, true, threshold, weight, 5);
+
+        Assert.Equal(evaluator.Select(hit => hit.ProductId), runtime.Select(hit => hit.Product.Id));
+        Assert.Equal(evaluator.Select(hit => hit.Score), runtime.Select(hit => hit.CombinedScore));
+        Assert.Equal(evaluator.Select(hit => hit.LexicalScore), runtime.Select(hit => hit.LexicalScore));
+        Assert.Equal(evaluator.Select(hit => hit.SemanticScore), runtime.Select(hit => hit.SemanticScore));
+        if (threshold == 0.59)
+        {
+            Assert.DoesNotContain(4, runtime.Select(hit => hit.Product.Id));
+            Assert.Equal(3, evaluator.Count);
+        }
+        else
+        {
+            Assert.Contains(4, runtime.Select(hit => hit.Product.Id));
+            Assert.Equal(5, evaluator.Count);
+        }
+    }
+
     [Fact]
     public async Task SemanticSearch_ReusesDocumentVectorsByContentHash()
     {
