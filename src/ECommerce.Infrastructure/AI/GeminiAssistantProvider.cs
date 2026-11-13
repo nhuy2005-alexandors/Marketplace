@@ -15,8 +15,6 @@ namespace ECommerce.Infrastructure.AI;
 public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnswerProvider
 {
     private const int EmbeddingBatchSize = 16;
-    private const int MaxEmbeddingAttempts = 3;
-    private static readonly TimeSpan MaxEmbeddingRetryWindow = TimeSpan.FromSeconds(30);
     private static readonly SemaphoreSlim ProviderConcurrency = new(1, 1);
     private readonly IHttpClientFactory _clients;
     private readonly GeminiOptions _options;
@@ -42,8 +40,20 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         if (string.IsNullOrWhiteSpace(key)) throw new AssistantProviderException("Embedding provider is not configured.");
 
         var output = new List<float[]>(texts.Count);
-        foreach (var batch in texts.Select((value, index) => (value, index)).Chunk(EmbeddingBatchSize))
+        var batches = texts.Select((value, index) => (value, index)).Chunk(EmbeddingBatchSize).ToArray();
+        for (var batchIndex = 0; batchIndex < batches.Length; batchIndex++)
         {
+            var batch = batches[batchIndex];
+            if (batchIndex > 0)
+            {
+                var pacingDelay = TimeSpan.FromSeconds(Math.Clamp(_options.EmbeddingBatchDelaySeconds, 0, 60));
+                if (pacingDelay > TimeSpan.Zero)
+                {
+                    _logger.LogInformation("Gemini embedding batch pacing: batch {Batch}/{BatchCount}, waiting {DelaySeconds} seconds.",
+                        batchIndex + 1, batches.Length, pacingDelay.TotalSeconds);
+                    await Task.Delay(pacingDelay, ct);
+                }
+            }
             var body = new
             {
                 requests = batch.Select(item => new
@@ -150,12 +160,13 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
 
     private async Task<HttpResponseMessage> SendEmbeddingBatchWithRetryAsync(object body, string key, CancellationToken ct)
     {
-        using var retryCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        retryCts.CancelAfter(MaxEmbeddingRetryWindow);
         var stopwatch = Stopwatch.StartNew();
         var lastStatus = "none";
+        var totalRetryWait = TimeSpan.Zero;
+        var maxAttempts = Math.Clamp(_options.EmbeddingRetryMaxAttempts, 1, 10);
+        var maxTotalWait = TimeSpan.FromSeconds(Math.Clamp(_options.EmbeddingRetryMaxTotalWaitSeconds, 1, 600));
 
-        for (var attempt = 1; attempt <= MaxEmbeddingAttempts; attempt++)
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Post,
                 $"v1beta/models/{_options.EmbeddingModel}:batchEmbedContents");
@@ -163,8 +174,8 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
             request.Content = JsonContent.Create(body);
 
             HttpResponseMessage response;
-            await ProviderConcurrency.WaitAsync(retryCts.Token);
-            try { response = await _clients.CreateClient("GeminiClient").SendAsync(request, retryCts.Token); }
+            await ProviderConcurrency.WaitAsync(ct);
+            try { response = await _clients.CreateClient("GeminiClient").SendAsync(request, ct); }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 _logger.LogWarning("Gemini embedding stopped: HTTP status {StatusCode}, attempts {Attempts}, elapsed {ElapsedMs} ms.",
@@ -184,7 +195,7 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
             var retryable = response.StatusCode is System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.ServiceUnavailable;
             var retryAfter = ReadRetryAfter(response);
             response.Dispose();
-            if (!retryable || attempt == MaxEmbeddingAttempts)
+            if (!retryable || attempt == maxAttempts)
             {
                 _logger.LogWarning("Gemini embedding failed: HTTP status {StatusCode}, attempts {Attempts}, elapsed {ElapsedMs} ms.",
                     lastStatus, attempt, stopwatch.ElapsedMilliseconds);
@@ -193,15 +204,16 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
 
             var delay = retryAfter ?? ExponentialBackoff(attempt);
             if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
-            if (stopwatch.Elapsed + delay >= MaxEmbeddingRetryWindow)
+            if (totalRetryWait + delay > maxTotalWait)
             {
                 _logger.LogWarning("Gemini embedding retry window ended: HTTP status {StatusCode}, attempts {Attempts}, elapsed {ElapsedMs} ms.",
                     lastStatus, attempt, stopwatch.ElapsedMilliseconds);
                 throw new AssistantProviderException("Embedding provider is temporarily unavailable.");
             }
-            _logger.LogWarning("Gemini embedding retry: HTTP status {StatusCode}, attempt {Attempt}, elapsed {ElapsedMs} ms.",
-                lastStatus, attempt, stopwatch.ElapsedMilliseconds);
-            await Task.Delay(delay, retryCts.Token);
+            totalRetryWait += delay;
+            _logger.LogWarning("Gemini embedding retry: HTTP status {StatusCode}, attempt {Attempt}/{MaxAttempts}, waiting {DelaySeconds} seconds, total wait {TotalWaitSeconds}/{MaxWaitSeconds} seconds.",
+                lastStatus, attempt, maxAttempts, delay.TotalSeconds, totalRetryWait.TotalSeconds, maxTotalWait.TotalSeconds);
+            await Task.Delay(delay, ct);
         }
 
         throw new AssistantProviderException("Embedding provider is temporarily unavailable.");
@@ -215,10 +227,13 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         return null;
     }
 
-    private static TimeSpan ExponentialBackoff(int attempt)
+    private TimeSpan ExponentialBackoff(int attempt)
     {
-        var baseMilliseconds = Math.Min(500 * Math.Pow(2, attempt - 1), 8000);
-        return TimeSpan.FromMilliseconds(baseMilliseconds + Random.Shared.Next(0, 251));
+        var maxDelaySeconds = Math.Clamp(_options.EmbeddingRetryMaxDelaySeconds, 1, 90);
+        var baseSeconds = Math.Min(Math.Clamp(_options.EmbeddingRetryBaseDelaySeconds, 1, 90) * Math.Pow(2, attempt - 1), maxDelaySeconds);
+        var jitterLimit = Math.Max(0, (int)((maxDelaySeconds - baseSeconds) * 1000));
+        var jitterMilliseconds = jitterLimit == 0 ? 0 : Random.Shared.Next(0, Math.Min(1000, jitterLimit) + 1);
+        return TimeSpan.FromSeconds(baseSeconds) + TimeSpan.FromMilliseconds(jitterMilliseconds);
     }
 }
 

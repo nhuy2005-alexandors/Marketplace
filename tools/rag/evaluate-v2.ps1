@@ -3,7 +3,11 @@ param(
     [string]$RagInputs = (Join-Path (Split-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path -Parent) 'Marketplace-khang-ai_rag\RAG_inputs'),
     [switch]$LexicalOnly,
     [switch]$DevelopmentOnly,
-    [switch]$HoldoutFinal
+    [switch]$HoldoutFinal,
+    [ValidateRange(0,60)][int]$BatchDelaySeconds = 3,
+    [ValidateRange(1,10)][int]$RetryMaxAttempts = 5,
+    [ValidateRange(1,90)][int]$RetryMaxDelaySeconds = 90,
+    [ValidateRange(1,600)][int]$RetryMaxTotalWaitSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -202,15 +206,29 @@ if(Test-Path -LiteralPath $cachePath){
     }catch{$cacheEntries=@{};Write-Host "CatalogCacheRead=ignored|FailureType=$($_.Exception.GetType().Name)"}
 }
 
-function Get-Embeddings([string[]]$texts,[bool]$isQuery) {
+function Save-EmbeddingCache {
+    $cacheDirectory=Split-Path $cachePath -Parent
+    [void](New-Item -ItemType Directory -Force -Path $cacheDirectory)
+    $tempCache="$cachePath.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $jsonCache=ConvertTo-Json -InputObject @($cacheEntries.Values) -Depth 6
+        [IO.File]::WriteAllText($tempCache,$jsonCache,[Text.UTF8Encoding]::new($false))
+        if(Test-Path -LiteralPath $cachePath){[IO.File]::Replace($tempCache,$cachePath,$null)}else{[IO.File]::Move($tempCache,$cachePath)}
+    } finally { if(Test-Path -LiteralPath $tempCache){Remove-Item -LiteralPath $tempCache -Force -ErrorAction SilentlyContinue} }
+}
+
+function Get-Embeddings([string[]]$texts,[bool]$isQuery,[object[]]$cacheMetadata=@()) {
     $all=[System.Collections.Generic.List[object]]::new()
     $task=if($isQuery){'RETRIEVAL_QUERY'}else{'RETRIEVAL_DOCUMENT'}
+    $batchCount=[int][Math]::Ceiling($texts.Count/16.0)
     for($offset=0;$offset -lt $texts.Count;$offset+=16) {
+        $batchNumber=[int][Math]::Floor($offset/16)+1
+        if($offset -gt 0 -and $BatchDelaySeconds -gt 0){Write-Host "EmbeddingBatchWait=batch $batchNumber/$batchCount|DelaySeconds=$BatchDelaySeconds|Reason=inter-batch pacing";Start-Sleep -Seconds $BatchDelaySeconds}
         $batch=@($texts | Select-Object -Skip $offset -First 16)
         $requests=@(foreach($text in $batch){@{model='models/gemini-embedding-001';content=@{parts=@(@{text=$text})};taskType=$task;outputDimensionality=768}})
         $payload=@{requests=$requests}|ConvertTo-Json -Depth 8 -Compress
-        $batchTimer=[Diagnostics.Stopwatch]::StartNew();$success=$false
-        for($attempt=1;$attempt -le 3;$attempt++){
+        $batchTimer=[Diagnostics.Stopwatch]::StartNew();$success=$false;$totalRetryWaitMs=0
+        for($attempt=1;$attempt -le $RetryMaxAttempts;$attempt++){
             $script:EmbeddingApiCalls++
             if($isQuery){$script:QueryApiCalls++}else{$script:DocumentApiCalls++}
             try{
@@ -222,8 +240,13 @@ function Get-Embeddings([string[]]$texts,[bool]$isQuery) {
                     $status=[string][int]$_.Exception.Response.StatusCode
                     $retryAfterHeader=$_.Exception.Response.Headers['Retry-After']
                 }
-                if($status -notin @('429','503') -or $attempt -eq 3){
+                if($status -notin @('429','503') -or $attempt -eq $RetryMaxAttempts){
                     $batchTimer.Stop();$script:EmbeddingCallTimes.Add($batchTimer.Elapsed.TotalMilliseconds)
+                    if(-not $isQuery){
+                        $savedThisRun=[Math]::Min($offset,$script:DocumentChunksSavedThisRun)
+                        $remaining=[Math]::Max(0,$texts.Count-$offset)
+                        throw "Embedding stopped at batch $batchNumber/$batchCount (HTTP $status, attempts=$attempt). Document chunks saved this run=$script:DocumentChunksSavedThisRun; remaining=$remaining; total valid cache entries=$($cacheEntries.Count). Response body suppressed."
+                    }
                     throw "Embedding failure HTTP=$status attempts=$attempt elapsedMs=$([int]$batchTimer.Elapsed.TotalMilliseconds) failureType=$failureType; response body suppressed."
                 }
                 $delayMs=$null
@@ -232,39 +255,47 @@ function Get-Embeddings([string[]]$texts,[bool]$isQuery) {
                     if([double]::TryParse([string]$retryAfterHeader,[ref]$seconds)){$delayMs=[Math]::Max(0,[int]($seconds*1000))}
                     else{$date=[DateTimeOffset]::MinValue;if([DateTimeOffset]::TryParse([string]$retryAfterHeader,[ref]$date)){$delayMs=[Math]::Max(0,[int]($date.Subtract([DateTimeOffset]::UtcNow).TotalMilliseconds))}}
                 }
-                if($null -eq $delayMs){$delayMs=[int]([Math]::Min(500*[Math]::Pow(2,$attempt-1),8000)+(Get-Random -Minimum 0 -Maximum 251))}
-                if($batchTimer.Elapsed.TotalMilliseconds+$delayMs -ge 30000){
-                    $batchTimer.Stop();$script:EmbeddingCallTimes.Add($batchTimer.Elapsed.TotalMilliseconds)
-                    throw "Embedding retry window ended HTTP=$status attempts=$attempt elapsedMs=$([int]$batchTimer.Elapsed.TotalMilliseconds); response body suppressed."
+                if($null -eq $delayMs){
+                    $baseDelay=[Math]::Min(15*[Math]::Pow(2,$attempt-1),$RetryMaxDelaySeconds)
+                    $baseDelayMs=[int]($baseDelay*1000)
+                    $jitterMaxMs=[int]([Math]::Min(1000,($RetryMaxDelaySeconds-$baseDelay)*1000))
+                    $jitterMs=if($jitterMaxMs -gt 0){Get-Random -Minimum 0 -Maximum ($jitterMaxMs+1)}else{0}
+                    $delayMs=$baseDelayMs+$jitterMs
                 }
-                Write-Host "EmbeddingRetry=HTTP$status|Attempt=$attempt|ElapsedMs=$([int]$batchTimer.Elapsed.TotalMilliseconds)|DelayMs=$delayMs"
+                if($totalRetryWaitMs+$delayMs -gt ($RetryMaxTotalWaitSeconds*1000)){
+                    $batchTimer.Stop();$script:EmbeddingCallTimes.Add($batchTimer.Elapsed.TotalMilliseconds)
+                    if(-not $isQuery){throw "Embedding retry wait limit reached at batch $batchNumber/$batchCount (HTTP $status, attempts=$attempt). Document chunks saved this run=$script:DocumentChunksSavedThisRun; remaining=$($texts.Count-$offset); total valid cache entries=$($cacheEntries.Count). Response body suppressed."}
+                    throw "Embedding retry wait limit reached HTTP=$status attempts=$attempt; response body suppressed."
+                }
+                $totalRetryWaitMs+=$delayMs
+                Write-Host "EmbeddingRetry=batch $batchNumber/$batchCount|HTTP$status|Attempt=$attempt/$RetryMaxAttempts|WaitingSeconds=$([Math]::Round($delayMs/1000.0,1))|TotalWaitSeconds=$([Math]::Round($totalRetryWaitMs/1000.0,1))/$RetryMaxTotalWaitSeconds"
                 Start-Sleep -Milliseconds $delayMs
             }
         }
         $batchTimer.Stop();$script:EmbeddingCallTimes.Add($batchTimer.Elapsed.TotalMilliseconds)
         if(-not $success -or @($response.embeddings).Count -ne $batch.Count){throw 'Embedding response count did not match request count.'}
-        foreach($embedding in $response.embeddings){$all.Add([single[]]@($embedding.values))}
-        Write-Host "EmbeddingBatchDone=$([Math]::Floor($offset/16)+1)|BatchItems=$($batch.Count)|Task=$task"
+        $batchVectors=@($response.embeddings|ForEach-Object{,([single[]]@($_.values))})
+        if($cacheMetadata.Count -gt 0){
+            for($index=0;$index -lt $batchVectors.Count;$index++){
+                $chunk=$cacheMetadata[$offset+$index];$key="$($chunk.Hash):gemini-embedding-001:768"
+                $cacheEntries[$key]=[pscustomobject]@{cacheKey=$key;contentHash=$chunk.Hash;modelName='gemini-embedding-001';dimensions=768;productId=$chunk.ProductId;chunkType=$chunk.Type;vector=$batchVectors[$index]}
+            }
+            Save-EmbeddingCache
+            $script:DocumentChunksSavedThisRun += $batch.Count
+            Write-Host "CatalogCacheBatchSaved=batch $batchNumber/$batchCount|ChunkCount=$($batch.Count)|SavedThisRun=$script:DocumentChunksSavedThisRun|Entries=$($cacheEntries.Count)|Atomic=TRUE"
+        }
+        foreach($vector in $batchVectors){$all.Add($vector)}
+        Write-Host "EmbeddingBatchDone=$batchNumber/$batchCount|BatchItems=$($batch.Count)|Task=$task"
     }
     return ,$all.ToArray()
 }
 
 $uniqueMissing=@($chunks|Group-Object Hash|ForEach-Object{$_.Group[0]}|Where-Object{$cacheEntries["$($_.Hash):gemini-embedding-001:768"] -eq $null})
-$docVectors=Get-Embeddings -texts @($uniqueMissing|ForEach-Object Content) -isQuery $false
+$script:DocumentChunksSavedThisRun=0
+$docVectors=Get-Embeddings -texts @($uniqueMissing|ForEach-Object Content) -isQuery $false -cacheMetadata $uniqueMissing
 if($docVectors.Count -ne $uniqueMissing.Count){throw 'Document embedding count mismatch.'}
-for($i=0;$i -lt $uniqueMissing.Count;$i++){
-    $chunk=$uniqueMissing[$i];$key="$($chunk.Hash):gemini-embedding-001:768";$vector=[single[]]$docVectors[$i]
-    $cacheEntries[$key]=[pscustomobject]@{cacheKey=$key;contentHash=$chunk.Hash;modelName='gemini-embedding-001';dimensions=768;productId=$chunk.ProductId;chunkType=$chunk.Type;vector=$vector}
-}
 foreach($chunk in $chunks){$chunk.Vector=[single[]]$cacheEntries["$($chunk.Hash):gemini-embedding-001:768"].vector}
-if($uniqueMissing.Count -gt 0){
-    $cacheDirectory=Split-Path $cachePath -Parent;[void](New-Item -ItemType Directory -Force -Path $cacheDirectory)
-    $tempCache="$cachePath.$([Guid]::NewGuid().ToString('N')).tmp"
-    $jsonCache=ConvertTo-Json -InputObject @($cacheEntries.Values) -Depth 6
-    [IO.File]::WriteAllText($tempCache,$jsonCache,[Text.UTF8Encoding]::new($false))
-    if(Test-Path -LiteralPath $cachePath){[IO.File]::Replace($tempCache,$cachePath,$null)}else{[IO.File]::Move($tempCache,$cachePath)}
-    Write-Host "CatalogCacheWrite=atomic|Entries=$($cacheEntries.Count)|Path=$cachePath"
-}
+if($uniqueMissing.Count -gt 0){Write-Host "CatalogCacheWrite=complete|Entries=$($cacheEntries.Count)|Path=$cachePath"}
 
 $fixtures=@(Get-Content -LiteralPath (Join-Path $RagInputs 'RAG_EVALUATION_QUERIES_V2.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
 $authorFixtures=@(Get-Content -LiteralPath (Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_K03_K05.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })

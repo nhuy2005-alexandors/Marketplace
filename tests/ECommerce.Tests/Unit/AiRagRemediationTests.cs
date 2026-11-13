@@ -90,6 +90,39 @@ public sealed class AiRagRemediationTests
     }
 
     [Fact]
+    public async Task SemanticSearch_PersistsEachSuccessfulEmbeddingBatchBeforeNextBatch()
+    {
+        await using var db = TestDb.Create();
+        var category = new Category { Id = 1, Name = "Batch cache category" };
+        var seller = new User { Id = 10, Email = "batch-cache@example.test", PasswordHash = "test-hash", FullName = "Seller" };
+        db.Categories.Add(category);
+        db.Users.Add(seller);
+        var suffix = Guid.NewGuid().ToString("N");
+        for (var id = 1; id <= 9; id++)
+        {
+            var product = Product(id, $"Batch item {suffix} {id}", category, 10m, 1, seller);
+            product.Description = $"Unique batch description {suffix} {id}";
+            db.Products.Add(product);
+        }
+        await db.SaveChangesAsync();
+        var path = Path.Combine(Path.GetTempPath(), $"rag-batch-cache-{Guid.NewGuid():N}.json");
+        try
+        {
+            var provider = new FakeEmbeddingProvider(_ => [1f, 0f], failDocumentOnCall: 2, modelVersion: "fake-embedding-v1:2");
+            var store = new LocalEmbeddingCacheStore(path);
+            var service = new SemanticSearchService(db, provider, NullLogger<SemanticSearchService>.Instance, store,
+                Options.Create(new GeminiOptions { EmbeddingBatchDelaySeconds = 0 }));
+
+            await service.SearchCandidatesAsync("batch item", null, 8);
+
+            Assert.Equal(2, provider.DocumentCallCount);
+            var persisted = await store.ReadAsync();
+            Assert.Equal(16, persisted.Count);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
     public async Task SemanticSearch_FallsBackToLexicalWhenEmbeddingIsUnavailable()
     {
         await using var db = TestDb.Create();
@@ -292,7 +325,7 @@ public sealed class AiRagRemediationTests
         await provider.GenerateEmbeddingsAsync(["another synthetic catalog item"], isQuery: false);
 
         Assert.Equal(2, calls);
-        Assert.True(timer.Elapsed >= TimeSpan.FromMilliseconds(450));
+        Assert.True(timer.Elapsed >= TimeSpan.FromMilliseconds(8));
     }
 
     [Fact]
@@ -309,7 +342,7 @@ public sealed class AiRagRemediationTests
 
         await Assert.ThrowsAsync<AssistantProviderException>(() => provider.GenerateEmbeddingsAsync(["synthetic item"], isQuery: false));
 
-        Assert.Equal(3, calls);
+        Assert.Equal(5, calls);
     }
 
     [Fact]
@@ -374,7 +407,15 @@ public sealed class AiRagRemediationTests
 
     private static GeminiAssistantProvider Provider(FakeHttpHandler handler) => new(
         new FakeHttpClientFactory(new HttpClient(handler) { BaseAddress = new Uri("https://generativelanguage.googleapis.com/") }),
-        Options.Create(new GeminiOptions { ApiKey = "server-key-test" }), NullLogger<GeminiAssistantProvider>.Instance);
+        Options.Create(new GeminiOptions
+        {
+            ApiKey = "server-key-test",
+            EmbeddingBatchDelaySeconds = 0,
+            EmbeddingRetryMaxAttempts = 5,
+            EmbeddingRetryBaseDelaySeconds = 1,
+            EmbeddingRetryMaxDelaySeconds = 1,
+            EmbeddingRetryMaxTotalWaitSeconds = 2
+        }), NullLogger<GeminiAssistantProvider>.Instance);
 
     private sealed class FakeHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
@@ -386,17 +427,21 @@ public sealed class AiRagRemediationTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
     }
 
-    private sealed class FakeEmbeddingProvider(Func<string, float[]> vector) : IEmbeddingProvider
+    private sealed class FakeEmbeddingProvider(
+        Func<string, float[]> vector,
+        int failDocumentOnCall = -1,
+        string modelVersion = "fake-embedding-v1") : IEmbeddingProvider
     {
         private int _documentCallCount;
         private int _queryCallCount;
-        public string ModelVersion => "fake-embedding-v1";
+        public string ModelVersion => modelVersion;
         public int DocumentCallCount => Volatile.Read(ref _documentCallCount);
         public int QueryCallCount => Volatile.Read(ref _queryCallCount);
         public Task<IReadOnlyList<float[]>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, bool isQuery, CancellationToken ct = default)
         {
             if (isQuery) Interlocked.Increment(ref _queryCallCount);
-            else Interlocked.Increment(ref _documentCallCount);
+            else if (Interlocked.Increment(ref _documentCallCount) == failDocumentOnCall)
+                throw new AssistantProviderException("simulated throttled embedding batch");
             return Task.FromResult<IReadOnlyList<float[]>>(texts.Select(vector).ToArray());
         }
     }

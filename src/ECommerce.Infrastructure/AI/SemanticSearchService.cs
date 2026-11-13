@@ -9,6 +9,7 @@ using ECommerce.Application.Interfaces;
 using ECommerce.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ECommerce.Infrastructure.AI;
 
@@ -16,7 +17,6 @@ public sealed class SemanticSearchService : ISemanticSearchService
 {
     private const int MaxCatalogCandidates = 1000;
     private const int EmbeddingBatchSize = 16;
-    private const int MaxConcurrentEmbeddingBatches = 1;
     private static readonly Regex ExplicitSkuPattern = new(@"\b[A-Z0-9]{2,}(?:-[A-Z0-9]{2,}){2,}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly ConcurrentDictionary<string, float[]> EmbeddingCache = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim EmbeddingCachePopulationGate = new(1, 1);
@@ -32,17 +32,20 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private readonly IEmbeddingProvider _embeddings;
     private readonly IEmbeddingCacheStore? _cacheStore;
     private readonly ILogger<SemanticSearchService> _logger;
+    private readonly int _embeddingBatchDelaySeconds;
 
     public SemanticSearchService(
         IAppDbContext db,
         IEmbeddingProvider embeddings,
         ILogger<SemanticSearchService> logger,
-        IEmbeddingCacheStore? cacheStore = null)
+        IEmbeddingCacheStore? cacheStore = null,
+        IOptions<GeminiOptions>? geminiOptions = null)
     {
         _db = db;
         _embeddings = embeddings;
         _logger = logger;
         _cacheStore = cacheStore;
+        _embeddingBatchDelaySeconds = Math.Clamp(geminiOptions?.Value.EmbeddingBatchDelaySeconds ?? 3, 0, 60);
     }
 
     public async Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
@@ -97,25 +100,24 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
                 var missing = chunks.GroupBy(CacheKey, StringComparer.Ordinal).Select(group => group.First())
                     .Where(chunk => !EmbeddingCache.ContainsKey(CacheKey(chunk))).ToArray();
-                using var batchGate = new SemaphoreSlim(MaxConcurrentEmbeddingBatches, MaxConcurrentEmbeddingBatches);
-                var batchTasks = missing.Chunk(EmbeddingBatchSize).Select(async batch =>
+                var batches = missing.Chunk(EmbeddingBatchSize).ToArray();
+                for (var batchIndex = 0; batchIndex < batches.Length; batchIndex++)
                 {
-                    await batchGate.WaitAsync(ct);
-                    try
+                    if (batchIndex > 0 && _embeddingBatchDelaySeconds > 0)
                     {
-                        var vectors = await _embeddings.GenerateEmbeddingsAsync(batch.Select(chunk => chunk.Content).ToArray(), isQuery: false, ct);
-                        if (vectors.Count != batch.Length) throw new AssistantProviderException("Embedding provider returned an invalid batch.");
-                        for (var i = 0; i < batch.Length; i++) EmbeddingCache[CacheKey(batch[i])] = vectors[i];
+                        _logger.LogInformation("Embedding batch pacing: batch {Batch}/{BatchCount}, waiting {DelaySeconds} seconds.",
+                            batchIndex + 1, batches.Length, _embeddingBatchDelaySeconds);
+                        await Task.Delay(TimeSpan.FromSeconds(_embeddingBatchDelaySeconds), ct);
                     }
-                    finally { batchGate.Release(); }
-                }).ToArray();
-                await Task.WhenAll(batchTasks);
 
-                if (_cacheStore is not null && missing.Length > 0)
-                {
-                    try
+                    var batch = batches[batchIndex];
+                    var vectors = await _embeddings.GenerateEmbeddingsAsync(batch.Select(chunk => chunk.Content).ToArray(), isQuery: false, ct);
+                    if (vectors.Count != batch.Length) throw new AssistantProviderException("Embedding provider returned an invalid batch.");
+                    for (var i = 0; i < batch.Length; i++) EmbeddingCache[CacheKey(batch[i])] = vectors[i];
+
+                    if (_cacheStore is not null)
                     {
-                        var entries = missing.Select(chunk =>
+                        var entries = batch.Select(chunk =>
                         {
                             var parsed = ParseModelVersion(chunk.EmbeddingModelVersion);
                             return new EmbeddingCacheEntry(CacheKey(chunk), chunk.ContentHash, parsed.Model,
@@ -123,11 +125,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
                         }).ToArray();
                         await _cacheStore.WriteAsync(entries, ct);
                     }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-                    {
-                        _logger.LogWarning("Embedding file cache write skipped. Failure type: {FailureType}", ex.GetType().Name);
-                    }
                 }
+
             }
             finally { EmbeddingCachePopulationGate.Release(); }
 
