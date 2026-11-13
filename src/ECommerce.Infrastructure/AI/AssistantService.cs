@@ -2,11 +2,15 @@ using ECommerce.Application.DTOs.AI;
 using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
 
 namespace ECommerce.Infrastructure.AI;
 
 public sealed class AssistantService : IAssistantService
 {
+    private static readonly Regex PromptExtractionRequest = new(
+        @"(?i)(?:\b(?:reveal|show|print|tell\s+me|repeat|disclose|what\s+is|give\s+me|tiết\s+lộ|cho\s+biết|in\s+ra|đưa\s+tôi)\b.{0,48}\b(?:api[\s-]*key|system[\s-]*(?:prompt|instruction)|secret|bí\s+mật|khóa\s+api)\b|\b(?:api[\s-]*key|system[\s-]*(?:prompt|instruction)|secret|bí\s+mật|khóa\s+api)\b.{0,48}\b(?:reveal|show|print|repeat|disclose|tiết\s+lộ|in\s+ra)\b)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly ISemanticSearchService _search;
     private readonly IAssistantAnswerProvider _answers;
     private readonly IRecommendationProvider _recommendations;
@@ -27,6 +31,7 @@ public sealed class AssistantService : IAssistantService
     public async Task<AssistantChatResponse> ChatAsync(AssistantChatRequest request, int? customerId, CancellationToken ct = default)
     {
         var query = request.Query!.Trim();
+        if (PromptExtractionRequest.IsMatch(query)) return NoEvidence(request.Conversation?.ConversationId);
         var filters = AssistantQueryFilters.Merge(query, request.Filters);
         if (filters.MinPrice.HasValue && filters.MaxPrice.HasValue && filters.MinPrice.Value > filters.MaxPrice.Value)
             return NoEvidence(request.Conversation?.ConversationId);

@@ -37,7 +37,9 @@ namespace ECommerce.Infrastructure.AI
     public static class RetrievalScoring
     {
         public const double MinimumCombinedScore = 0.22;
-        private static readonly Regex ExplicitSkuPattern = new Regex(@"\b[A-Z0-9]{2,}(?:-[A-Z0-9]{2,}){2,}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        private static readonly Regex SkuCandidatePattern = new Regex(@"\b[A-Z0-9]{2,}(?:-[A-Z0-9]{2,}){2,}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        private static readonly Regex SkuCuePattern = new Regex(@"\b(?:sku|ma|mã)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        private static readonly Regex SummarySkuPattern = new Regex(@"\bSKU:\s*([A-Z0-9-]+)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
         private static readonly HashSet<string> StopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "toi", "minh", "ban", "cho", "voi", "la", "co", "khong", "nao", "gi", "nhe", "nha", "va", "cua", "mot",
@@ -84,17 +86,60 @@ namespace ECommerce.Infrastructure.AI
             return leftNorm == 0 || rightNorm == 0 ? 0 : dot / (Math.Sqrt(leftNorm) * Math.Sqrt(rightNorm));
         }
 
+        public static bool TryFindSkuCandidate(string query, out string sku)
+        {
+            var match = SkuCandidatePattern.Match(query ?? String.Empty);
+            sku = match.Success ? match.Value : String.Empty;
+            return match.Success;
+        }
+
+        public static bool HasNearbySkuCue(string query, string sku)
+        {
+            if (String.IsNullOrWhiteSpace(query) || String.IsNullOrWhiteSpace(sku)) return false;
+            var skuIndex = query.IndexOf(sku, StringComparison.OrdinalIgnoreCase);
+            if (skuIndex < 0) return false;
+            foreach (Match cue in SkuCuePattern.Matches(query))
+            {
+                var distance = cue.Index < skuIndex ? skuIndex - cue.Index - cue.Length : cue.Index - skuIndex - sku.Length;
+                if (distance > 32) continue;
+                var betweenStart = Math.Min(cue.Index + cue.Length, skuIndex + sku.Length);
+                var betweenEnd = Math.Max(cue.Index, skuIndex);
+                var between = betweenEnd > betweenStart ? query.Substring(betweenStart, betweenEnd - betweenStart) : String.Empty;
+                if (Regex.Matches(between, @"\b\w+\b").Count <= 2) return true;
+            }
+            return false;
+        }
+
+        public static bool TryResolveSkuIntent(string query, IEnumerable<RetrievalScoringChunk> catalogChunks, out string sku)
+        {
+            if (!TryFindSkuCandidate(query, out sku)) return false;
+            if (HasNearbySkuCue(query, sku)) return true;
+            foreach (var chunk in catalogChunks)
+            {
+                if (!String.Equals(chunk.Type, "summary", StringComparison.OrdinalIgnoreCase)) continue;
+                var match = SummarySkuPattern.Match(chunk.Content ?? String.Empty);
+                if (match.Success && String.Equals(match.Groups[1].Value, sku, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            sku = String.Empty;
+            return false;
+        }
+
+        public static bool SummaryContainsSku(string summary, string sku)
+        {
+            var match = SummarySkuPattern.Match(summary ?? String.Empty);
+            return match.Success && String.Equals(match.Groups[1].Value, sku ?? String.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
         public static RetrievalProductScore ScoreProduct(string query, float[] queryVector,
-            IReadOnlyList<RetrievalScoringChunk> chunks, bool hybrid, double semanticThreshold, double semanticWeight)
+            IReadOnlyList<RetrievalScoringChunk> chunks, bool hybrid, double semanticThreshold, double semanticWeight,
+            bool explicitSkuQuery = false, string skuToken = "")
         {
             var productId = chunks.Count == 0 ? 0 : chunks[0].ProductId;
-            var sku = ExplicitSkuPattern.Match(query ?? String.Empty);
-            if (sku.Success)
+            if (explicitSkuQuery)
             {
                 for (var i = 0; i < chunks.Count; i++)
                 {
-                    if (String.Equals(chunks[i].Type, "summary", StringComparison.OrdinalIgnoreCase) &&
-                        Regex.IsMatch(chunks[i].Content ?? String.Empty, @"\bSKU:\s*" + Regex.Escape(sku.Value) + @"\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                    if (String.Equals(chunks[i].Type, "summary", StringComparison.OrdinalIgnoreCase) && SummaryContainsSku(chunks[i].Content, skuToken))
                     {
                         return new RetrievalProductScore
                         {
@@ -148,11 +193,14 @@ namespace ECommerce.Infrastructure.AI
         public static List<RetrievalRankingHit> RankForEvaluation(string query, float[] queryVector,
             IEnumerable<RetrievalScoringChunk> chunks, bool hybrid, double semanticThreshold, double semanticWeight, int limit)
         {
+            var allChunks = chunks.ToArray();
+            string skuToken;
+            var explicitSkuQuery = TryResolveSkuIntent(query, allChunks, out skuToken);
             var ranked = new List<RetrievalRankingHit>();
-            foreach (var group in chunks.GroupBy(chunk => chunk.ProductId))
+            foreach (var group in allChunks.GroupBy(chunk => chunk.ProductId))
             {
                 var productChunks = group.ToArray();
-                var score = ScoreProduct(query, queryVector, productChunks, hybrid, semanticThreshold, semanticWeight);
+                var score = ScoreProduct(query, queryVector, productChunks, hybrid, semanticThreshold, semanticWeight, explicitSkuQuery, skuToken);
                 if (score.Included)
                     ranked.Add(new RetrievalRankingHit
                     {

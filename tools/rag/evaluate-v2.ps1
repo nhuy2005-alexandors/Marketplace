@@ -14,6 +14,7 @@ param(
     [switch]$DryRunTrackRankTiming,
     [switch]$CacheForecastOnly,
     [switch]$AuthorK05Only,
+    [switch]$Diagnostics,
     [ValidateRange(0,1000000)][int]$ExpectedDocumentChunks = 1395
 )
 
@@ -25,6 +26,12 @@ Add-Type -AssemblyName System.Data
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
 if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only) { throw 'Specify -DevelopmentOnly, -HoldoutFinal, -AuthorK05Only, -CacheForecastOnly, or -DryRunFromCache; holdout is never run by default.' }
 if ($AuthorK05Only -and ($LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly)) { throw '-AuthorK05Only must run by itself (it may be combined with -DryRunFromCache).' }
+if ($Diagnostics) {
+    if (-not $AuthorK05Only -or $LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly) { throw '-Diagnostics must be used with -AuthorK05Only only; it never runs provider or database paths.' }
+    if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
+    if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw '-Diagnostics requires a local cache-only dry-run fixture at -DryRunDataPath (default: obj/rag-dryrun-data.json).' }
+    $DryRunFromCache = $true
+}
 
 $scoringSource = Join-Path $RepoRoot 'src/ECommerce.Infrastructure/AI/RetrievalScoring.cs'
 if (-not ('ECommerce.Infrastructure.AI.RetrievalScoring' -as [type])) { Add-Type -Path $scoringSource }
@@ -75,19 +82,24 @@ if ($DryRunFromCache) {
     $development = @($dry.development)
     $authorFixtures = @($dry.authorFixtures)
     $authorK05Fixtures = @($dry.authorK05Fixtures)
-    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
+    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}else{@($development.query) + @($authorFixtures.query)}
     $queryCache = Read-QueryVectorCache -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions)
     $script:TrackRankTiming = [bool]$DryRunTrackRankTiming
     $script:RankTimes = [System.Collections.Generic.List[double]]::new()
-    $queryVectors = Resolve-CachedQueryVectors -Queries $allQueries -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -Cache $queryCache -BatchDelaySeconds 0 -EmbedMissing { throw 'Dry-run is cache-only and cannot embed.' }
+    $queryVectors = if($Diagnostics){@()}else{Resolve-CachedQueryVectors -Queries $allQueries -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -Cache $queryCache -BatchDelaySeconds 0 -EmbedMissing { throw 'Dry-run is cache-only and cannot embed.' }}
     $vectorMap = @{}
-    if($AuthorK05Only){for ($i=0; $i -lt $authorK05Fixtures.Count; $i++) { $vectorMap[[string]$authorK05Fixtures[$i].id] = $queryVectors[$i] }}
+    if($Diagnostics) { }
+    elseif($AuthorK05Only){for ($i=0; $i -lt $authorK05Fixtures.Count; $i++) { $vectorMap[[string]$authorK05Fixtures[$i].id] = $queryVectors[$i] }}
     else {
         for ($i=0; $i -lt $development.Count; $i++) { $vectorMap[[string]$development[$i].id] = $queryVectors[$i] }
         for ($i=0; $i -lt $authorFixtures.Count; $i++) { $vectorMap[[string]$authorFixtures[$i].id] = $queryVectors[$development.Count+$i] }
         for ($i=0; $i -lt $authorK05Fixtures.Count; $i++) { $vectorMap[[string]$authorK05Fixtures[$i].id] = $queryVectors[$development.Count+$authorFixtures.Count+$i] }
     }
-    Write-Output ('DryRunCacheForecast missing_chunks=0 missing_queries=0 estimated_api_calls=0 chunks={0} queries={1}' -f $chunks.Count,$allQueries.Count)
+    if($Diagnostics){
+        $missingK05Vectors=0
+        foreach($row in $authorK05Fixtures){$key=Get-QueryVectorCacheKey ([string]$row.query) $dry.modelName ([int]$dry.dimensions);if($queryCache.ContainsKey($key)){$vectorMap[[string]$row.id]=[single[]]$queryCache[$key].vector}else{$missingK05Vectors++}}
+    }
+    Write-Output ('DryRunCacheForecast missing_chunks=0 missing_queries={0} estimated_api_calls=0 chunks={1} queries={2}' -f $(if($Diagnostics){$missingK05Vectors}else{0}),$chunks.Count,$allQueries.Count)
     if ($LexicalOnly) {
         $lexicalDev = Get-Metrics $development @{} $chunks.ToArray() $false 0.38 0.5 $script:TrackRankTiming $script:RankTimes
         $lexicalAuthor = Get-Metrics $authorFixtures @{} $chunks.ToArray() $false 0.38 0.5 $script:TrackRankTiming $script:RankTimes
@@ -97,6 +109,12 @@ if ($DryRunFromCache) {
         exit 0
     }
     if($AuthorK05Only){
+        if($Diagnostics){
+            $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
+            Write-AuthorK05Diagnostics -Rows $authorK05Fixtures -Vectors $vectorMap -Chunks $chunks.ToArray() -Threshold ([double]$selection.threshold) -Weight ([double]$selection.semanticWeight)
+            Write-Output ('AuthorK05Only=TRUE;Diagnostics=TRUE;CacheOnly=TRUE;MissingQueryVectors={0};Network=0;Database=0;HoldoutEvaluated=FALSE' -f $missingK05Vectors)
+            exit 0
+        }
         $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
         $lex=Get-Metrics $authorK05Fixtures @{} $chunks.ToArray() $false ([double]$selection.threshold) ([double]$selection.semanticWeight) $script:TrackRankTiming $script:RankTimes
         $hybrid=Get-Metrics $authorK05Fixtures $vectorMap $chunks.ToArray() $true ([double]$selection.threshold) ([double]$selection.semanticWeight) $script:TrackRankTiming $script:RankTimes

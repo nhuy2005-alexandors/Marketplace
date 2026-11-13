@@ -93,7 +93,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Evaluator K-05-only dry-run failed: $output" }
     Assert-True ($output.Contains('AUTHOR_K05 lexical') -and $output.Contains('UsedForTuning=FALSE') -and $output.Contains('AuthorK05Only=TRUE')) 'K-05-only report did not produce side-by-side lexical/hybrid results.'
 
-    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Scenarios=5;Modes=lexical,hybrid,author-k05-only;RankTiming=on,off;ExternalCalls=0;Database=0;SelectionWritten=TRUE'
+    $diagnosticKey = Get-QueryVectorCacheKey $authorK05[0].query $model $dimensions
+    $oneCachedVector = @($queryEntries | Where-Object cacheKey -eq $diagnosticKey)
+    Write-AtomicCacheFile -Path $queryCachePath -Content (ConvertTo-Json -InputObject $oneCachedVector -Depth 5)
+    $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$evaluatorPath,'-RepoRoot',$repoRoot,'-RagInputs',$tempRoot,'-DryRunFromCache','-DryRunDataPath',$fixturePath,'-AuthorK05Only','-Diagnostics')
+    $output = (& $powershell @arguments 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "Evaluator K-05 diagnostics dry-run failed: $output" }
+    Assert-True ($output.Contains('K05_DIAG id=author-k05-1') -and $output.Contains('K05_DIAG id=author-k05-2')) 'K-05 diagnostic rows are missing.'
+    Assert-True ($output.Contains('hybrid_results=n/a') -and $output.Contains('MissingQueryVectors=1') -and $output.Contains('Network=0;Database=0')) 'K-05 cache-miss diagnostics were not marked safely.'
+
+    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Scenarios=6;Modes=lexical,hybrid,author-k05-only,author-k05-diagnostics;RankTiming=on,off;CacheMiss=marked;ExternalCalls=0;Database=0;SelectionWritten=TRUE'
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }

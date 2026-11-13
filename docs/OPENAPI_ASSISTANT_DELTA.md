@@ -1,0 +1,83 @@
+# OpenAPI delta — Assistant chat
+
+This delta documents `POST /api/assistant/chat` as implemented in `AssistantController`, `AssistantDtos`, and `ProductDto`. The route is anonymous; a bearer token is optional. Send `Content-Type: application/json`. Names below use the API's camel-case JSON policy.
+
+## Request
+
+```json
+{
+  "query": "Tìm tai nghe không dây dưới $100",
+  "filters": {
+    "categoryId": 3,
+    "sellerId": 12,
+    "minPrice": 10,
+    "maxPrice": 100,
+    "inStockOnly": true
+  },
+  "conversation": {
+    "conversationId": "optional-client-id",
+    "recentTurns": [
+      { "role": "user", "content": "I need headphones" },
+      { "role": "assistant", "content": "What connection do you prefer?" }
+    ]
+  },
+  "context": { "visibleProductIds": [101, 102] }
+}
+```
+
+| Field | Type | Validation / behavior |
+|---|---|---|
+| `query` | string | Required in practice; 1–1000 characters after trim. |
+| `filters.categoryId` | integer or null | Must be positive; SQL hard filter. |
+| `filters.sellerId` | integer or null | Must be positive; SQL hard filter. |
+| `filters.minPrice`, `maxPrice` | decimal or null | Non-negative; min cannot exceed max. |
+| `filters.inStockOnly` | boolean | Defaults to `false`; SQL requires stock > 0 when true. |
+| `conversation.conversationId` | string or null | Echoed when supplied; otherwise a new ID is returned. |
+| `conversation.recentTurns` | array | At most 4 turns; each role at most 16 chars and content at most 500 chars. Only `user` and `assistant` roles are forwarded to the answer provider. |
+| `context.visibleProductIds` | integer array | At most 20 IDs; hints only, never retrieval authority. |
+
+The request body limit is 32,768 bytes. The endpoint is rate-limited by the `ai` policy to 12 requests per source IP per fixed minute; the API also has a global limit of 100 requests/IP/minute.
+
+## Success — `200 OK`
+
+```json
+{
+  "answer": "Các sản phẩm phù hợp với …",
+  "products": [
+    {
+      "id": 101,
+      "name": "Catalog product",
+      "description": "…",
+      "price": 49.99,
+      "stock": 5,
+      "imageUrl": null,
+      "categoryId": 3,
+      "categoryName": "Audio & Wearables",
+      "sellerId": 12,
+      "sellerShopName": "Demo shop",
+      "averageRating": 0,
+      "reviewCount": 0
+    }
+  ],
+  "sources": [
+    { "type": "product", "productId": 101, "reasonCode": "summary" }
+  ],
+  "retrieval": { "mode": "hybrid", "hasEvidence": true },
+  "conversationId": "…"
+}
+```
+
+An insufficient-evidence result is still `200`: `products` and `sources` are empty and `retrieval.hasEvidence` is false. Provider failures normally use a backend-grounded fallback; the response does not expose provider error bodies.
+
+## Errors
+
+| Status | Body / condition |
+|---|---|
+| `400 Bad Request` | `{"error":"Query must contain 1 to 1000 characters."}`, `{"error":"Price filters are invalid."}`, `{"error":"Category and seller filters must be positive IDs."}`, `{"error":"Conversation context exceeds the allowed bounds."}`, or `{"error":"Visible product hints exceed the allowed limit."}`. |
+| `413 Payload Too Large` | Request exceeds the 32,768-byte endpoint limit. The host may return an empty body. |
+| `429 Too Many Requests` | Rate limiter rejection. Current middleware guarantees status only; no JSON error schema or `Retry-After` header is configured. |
+| `500 Internal Server Error` | Unhandled exception: `{"error":"An unexpected error occurred."}`. Provider exceptions caught by assistant orchestration are returned as a grounded fallback instead. |
+
+## OpenAPI caveats
+
+The request-size limit and `429` policy are endpoint/runtime behavior and are not fully represented by generated Swagger response schemas. The API source declares response types for `200`, `400`, and `429`; this delta records observed controller and middleware behavior for `413` and `500` as well.

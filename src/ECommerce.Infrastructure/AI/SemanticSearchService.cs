@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using ECommerce.Application.DTOs.AI;
 using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
@@ -16,7 +15,6 @@ public sealed class SemanticSearchService : ISemanticSearchService
 {
     private const int MaxCatalogCandidates = 1000;
     private const int EmbeddingBatchSize = 16;
-    private static readonly Regex ExplicitSkuPattern = new(@"\b[A-Z0-9]{2,}(?:-[A-Z0-9]{2,}){2,}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly ConcurrentDictionary<string, float[]> EmbeddingCache = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim EmbeddingCachePopulationGate = new(1, 1);
     private static bool EmbeddingCacheLoadedFromFile;
@@ -54,8 +52,12 @@ public sealed class SemanticSearchService : ISemanticSearchService
         if (filters?.MinPrice is decimal minPrice) dbQuery = dbQuery.Where(p => p.Price >= minPrice);
         if (filters?.MaxPrice is decimal maxPrice) dbQuery = dbQuery.Where(p => p.Price <= maxPrice);
         if (filters?.InStockOnly == true) dbQuery = dbQuery.Where(p => p.Stock > 0);
-        var explicitSku = ExplicitSkuPattern.Match(query);
-        if (explicitSku.Success) dbQuery = dbQuery.Where(p => p.Sku == explicitSku.Value.ToUpperInvariant());
+        if (RetrievalScoring.TryFindSkuCandidate(query, out var skuCandidate))
+        {
+            var hasSkuCue = RetrievalScoring.HasNearbySkuCue(query, skuCandidate);
+            var existsInCatalog = hasSkuCue || await _db.Products.AsNoTracking().AnyAsync(p => p.Sku == skuCandidate, ct);
+            if (existsInCatalog) dbQuery = dbQuery.Where(p => p.Sku == skuCandidate.ToUpperInvariant());
+        }
 
         var products = await dbQuery.OrderBy(p => p.Id).Take(MaxCatalogCandidates).ToListAsync(ct);
         if (products.Count == 0) return [];
@@ -68,6 +70,12 @@ public sealed class SemanticSearchService : ISemanticSearchService
         var attributesByProduct = attributes.GroupBy(value => value.ProductId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<ProductAttributeValue>)group.ToArray());
         var chunks = products.SelectMany(product => BuildChunks(product, attributesByProduct.GetValueOrDefault(product.Id, []))).ToArray();
+        var explicitSkuQuery = RetrievalScoring.TryResolveSkuIntent(query, chunks.Select(chunk => new RetrievalScoringChunk
+        {
+            ProductId = chunk.ProductId,
+            Type = chunk.ChunkType,
+            Content = chunk.Content
+        }), out var skuToken);
 
         float[] queryVector = [];
         try
@@ -149,7 +157,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 Vector = EmbeddingCache.GetValueOrDefault(CacheKey(chunk), [])
             }).ToArray();
             var score = RetrievalScoring.ScoreProduct(query, queryVector, scoringChunks, queryVector.Length > 0,
-                _semanticThreshold, _semanticWeight);
+                _semanticThreshold, _semanticWeight, explicitSkuQuery, skuToken);
             if (!score.Included) continue;
             var sources = score.IncludedChunkIndexes.Select(index => productChunks[index]).ToArray();
             results.Add(new AssistantRetrievalCandidate(ToDto(product), score.LexicalScore, score.SemanticScore,
