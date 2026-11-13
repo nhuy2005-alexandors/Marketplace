@@ -8,15 +8,21 @@ param(
     [ValidateRange(1,10)][int]$RetryMaxAttempts = 5,
     [ValidateRange(1,90)][int]$RetryMaxDelaySeconds = 90,
     [ValidateRange(1,600)][int]$RetryMaxTotalWaitSeconds = 300,
-    [ValidateRange(0,100000)][int]$MaxBatchesPerRun = 0
+    [ValidateRange(0,100000)][int]$MaxBatchesPerRun = 0,
+    [switch]$DryRunFromCache,
+    [string]$DryRunDataPath,
+    [switch]$DryRunTrackRankTiming,
+    [switch]$CacheForecastOnly,
+    [ValidateRange(0,1000000)][int]$ExpectedDocumentChunks = 1395
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Data
 . (Join-Path $PSScriptRoot 'AtomicJsonCache.ps1')
 . (Join-Path $PSScriptRoot 'EvaluationResilience.ps1')
+. (Join-Path $PSScriptRoot 'EvaluationMetrics.ps1')
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
-if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal) { throw 'Specify -DevelopmentOnly or -HoldoutFinal; holdout is never run by default.' }
+if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache) { throw 'Specify -DevelopmentOnly, -HoldoutFinal, -CacheForecastOnly, or -DryRunFromCache; holdout is never run by default.' }
 
 if (-not ('RagEvalKernel' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -35,6 +41,7 @@ public sealed class RagEvalChunk
     public string Hash { get; set; }
     public float[] Vector { get; set; }
 }
+
 public sealed class RagEvalHit
 {
     public int ProductId { get; set; }
@@ -103,6 +110,72 @@ public static class RagEvalKernel
     }
 }
 '@
+}
+
+$script:RankTimes = [System.Collections.Generic.List[double]]::new()
+$script:TrackRankTiming = $false
+
+if ($CacheForecastOnly) {
+    $catalogCachePath = Join-Path $RepoRoot 'obj/rag-embedding-cache.json'
+    $queryCachePath = Join-Path $RepoRoot 'obj/rag-query-embedding-cache.json'
+    if (-not [IO.File]::Exists($catalogCachePath)) { throw 'Catalog embedding cache is missing.' }
+    $catalogEntries = Get-Content -LiteralPath $catalogCachePath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $validCatalogCount = @($catalogEntries | Where-Object {
+        $_.modelName -eq 'gemini-embedding-001' -and [int]$_.dimensions -eq 768 -and
+        $_.cacheKey -eq "$($_.contentHash):$($_.modelName):$($_.dimensions)" -and @($_.vector).Count -eq 768
+    } | Group-Object cacheKey).Count
+    $missingChunks = [Math]::Max(0,$ExpectedDocumentChunks-$validCatalogCount)
+    $fixturePath = Join-Path $RagInputs 'RAG_EVALUATION_QUERIES_V2.jsonl'
+    $authorPath = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_K03_K05.jsonl'
+    $fixtureRows = @(Get-Content -LiteralPath $fixturePath | ForEach-Object { $_ | ConvertFrom-Json })
+    $developmentRows = @($fixtureRows | Where-Object split -eq 'development')
+    $authorRows = @(Get-Content -LiteralPath $authorPath | ForEach-Object { $_ | ConvertFrom-Json })
+    $queryCache = Read-QueryVectorCache -Path $queryCachePath -ModelName 'gemini-embedding-001' -Dimensions 768
+    $queryTexts = @($developmentRows.query) + @($authorRows.query)
+    $uniqueQueryKeys = @($queryTexts | ForEach-Object { Get-QueryVectorCacheKey ([string]$_) 'gemini-embedding-001' 768 } | Sort-Object -Unique)
+    $missingQueries = @($uniqueQueryKeys | Where-Object { -not $queryCache.ContainsKey($_) }).Count
+    Write-Output ('CacheForecastOnly catalog_cache_valid={0} expected_catalog_chunks={1} missing_chunks={2} query_cache_valid={3} expected_unique_queries={4} missing_queries={5} estimated_api_calls=0' -f $validCatalogCount,$ExpectedDocumentChunks,$missingChunks,$queryCache.Count,$uniqueQueryKeys.Count,$missingQueries)
+    exit 0
+}
+
+if ($DryRunFromCache) {
+    if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { throw '-DryRunDataPath is required with -DryRunFromCache.' }
+    $dry = Get-Content -LiteralPath $DryRunDataPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $docCache = @{}
+    $loadedDocEntries = Get-Content -LiteralPath $dry.catalogCachePath -Raw | ConvertFrom-Json -ErrorAction Stop
+    foreach ($entry in $loadedDocEntries) {
+        $expected = "$($entry.contentHash):$($entry.modelName):$($entry.dimensions)"
+        if ($entry.cacheKey -eq $expected -and @($entry.vector).Count -eq [int]$entry.dimensions) { $docCache[$expected] = $entry }
+    }
+    $chunks = New-Object 'System.Collections.Generic.List[RagEvalChunk]'
+    foreach ($item in $dry.chunks) {
+        $key = "$($item.hash):$($dry.modelName):$($dry.dimensions)"
+        if (-not $docCache.ContainsKey($key)) { throw "Dry-run catalog cache miss for fixture chunk $($item.hash)." }
+        $chunks.Add([RagEvalChunk]@{ ProductId=[int]$item.productId; Type=[string]$item.type; Content=[string]$item.content; Hash=[string]$item.hash; Vector=[single[]]$docCache[$key].vector })
+    }
+    $development = @($dry.development)
+    $authorFixtures = @($dry.authorFixtures)
+    $allQueries = @($development.query) + @($authorFixtures.query)
+    $queryCache = Read-QueryVectorCache -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions)
+    $script:TrackRankTiming = [bool]$DryRunTrackRankTiming
+    $script:RankTimes = [System.Collections.Generic.List[double]]::new()
+    $queryVectors = Resolve-CachedQueryVectors -Queries $allQueries -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -Cache $queryCache -BatchDelaySeconds 0 -EmbedMissing { throw 'Dry-run is cache-only and cannot embed.' }
+    $vectorMap = @{}
+    for ($i=0; $i -lt $development.Count; $i++) { $vectorMap[[string]$development[$i].id] = $queryVectors[$i] }
+    for ($i=0; $i -lt $authorFixtures.Count; $i++) { $vectorMap[[string]$authorFixtures[$i].id] = $queryVectors[$development.Count+$i] }
+    Write-Output ('DryRunCacheForecast missing_chunks=0 missing_queries=0 estimated_api_calls=0 chunks={0} queries={1}' -f $chunks.Count,$allQueries.Count)
+    if ($LexicalOnly) {
+        $lexicalDev = Get-Metrics $development @{} $chunks.ToArray() $false 0.38 0.5 $script:TrackRankTiming $script:RankTimes
+        $lexicalAuthor = Get-Metrics $authorFixtures @{} $chunks.ToArray() $false 0.38 0.5 $script:TrackRankTiming $script:RankTimes
+        Write-Output ('DRYRUN DEV lexical Recall@5={0:P2} MRR@10={1:P2} no_result_empty={2:P2}' -f $lexicalDev.RecallAt5,$lexicalDev.MRRAt10,$lexicalDev.NoResultEmptyAccuracy)
+        Write-Output ('DRYRUN AUTHOR lexical Recall@5={0:P2} MRR@10={1:P2} no_result_empty={2:P2}' -f $lexicalAuthor.RecallAt5,$lexicalAuthor.MRRAt10,$lexicalAuthor.NoResultEmptyAccuracy)
+        Write-Output ('RankTimingEnabled={0};RankSamples={1};DryRun=TRUE;HoldoutEvaluated=FALSE' -f $script:TrackRankTiming,$script:RankTimes.Count)
+        exit 0
+    }
+    $selection = Invoke-DevelopmentSelection -Development $development -AuthorFixtures $authorFixtures -Vectors $vectorMap -Chunks $chunks.ToArray() -SelectionPath $dry.selectionPath -FixtureVersion 'DRY_RUN_FIXTURE' -TrackTiming $script:TrackRankTiming -RankTimes $script:RankTimes
+    Write-Output ('SelectedDevThreshold={0};SelectedSemanticWeight={1};RankTimingEnabled={2};RankSamples={3};DryRun=TRUE;HoldoutEvaluated=FALSE' -f $selection.Threshold,$selection.Weight,$script:TrackRankTiming,$script:RankTimes.Count)
+    Write-Output "DevelopmentSelectionSaved=$($dry.selectionPath)"
+    exit 0
 }
 
 $keyLine = Get-Content -LiteralPath (Join-Path $RepoRoot '.env') | Where-Object { $_ -match '^\s*GEMINI_API_KEY\s*=' } | Select-Object -First 1
@@ -343,56 +416,13 @@ if($HoldoutFinal){
     if($holdoutVectors.Count -ne $holdout.Count){throw 'Holdout query embedding count mismatch.'}
     $holdoutMap=@{}
     for($i=0;$i -lt $holdout.Count;$i++){$holdoutMap[[string]$holdout[$i].id]=$holdoutVectors[$i]}
-    $lexicalHoldout=Get-Metrics $holdout @{} $false $threshold $weight
-    $hybridHoldout=Get-Metrics $holdout $holdoutMap $true $threshold $weight
+    $lexicalHoldout=Get-Metrics $holdout @{} $chunks.ToArray() $false $threshold $weight $script:TrackRankTiming $script:RankTimes
+    $hybridHoldout=Get-Metrics $holdout $holdoutMap $chunks.ToArray() $true $threshold $weight $script:TrackRankTiming $script:RankTimes
     Write-Output ('HOLDOUT lexical R5(all)={0:P2} R5(capped)={1:P2} ceiling(all)={2:P2} MRR10={3:P2} no_result_empty={4:P2}' -f $lexicalHoldout.RecallAt5,$lexicalHoldout.RecallAt5Capped,$lexicalHoldout.RecallAt5TheoreticalCeiling,$lexicalHoldout.MRRAt10,$lexicalHoldout.NoResultEmptyAccuracy)
     Write-Output ('HOLDOUT tuned hybrid threshold={0} semanticWeight={1} R5(all)={2:P2} R5(capped)={3:P2} ceiling(all)={4:P2} MRR10={5:P2} no_result_empty={6:P2}' -f $threshold,$weight,$hybridHoldout.RecallAt5,$hybridHoldout.RecallAt5Capped,$hybridHoldout.RecallAt5TheoreticalCeiling,$hybridHoldout.MRRAt10,$hybridHoldout.NoResultEmptyAccuracy)
-    Write-TypeMetrics $holdout $holdoutMap $true $threshold $weight 'HOLDOUT_HYBRID'
+    Write-TypeMetrics $holdout $holdoutMap $chunks.ToArray() $true $threshold $weight 'HOLDOUT_HYBRID' $script:TrackRankTiming $script:RankTimes
     Write-Output ('EmbeddingCalls={0};QueryCalls={1};QueryLatencyAvgP95Ms={2}/{3};RankLatencyAvgP95Ms={4}/{5};CPUms={6};WorkingSetMB={7:N1};HoldoutEvaluated=TRUE' -f $script:EmbeddingApiCalls,$script:QueryApiCalls,(Get-LatencySummary $script:EmbeddingCallTimes).AverageMs,(Get-LatencySummary $script:EmbeddingCallTimes).P95Ms,(Get-LatencySummary $script:RankTimes).AverageMs,(Get-LatencySummary $script:RankTimes).P95Ms,[Diagnostics.Process]::GetCurrentProcess().TotalProcessorTime.TotalMilliseconds,([Diagnostics.Process]::GetCurrentProcess().WorkingSet64/1MB))
     exit 0
-}
-
-function Get-Metrics($rows,$vectors,[bool]$hybrid,[double]$threshold,[double]$weight) {
-    $relevant=@($rows | Where-Object { @($_.expected_product_ids).Count -gt 0 })
-    $empty=@($rows | Where-Object { @($_.expected_product_ids).Count -eq 0 })
-    $recall=0.0; $recallCapped=0.0; $ceiling=0.0; $mrr=0.0; $emptyCorrect=0
-    foreach($row in $rows) {
-        $rankTimer=[Diagnostics.Stopwatch]::StartNew()
-        $ranked=[RagEvalKernel]::Rank([string]$row.query,$vectors[[string]$row.id],$chunks.ToArray(),$hybrid,$threshold,$weight)
-        $rankTimer.Stop();if($script:TrackRankTiming){$script:RankTimes.Add($rankTimer.Elapsed.TotalMilliseconds)}
-        $ids=@($ranked | Select-Object -First 10 | ForEach-Object ProductId)
-        if(@($row.expected_product_ids).Count -gt 0) {
-            $expected=@($row.expected_product_ids); $top5=@($ids | Select-Object -First 5)
-            $found=@($top5 | Where-Object { $expected -contains $_ }).Count
-            $recall += $found/[double]$expected.Count
-            $recallCapped += $found/[double][Math]::Min(5,$expected.Count)
-            $ceiling += [Math]::Min(5,$expected.Count)/[double]$expected.Count
-            $rank=0; for($i=0;$i -lt $ids.Count;$i++){if($expected -contains $ids[$i]){$rank=$i+1;break}}
-            if($rank -gt 0){$mrr += 1.0/$rank}
-        } elseif($ranked.Count -eq 0) { $emptyCorrect++ }
-    }
-    return [pscustomobject]@{
-        RecallAt5=if($relevant.Count){$recall/$relevant.Count}else{0}
-        RecallAt5Capped=if($relevant.Count){$recallCapped/$relevant.Count}else{0}
-        RecallAt5TheoreticalCeiling=if($relevant.Count){$ceiling/$relevant.Count}else{0}
-        MRRAt10=if($relevant.Count){$mrr/$relevant.Count}else{0}
-        NoResultEmptyAccuracy=if($empty.Count){$emptyCorrect/[double]$empty.Count}else{0}
-        RelevantQueries=$relevant.Count;NoResultQueries=$empty.Count
-    }
-}
-
-function Get-LatencySummary($values) {
-    $sorted=@($values|Sort-Object);$count=$sorted.Count
-    if(-not $count){return [pscustomobject]@{AverageMs=0;P95Ms=0;Count=0}}
-    $p95Index=[Math]::Max(0,[int][Math]::Ceiling(0.95*$count)-1)
-    return [pscustomobject]@{AverageMs=($sorted|Measure-Object -Average).Average;P95Ms=$sorted[$p95Index];Count=$count}
-}
-
-function Write-TypeMetrics($rows,$vectors,[bool]$hybrid,[double]$threshold,[double]$weight,[string]$label) {
-    foreach($group in ($rows|Group-Object type|Sort-Object Name)){
-        $metric=Get-Metrics $group.Group $vectors $hybrid $threshold $weight
-        Write-Output ('{0} type={1} R5(all)={2:P2} R5(capped)={3:P2} ceiling(all)={4:P2} MRR10={5:P2} no_result_empty={6:P2} queries={7}' -f $label,$group.Name,$metric.RecallAt5,$metric.RecallAt5Capped,$metric.RecallAt5TheoreticalCeiling,$metric.MRRAt10,$metric.NoResultEmptyAccuracy,$group.Count)
-    }
 }
 
 $devQueries=@($development.query)+@($authorFixtures.query)
@@ -402,37 +432,17 @@ $devVectorMap=@{}
 for($i=0;$i -lt $development.Count;$i++){$devVectorMap[[string]$development[$i].id]=$devQueryVectors[$i]}
 for($i=0;$i -lt $authorFixtures.Count;$i++){$devVectorMap[[string]$authorFixtures[$i].id]=$devQueryVectors[$development.Count+$i]}
 
-$lexicalDev=Get-Metrics $development @{} $false 0.38 0.5
-$grid=[System.Collections.Generic.List[object]]::new()
-foreach($weight in @(0.25,0.5,0.75)){
-  foreach($threshold in @(0.38,0.45,0.52,0.59,0.66)){
-    $metric=Get-Metrics $development $devVectorMap $true $threshold $weight
-    $objective=0.45*$metric.RecallAt5+0.45*$metric.MRRAt10+0.10*$metric.NoResultEmptyAccuracy
-    $grid.Add([pscustomobject]@{Weight=$weight;Threshold=$threshold;Metrics=$metric;Objective=$objective})
-  }
-}
-$selected=$grid | Sort-Object @{Expression='Objective';Descending=$true}, @{Expression={$_.Metrics.NoResultEmptyAccuracy};Descending=$true}, @{Expression='Weight';Descending=$false} | Select-Object -First 1
-$hybridDev=Get-Metrics $development $devVectorMap $true $selected.Threshold $selected.Weight
-$authorMetrics=Get-Metrics $authorFixtures $devVectorMap $true $selected.Threshold $selected.Weight
-Write-Output ('DEV lexical Recall@5={0:P2} MRR@10={1:P2} no_result_empty={2:P2}' -f $lexicalDev.RecallAt5,$lexicalDev.MRRAt10,$lexicalDev.NoResultEmptyAccuracy)
-Write-Output ('DEV tuned hybrid threshold={0} semanticWeight={1} Recall@5={2:P2} MRR@10={3:P2} no_result_empty={4:P2}' -f $selected.Threshold,$selected.Weight,$hybridDev.RecallAt5,$hybridDev.MRRAt10,$hybridDev.NoResultEmptyAccuracy)
-Write-Output ('AUTHOR_WRITTEN K03/K05 Recall@5={0:P2} MRR@10={1:P2} no_result_queries=0' -f $authorMetrics.RecallAt5,$authorMetrics.MRRAt10)
-Write-TypeMetrics $development $devVectorMap $true $selected.Threshold $selected.Weight 'DEV_HYBRID'
-Write-TypeMetrics $authorFixtures $devVectorMap $true $selected.Threshold $selected.Weight 'AUTHOR_HYBRID'
-$selectionPath=Join-Path $RepoRoot 'obj/rag-eval-selection.json'
-[void](New-Item -ItemType Directory -Force -Path (Split-Path $selectionPath -Parent))
-$selectionJson=@{fixtureVersion='RAG_EVALUATION_QUERIES_V2';developmentCount=96;threshold=$selected.Threshold;semanticWeight=$selected.Weight;objective=$selected.Objective;createdUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 4
-[IO.File]::WriteAllText($selectionPath,$selectionJson,[Text.UTF8Encoding]::new($false))
+$selected=Invoke-DevelopmentSelection -Development $development -AuthorFixtures $authorFixtures -Vectors $devVectorMap -Chunks $chunks.ToArray() -SelectionPath (Join-Path $RepoRoot 'obj/rag-eval-selection.json') -FixtureVersion 'RAG_EVALUATION_QUERIES_V2' -TrackTiming $script:TrackRankTiming -RankTimes $script:RankTimes
 Write-Output ('SelectedDevThreshold={0};SelectedSemanticWeight={1};DocumentChunks={2};DocumentBatches={3};EmbeddingCalls={4};QueryCalls={5};EmbeddingLatencyAvgP95Ms={6}/{7};RankLatencyAvgP95Ms={8}/{9};CPUms={10};WorkingSetMB={11:N1};HoldoutEvaluated=FALSE' -f $selected.Threshold,$selected.Weight,$chunks.Count,[Math]::Ceiling($chunks.Count/16.0),$script:EmbeddingApiCalls,$script:QueryApiCalls,(Get-LatencySummary $script:EmbeddingCallTimes).AverageMs,(Get-LatencySummary $script:EmbeddingCallTimes).P95Ms,(Get-LatencySummary $script:RankTimes).AverageMs,(Get-LatencySummary $script:RankTimes).P95Ms,[Diagnostics.Process]::GetCurrentProcess().TotalProcessorTime.TotalMilliseconds,([Diagnostics.Process]::GetCurrentProcess().WorkingSet64/1MB))
-Write-Output "DevelopmentSelectionSaved=$selectionPath"
+Write-Output "DevelopmentSelectionSaved=$(Join-Path $RepoRoot 'obj/rag-eval-selection.json')"
 exit 0
 
 # Final holdout run: only the already-selected development parameters are evaluated here.
 $holdoutVectors=Get-Embeddings -texts @($holdout.query) -isQuery $true
 $holdoutMap=@{}
 for($i=0;$i -lt $holdout.Count;$i++){$holdoutMap[[string]$holdout[$i].id]=$holdoutVectors[$i]}
-$lexicalHoldout=Get-Metrics $holdout @{} $false $selected.Threshold $selected.Weight
-$hybridHoldout=Get-Metrics $holdout $holdoutMap $true $selected.Threshold $selected.Weight
+$lexicalHoldout=Get-Metrics $holdout @{} $chunks.ToArray() $false $selected.Threshold $selected.Weight $script:TrackRankTiming $script:RankTimes
+$hybridHoldout=Get-Metrics $holdout $holdoutMap $chunks.ToArray() $true $selected.Threshold $selected.Weight $script:TrackRankTiming $script:RankTimes
 Write-Output ('HOLDOUT lexical Recall@5={0:P2} MRR@10={1:P2} no_result_empty={2:P2}' -f $lexicalHoldout.RecallAt5,$lexicalHoldout.MRRAt10,$lexicalHoldout.NoResultEmptyAccuracy)
 Write-Output ('HOLDOUT tuned hybrid Recall@5={0:P2} MRR@10={1:P2} no_result_empty={2:P2}' -f $hybridHoldout.RecallAt5,$hybridHoldout.MRRAt10,$hybridHoldout.NoResultEmptyAccuracy)
 Write-Output ('SelectedDevThreshold={0};SelectedSemanticWeight={1};DocumentChunks={2};DocumentBatches={3};QueryBatchSize=32' -f $selected.Threshold,$selected.Weight,$chunks.Count,[Math]::Ceiling($chunks.Count/32.0))

@@ -87,7 +87,8 @@ function Read-QueryVectorCache([string]$Path, [string]$ModelName, [int]$Dimensio
     $entries = @{}
     if (-not [IO.File]::Exists($Path)) { return $entries }
     try {
-        foreach ($entry in @(Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -ErrorAction Stop)) {
+        $loadedEntries = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -ErrorAction Stop
+        foreach ($entry in $loadedEntries) {
             $expected = "$($entry.contentHash):$ModelName`:$Dimensions"
             if ($entry.modelName -eq $ModelName -and [int]$entry.dimensions -eq $Dimensions -and
                 $entry.cacheKey -eq $expected -and @($entry.vector).Count -eq $Dimensions) {
