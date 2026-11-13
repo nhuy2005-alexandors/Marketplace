@@ -7,12 +7,14 @@ param(
     [ValidateRange(0,60)][int]$BatchDelaySeconds = 3,
     [ValidateRange(1,10)][int]$RetryMaxAttempts = 5,
     [ValidateRange(1,90)][int]$RetryMaxDelaySeconds = 90,
-    [ValidateRange(1,600)][int]$RetryMaxTotalWaitSeconds = 300
+    [ValidateRange(1,600)][int]$RetryMaxTotalWaitSeconds = 300,
+    [ValidateRange(0,100000)][int]$MaxBatchesPerRun = 0
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Data
 . (Join-Path $PSScriptRoot 'AtomicJsonCache.ps1')
+. (Join-Path $PSScriptRoot 'EvaluationResilience.ps1')
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
 if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal) { throw 'Specify -DevelopmentOnly or -HoldoutFinal; holdout is never run by default.' }
 
@@ -222,7 +224,7 @@ function Get-Embeddings([string[]]$texts,[bool]$isQuery,[object[]]$cacheMetadata
         $batch=@($texts | Select-Object -Skip $offset -First 16)
         $requests=@(foreach($text in $batch){@{model='models/gemini-embedding-001';content=@{parts=@(@{text=$text})};taskType=$task;outputDimensionality=768}})
         $payload=@{requests=$requests}|ConvertTo-Json -Depth 8 -Compress
-        $batchTimer=[Diagnostics.Stopwatch]::StartNew();$success=$false;$totalRetryWaitMs=0
+        $batchTimer=[Diagnostics.Stopwatch]::StartNew();$success=$false;$totalRetryWaitMs=0;$completedLong429Waits=0
         for($attempt=1;$attempt -le $RetryMaxAttempts;$attempt++){
             $script:EmbeddingApiCalls++
             if($isQuery){$script:QueryApiCalls++}else{$script:DocumentApiCalls++}
@@ -230,16 +232,27 @@ function Get-Embeddings([string[]]$texts,[bool]$isQuery,[object[]]$cacheMetadata
                 $response=Invoke-RestMethod -Method Post -Uri 'https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents' -Headers $headers -ContentType 'application/json' -Body $payload -TimeoutSec 20
                 $success=$true;$status='200';break
             }catch{
-                $status='none';$failureType=$_.Exception.GetType().Name;$retryAfterHeader=$null
+                $status='none';$failureType=$_.Exception.GetType().Name;$retryAfterHeader=$null;$quotaDiagnostic=$null
                 if($_.Exception.Response){
                     $status=[string][int]$_.Exception.Response.StatusCode
                     $retryAfterHeader=$_.Exception.Response.Headers['Retry-After']
                 }
+                if($status -eq '429'){
+                    $errorBody=Get-HttpErrorBody $_.Exception
+                    $quotaDiagnostic=Get-GeminiQuotaDiagnostic ([int]$status) $errorBody
+                    $errorBody=$null
+                    Write-Host "GeminiQuota429|HTTP=$($quotaDiagnostic.HttpStatus)|Status=$($quotaDiagnostic.Status)|QuotaMetric=$($quotaDiagnostic.QuotaMetric)|QuotaId=$($quotaDiagnostic.QuotaId)|QuotaDimensions=$($quotaDiagnostic.QuotaDimensions)|RetryDelaySeconds=$($quotaDiagnostic.RetryDelaySeconds)|Classification=$($quotaDiagnostic.Classification)"
+                    $stopReason=Get-Quota429StopReason $quotaDiagnostic $completedLong429Waits
+                    if($stopReason){
+                        $batchTimer.Stop();$script:EmbeddingCallTimes.Add($batchTimer.Elapsed.TotalMilliseconds)
+                        if(-not $isQuery){throw "Embedding stopped early at batch $batchNumber/$batchCount ($stopReason). Document chunks saved this run=$script:DocumentChunksSavedThisRun; remaining=$($texts.Count-$offset); total valid cache entries=$($cacheEntries.Count). Retry after quota reset or later. Response body suppressed."}
+                        throw "Query embedding stopped early ($stopReason); response body suppressed."
+                    }
+                } elseif($status -ne '429') { $completedLong429Waits=0 }
                 if($status -notin @('429','503') -or $attempt -eq $RetryMaxAttempts){
                     $batchTimer.Stop();$script:EmbeddingCallTimes.Add($batchTimer.Elapsed.TotalMilliseconds)
                     if(-not $isQuery){
-                        $savedThisRun=[Math]::Min($offset,$script:DocumentChunksSavedThisRun)
-                        $remaining=[Math]::Max(0,$texts.Count-$offset)
+                        $remaining=[Math]::Max(0,$script:DocumentChunksTotalMissing-$script:DocumentChunksSavedThisRun)
                         throw "Embedding stopped at batch $batchNumber/$batchCount (HTTP $status, attempts=$attempt). Document chunks saved this run=$script:DocumentChunksSavedThisRun; remaining=$remaining; total valid cache entries=$($cacheEntries.Count). Response body suppressed."
                     }
                     throw "Embedding failure HTTP=$status attempts=$attempt elapsedMs=$([int]$batchTimer.Elapsed.TotalMilliseconds) failureType=$failureType; response body suppressed."
@@ -251,6 +264,9 @@ function Get-Embeddings([string[]]$texts,[bool]$isQuery,[object[]]$cacheMetadata
                     else{$date=[DateTimeOffset]::MinValue;if([DateTimeOffset]::TryParse([string]$retryAfterHeader,[ref]$date)){$delayMs=[Math]::Max(0,[int]($date.Subtract([DateTimeOffset]::UtcNow).TotalMilliseconds))}}
                 }
                 if($null -eq $delayMs){
+                    if($quotaDiagnostic -and $null -ne $quotaDiagnostic.RetryDelaySeconds){$delayMs=[int][Math]::Ceiling($quotaDiagnostic.RetryDelaySeconds*1000)}
+                }
+                if($null -eq $delayMs){
                     $baseDelay=[Math]::Min(15*[Math]::Pow(2,$attempt-1),$RetryMaxDelaySeconds)
                     $baseDelayMs=[int]($baseDelay*1000)
                     $jitterMaxMs=[int]([Math]::Min(1000,($RetryMaxDelaySeconds-$baseDelay)*1000))
@@ -259,10 +275,13 @@ function Get-Embeddings([string[]]$texts,[bool]$isQuery,[object[]]$cacheMetadata
                 }
                 if($totalRetryWaitMs+$delayMs -gt ($RetryMaxTotalWaitSeconds*1000)){
                     $batchTimer.Stop();$script:EmbeddingCallTimes.Add($batchTimer.Elapsed.TotalMilliseconds)
-                    if(-not $isQuery){throw "Embedding retry wait limit reached at batch $batchNumber/$batchCount (HTTP $status, attempts=$attempt). Document chunks saved this run=$script:DocumentChunksSavedThisRun; remaining=$($texts.Count-$offset); total valid cache entries=$($cacheEntries.Count). Response body suppressed."}
+                    if(-not $isQuery){$remaining=[Math]::Max(0,$script:DocumentChunksTotalMissing-$script:DocumentChunksSavedThisRun);throw "Embedding retry wait limit reached at batch $batchNumber/$batchCount (HTTP $status, attempts=$attempt). Document chunks saved this run=$script:DocumentChunksSavedThisRun; remaining=$remaining; total valid cache entries=$($cacheEntries.Count). Response body suppressed."}
                     throw "Embedding retry wait limit reached HTTP=$status attempts=$attempt; response body suppressed."
                 }
                 $totalRetryWaitMs+=$delayMs
+                if($status -eq '429'){
+                    if($delayMs -ge 60000){$completedLong429Waits++}else{$completedLong429Waits=0}
+                }
                 Write-Host "EmbeddingRetry=batch $batchNumber/$batchCount|HTTP$status|Attempt=$attempt/$RetryMaxAttempts|WaitingSeconds=$([Math]::Round($delayMs/1000.0,1))|TotalWaitSeconds=$([Math]::Round($totalRetryWaitMs/1000.0,1))/$RetryMaxTotalWaitSeconds"
                 Start-Sleep -Milliseconds $delayMs
             }
@@ -286,17 +305,32 @@ function Get-Embeddings([string[]]$texts,[bool]$isQuery,[object[]]$cacheMetadata
 }
 
 $uniqueMissing=@($chunks|Group-Object Hash|ForEach-Object{$_.Group[0]}|Where-Object{$cacheEntries["$($_.Hash):gemini-embedding-001:768"] -eq $null})
-$script:DocumentChunksSavedThisRun=0
-$docVectors=Get-Embeddings -texts @($uniqueMissing|ForEach-Object Content) -isQuery $false -cacheMetadata $uniqueMissing
-if($docVectors.Count -ne $uniqueMissing.Count){throw 'Document embedding count mismatch.'}
-foreach($chunk in $chunks){$chunk.Vector=[single[]]$cacheEntries["$($chunk.Hash):gemini-embedding-001:768"].vector}
-if($uniqueMissing.Count -gt 0){Write-Host "CatalogCacheWrite=complete|Entries=$($cacheEntries.Count)|Path=$cachePath"}
-
 $fixtures=@(Get-Content -LiteralPath (Join-Path $RagInputs 'RAG_EVALUATION_QUERIES_V2.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
 $authorFixtures=@(Get-Content -LiteralPath (Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_K03_K05.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
 $development=@($fixtures | Where-Object split -eq 'development')
 $holdout=@($fixtures | Where-Object split -eq 'holdout')
 if($development.Count -ne 96 -or $holdout.Count -ne 24){throw 'Fixture split counts differ from the handoff.'}
+$plannedQueryRows=if($HoldoutFinal){$holdout}else{@($development)+@($authorFixtures)}
+$queryCachePath=Join-Path $RepoRoot 'obj/rag-query-embedding-cache.json'
+$queryCache=Read-QueryVectorCache -Path $queryCachePath -ModelName 'gemini-embedding-001' -Dimensions 768
+$queryPlanKeys=@($plannedQueryRows.query|ForEach-Object{Get-QueryVectorCacheKey ([string]$_) 'gemini-embedding-001' 768}|Sort-Object -Unique)
+$queryMissingCount=@($queryPlanKeys|Where-Object{-not $queryCache.ContainsKey($_)}).Count
+$fullDocumentBatchCount=[int][Math]::Ceiling($uniqueMissing.Count/16.0)
+$documentBatchCount=$fullDocumentBatchCount
+if($MaxBatchesPerRun -gt 0){$documentBatchCount=[Math]::Min($documentBatchCount,$MaxBatchesPerRun)}
+$plannedDocumentChunkCount=[Math]::Min($uniqueMissing.Count,$documentBatchCount*16)
+$queryBatchCount=[int][Math]::Ceiling($queryMissingCount/16.0)
+$queryBatchesThisRun=if($plannedDocumentChunkCount -eq $uniqueMissing.Count){$queryBatchCount}else{0}
+$maxBatchesLabel=if($MaxBatchesPerRun -eq 0){'unlimited'}else{[string]$MaxBatchesPerRun}
+Write-Output ('EmbeddingForecast missing_chunks={0} document_batches={1}/{2} max_batches_per_run={3} unique_queries_to_embed={4} query_batches={5} estimated_calls_this_run={6} estimated_calls_for_complete_run={7}' -f $uniqueMissing.Count,$documentBatchCount,$fullDocumentBatchCount,$maxBatchesLabel,$queryMissingCount,$queryBatchCount,($documentBatchCount+$queryBatchesThisRun),($fullDocumentBatchCount+$queryBatchCount))
+$script:DocumentChunksSavedThisRun=0
+$script:DocumentChunksTotalMissing=$uniqueMissing.Count
+$plannedMissing=@($uniqueMissing|Select-Object -First $plannedDocumentChunkCount)
+$docVectors=Get-Embeddings -texts @($plannedMissing|ForEach-Object Content) -isQuery $false -cacheMetadata $plannedMissing
+if($docVectors.Count -ne $plannedMissing.Count){throw 'Document embedding count did not match this run plan.'}
+if($plannedMissing.Count -lt $uniqueMissing.Count){throw "MaxBatchesPerRun reached after saving $script:DocumentChunksSavedThisRun chunks. Remaining chunks=$($uniqueMissing.Count-$plannedMissing.Count); rerun to resume from cache."}
+foreach($chunk in $chunks){$chunk.Vector=[single[]]$cacheEntries["$($chunk.Hash):gemini-embedding-001:768"].vector}
+if($uniqueMissing.Count -gt 0){Write-Host "CatalogCacheWrite=complete|Entries=$($cacheEntries.Count)|Path=$cachePath"}
 
 if($HoldoutFinal){
     $selectionPath=Join-Path $RepoRoot 'obj/rag-eval-selection.json'
@@ -305,7 +339,7 @@ if($HoldoutFinal){
     if($selection.fixtureVersion -ne 'RAG_EVALUATION_QUERIES_V2' -or $selection.developmentCount -ne 96){throw 'Development selection metadata is invalid.'}
     $threshold=[double]$selection.threshold;$weight=[double]$selection.semanticWeight
     $script:TrackRankTiming=$true
-    $holdoutVectors=Get-Embeddings -texts @($holdout.query) -isQuery $true
+    $holdoutVectors=Resolve-CachedQueryVectors -Queries @($holdout.query) -Path $queryCachePath -ModelName 'gemini-embedding-001' -Dimensions 768 -Cache $queryCache -BatchDelaySeconds $BatchDelaySeconds -EmbedMissing { param($batch) Get-Embeddings -texts $batch -isQuery $true }
     if($holdoutVectors.Count -ne $holdout.Count){throw 'Holdout query embedding count mismatch.'}
     $holdoutMap=@{}
     for($i=0;$i -lt $holdout.Count;$i++){$holdoutMap[[string]$holdout[$i].id]=$holdoutVectors[$i]}
@@ -363,7 +397,7 @@ function Write-TypeMetrics($rows,$vectors,[bool]$hybrid,[double]$threshold,[doub
 
 $devQueries=@($development.query)+@($authorFixtures.query)
 $script:TrackRankTiming=$true
-$devQueryVectors=Get-Embeddings -texts $devQueries -isQuery $true
+$devQueryVectors=Resolve-CachedQueryVectors -Queries $devQueries -Path $queryCachePath -ModelName 'gemini-embedding-001' -Dimensions 768 -Cache $queryCache -BatchDelaySeconds $BatchDelaySeconds -EmbedMissing { param($batch) Get-Embeddings -texts $batch -isQuery $true }
 $devVectorMap=@{}
 for($i=0;$i -lt $development.Count;$i++){$devVectorMap[[string]$development[$i].id]=$devQueryVectors[$i]}
 for($i=0;$i -lt $authorFixtures.Count;$i++){$devVectorMap[[string]$authorFixtures[$i].id]=$devQueryVectors[$development.Count+$i]}
