@@ -37,6 +37,8 @@ public class RefundService : IRefundService
             return Result.Fail<RefundDto>("Only paid orders can request a refund.", ErrorType.Conflict);
         if (order.Payment is null || order.Payment.Status != PaymentStatus.Completed)
             return Result.Fail<RefundDto>("The order has no completed payment to refund.", ErrorType.Conflict);
+        if (order.Payment.RequiresReconciliation || order.Payment.IsDemo)
+            return Result.Fail<RefundDto>("Payment requires reconciliation before a refund.", ErrorType.Conflict);
         if (order.Payment.Method == PaymentMethod.CashOnDelivery)
             return Result.Fail<RefundDto>("COD refunds are not supported until cash collection is recorded.", ErrorType.Conflict);
         if (order.Payment.Amount <= 0 || order.Payment.Amount != order.Total)
@@ -60,14 +62,20 @@ public class RefundService : IRefundService
         };
 
         _db.Refunds.Add(refund);
+        order.RefundPending = true;
+        OrderLifecycle.Touch(_db, order);
         try
         {
             await _db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException)
+        catch (DuplicateRefundException)
         {
             // The unique OrderId index is the final guard against concurrent duplicate requests.
             return Result.Fail<RefundDto>("A refund request already exists for this order.", ErrorType.Conflict);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Result.Fail<RefundDto>("Order changed concurrently. Reload and retry.", ErrorType.Conflict);
         }
 
         return Result.Ok(ToDto(refund));
@@ -77,13 +85,18 @@ public class RefundService : IRefundService
         int userId,
         int page,
         int pageSize,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int[]? orderIds = null)
     {
         var query = _db.Refunds
             .AsNoTracking()
             .Include(r => r.Order).ThenInclude(o => o.User)
             .Include(r => r.ProcessedByUser)
             .Where(r => r.Order.UserId == userId);
+
+        if (orderIds is { Length: > 100 })
+            return Result.Fail<PagedResult<RefundDto>>("At most 100 order IDs can be requested.");
+        if (orderIds is { Length: > 0 }) query = query.Where(r => orderIds.Contains(r.OrderId));
 
         return Result.Ok(await PageAsync(query, page, pageSize, ct));
     }
@@ -143,6 +156,7 @@ public class RefundService : IRefundService
         if (refund.Order.Status != OrderStatus.Paid ||
             refund.Payment.Status != PaymentStatus.Completed ||
             refund.Payment.Method == PaymentMethod.CashOnDelivery ||
+            refund.Payment.RequiresReconciliation || refund.Payment.IsDemo || !refund.Order.RefundPending ||
             refund.Payment.Amount != refund.Amount ||
             refund.Order.Items.Count == 0 ||
             refund.Order.Items.Any(i => i.Status != FulfillmentStatus.Pending))
@@ -167,6 +181,8 @@ public class RefundService : IRefundService
             }
 
             refund.Order.ChangeStatus(OrderStatus.Cancelled);
+            refund.Order.RefundPending = false;
+            OrderLifecycle.Touch(_db, refund.Order);
             refund.Payment.Status = PaymentStatus.Refunded;
             refund.Complete(adminId, externalReference, note);
             refund.ProcessedByUser = admin;
@@ -223,6 +239,8 @@ public class RefundService : IRefundService
         try
         {
             refund.Reject(adminId, reason);
+            refund.Order.RefundPending = false;
+            OrderLifecycle.Touch(_db, refund.Order);
             refund.ProcessedByUser = admin;
             await _db.SaveChangesAsync(ct);
         }

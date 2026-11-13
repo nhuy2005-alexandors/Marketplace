@@ -13,9 +13,9 @@ public class PaymentProviderFactory : IPaymentProviderFactory
 
     public IPaymentProvider Resolve(string methodOrProvider)
     {
-        var key = (methodOrProvider ?? "mock").Trim().ToLowerInvariant();
+        var key = (methodOrProvider ?? "").Trim().ToLowerInvariant();
         if (_providers.TryGetValue(key, out var provider))
             return provider;
-        return _providers["mock"];
+        throw new ArgumentException("Unknown payment provider.", nameof(methodOrProvider));
     }
 }

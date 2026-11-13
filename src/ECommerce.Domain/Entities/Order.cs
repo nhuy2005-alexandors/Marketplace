@@ -20,13 +20,15 @@ public class Order : BaseEntity
 
     // Concurrency token: protects refund/cancel transitions against concurrent fulfillment updates.
     public byte[]? RowVersion { get; set; }
+    public bool RefundPending { get; set; }
 
     public decimal Subtotal => Items.Sum(i => i.Subtotal);
     public decimal Total => Math.Max(0, Subtotal - DiscountAmount);
 
     private static readonly Dictionary<OrderStatus, OrderStatus[]> AllowedTransitions = new()
     {
-        [OrderStatus.Pending] = new[] { OrderStatus.Paid, OrderStatus.Cancelled },
+        [OrderStatus.Pending] = new[] { OrderStatus.Paid, OrderStatus.Accepted, OrderStatus.Cancelled },
+        [OrderStatus.Accepted] = new[] { OrderStatus.Shipped, OrderStatus.Cancelled },
         [OrderStatus.Paid] = new[] { OrderStatus.Shipped, OrderStatus.Cancelled },
         [OrderStatus.Shipped] = new[] { OrderStatus.Delivered },
         [OrderStatus.Delivered] = Array.Empty<OrderStatus>(),

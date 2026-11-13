@@ -40,28 +40,36 @@ public interface IPaymentProvider
 {
     // Khóa định danh provider, khớp với PaymentMethod hoặc config
     string Key { get; }
+    PaymentQuote Quote(PaymentContext context) => new(context.Amount, "XXX", null);
 
     // Khởi tạo thanh toán. Provider redirect (MoMo) trả RedirectUrl + Pending.
-    // Provider tức thời (mock/COD) trả Completed ngay.
+    // Demo mock can return Completed; COD acceptance is not cash collection.
     Task<PaymentInitResult> CreatePaymentAsync(PaymentContext context, CancellationToken ct = default);
 
     // Xác minh callback/return từ cổng. Trả kết quả cuối cùng.
     Task<PaymentVerifyResult> VerifyAsync(IReadOnlyDictionary<string, string> callbackData, CancellationToken ct = default);
 }
 
-public record PaymentContext(int OrderId, decimal Amount, string ReturnUrl, string ClientIp);
+public record PaymentContext(int OrderId, decimal Amount, string ReturnUrl, string ClientIp, string? RequestId = null);
+public record PaymentQuote(decimal Amount, string Currency, string? Error);
 
 public record PaymentInitResult(
     bool Completed,
     string? RedirectUrl,
     string TransactionId,
-    string? Error);
+    string? Error,
+    decimal? ProviderAmount = null,
+    string? ProviderCurrency = null);
 
 public record PaymentVerifyResult(
     bool Success,
     int OrderId,
     string TransactionId,
-    string? Error);
+    string? Error,
+    bool Authenticated = false,
+    string? RequestId = null,
+    decimal? Amount = null,
+    string? Currency = null);
 
 // Factory phân giải provider theo key
 public interface IPaymentProviderFactory
@@ -72,7 +80,7 @@ public interface IPaymentProviderFactory
 public interface IRefundService
 {
     Task<Result<RefundDto>> RequestAsync(int userId, RequestRefundRequest request, CancellationToken ct = default);
-    Task<Result<PagedResult<RefundDto>>> GetForUserAsync(int userId, int page, int pageSize, CancellationToken ct = default);
+    Task<Result<PagedResult<RefundDto>>> GetForUserAsync(int userId, int page, int pageSize, CancellationToken ct = default, int[]? orderIds = null);
     Task<Result<PagedResult<RefundDto>>> GetAllAsync(string? status, int page, int pageSize, CancellationToken ct = default);
     Task<Result<RefundDto>> CompleteAsync(int adminId, int refundId, CompleteRefundRequest request, CancellationToken ct = default);
     Task<Result<RefundDto>> RejectAsync(int adminId, int refundId, RejectRefundRequest request, CancellationToken ct = default);

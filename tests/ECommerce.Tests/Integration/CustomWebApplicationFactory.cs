@@ -70,6 +70,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             services.AddDbContext<AppDbContext>(opt =>
                 opt.UseSqlite(_connection)
                    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
+            services.PostConfigure<ECommerce.Infrastructure.Payments.PaymentOptions>(o => o.AllowDemo = true);
         });
     }
 

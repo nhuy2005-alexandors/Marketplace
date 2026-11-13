@@ -2,6 +2,7 @@ using System.Text.Json;
 using ECommerce.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ECommerce.Application.Common;
 
 namespace ECommerce.API.Controllers;
 
@@ -26,7 +27,9 @@ public class PaymentsController : ControllerBase
     {
         var data = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
         var result = await _payments.ConfirmAsync("momo", data, ct);
-        return RedirectToClient(result.Success);
+        if (result.Value?.Payment?.RequiresReconciliation == true)
+            return Redirect($"{_config["Client:BaseUrl"] ?? "http://localhost:5173"}/orders?payment=reconciliation");
+        return RedirectToClient(result.Success && result.Value?.Payment?.Status == "Completed");
     }
 
     // MoMo IPN — server-to-server notification (JSON body), xác nhận độc lập với redirect.
@@ -38,8 +41,9 @@ public class PaymentsController : ControllerBase
         var data = payload.ToDictionary(
             kv => kv.Key,
             kv => kv.Value.ValueKind == JsonValueKind.String ? kv.Value.GetString() ?? "" : kv.Value.GetRawText());
-        await _payments.ConfirmAsync("momo", data, ct);
-        return NoContent();
+        var result = await _payments.ConfirmAsync("momo", data, ct);
+        return result.Success ? NoContent() : StatusCode(result.ErrorType == ErrorType.Conflict ? 409 : 400,
+            new { error = result.Error });
     }
 
     private IActionResult RedirectToClient(bool success)

@@ -53,6 +53,18 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         b.Property(p => p.Method).HasConversion<int>();
         b.Property(p => p.Status).HasConversion<int>();
         b.Property(p => p.TransactionId).HasMaxLength(100);
+        b.Property(p => p.ProviderKey).HasMaxLength(30);
+        b.Property(p => p.ProviderReference).HasMaxLength(100);
+        b.Property(p => p.ProviderAmount).HasColumnType("decimal(18,2)");
+        b.Property(p => p.ProviderCurrency).HasMaxLength(3);
+        b.Property(p => p.ReconciliationAmount).HasColumnType("decimal(18,2)");
+        b.Property(p => p.ReconciliationCurrency).HasMaxLength(3);
+        b.Property(p => p.ReconciliationReference).HasMaxLength(100);
+        b.Property(p => p.RowVersion).IsRowVersion();
+        b.HasIndex(p => new { p.ProviderKey, p.ProviderReference }).IsUnique()
+            .HasFilter("[ProviderKey] IS NOT NULL AND [ProviderReference] IS NOT NULL");
+        b.HasIndex(p => new { p.ProviderKey, p.TransactionId }).IsUnique()
+            .HasFilter("[ProviderKey] IS NOT NULL AND [TransactionId] IS NOT NULL");
     }
 }
 

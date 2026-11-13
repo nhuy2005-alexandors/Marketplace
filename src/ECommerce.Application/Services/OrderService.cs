@@ -154,6 +154,9 @@ public class OrderService : IOrderService
         if (order is null)
             return Result.Fail<OrderDto>("Order not found.", ErrorType.NotFound);
 
+        if (order.RefundPending)
+            return Result.Fail<OrderDto>("Order is held for refund.", ErrorType.Conflict);
+
         if (newStatus == OrderStatus.Cancelled)
         {
             var cancellation = await CancelUnfulfilledOrderAsync(order, ct);
@@ -172,13 +175,29 @@ public class OrderService : IOrderService
 
         try
         {
+            if (newStatus is not (OrderStatus.Shipped or OrderStatus.Delivered) || !OrderLifecycle.CanFulfill(order))
+                return Result.Fail<OrderDto>("Payment acceptance must use the payment workflow; order cannot be fulfilled.", ErrorType.Conflict);
+            var itemStatus = newStatus == OrderStatus.Shipped ? FulfillmentStatus.Shipped : FulfillmentStatus.Delivered;
+            if (order.Items.Count == 0)
+                return Result.Fail<OrderDto>("Order has no items.", ErrorType.Conflict);
+            // Validate all transitions before changing any tracked state.
+            if (order.Items.Any(i => itemStatus == FulfillmentStatus.Shipped
+                ? i.Status is not (FulfillmentStatus.Pending or FulfillmentStatus.Shipped)
+                : i.Status is not (FulfillmentStatus.Shipped or FulfillmentStatus.Delivered)))
+                return Result.Fail<OrderDto>("Item fulfillment state does not permit this transition.", ErrorType.Conflict);
             order.ChangeStatus(newStatus);
+            foreach (var item in order.Items) item.ChangeStatus(itemStatus);
+            OrderLifecycle.Touch(_db, order);
         }
         catch (InvalidOrderTransitionException ex)
         {
             return Result.Fail<OrderDto>(ex.Message, ErrorType.Conflict);
         }
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Result.Fail<OrderDto>("Order changed concurrently. Reload and retry.", ErrorType.Conflict);
+        }
         return Result.Ok(order.ToDto());
     }
 
@@ -206,13 +225,15 @@ public class OrderService : IOrderService
 
     private async Task<Result> CancelUnfulfilledOrderAsync(Order order, CancellationToken ct)
     {
+        if (order.RefundPending)
+            return Result.Fail("Order is held for refund.", ErrorType.Conflict);
         if (!order.CanCancel())
             return Result.Fail($"Cannot cancel an order in {order.Status} state.", ErrorType.Conflict);
 
         // A captured online payment must go through the refund workflow.
         // COD is treated as uncollected in this MVP and can be cancelled without a refund.
-        if (order.Status == OrderStatus.Paid &&
-            order.Payment?.Method != PaymentMethod.CashOnDelivery)
+        if (order.Payment?.Status is PaymentStatus.Completed or PaymentStatus.Refunded ||
+            order.Payment?.RequiresReconciliation == true)
             return Result.Fail("Paid online orders must use the refund request workflow.", ErrorType.Conflict);
 
         if (order.Items.Count == 0 || order.Items.Any(i => i.Status != FulfillmentStatus.Pending))
@@ -239,6 +260,7 @@ public class OrderService : IOrderService
         try
         {
             order.ChangeStatus(OrderStatus.Cancelled);
+            OrderLifecycle.Touch(_db, order);
         }
         catch (InvalidOrderTransitionException ex)
         {

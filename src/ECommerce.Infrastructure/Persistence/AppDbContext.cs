@@ -2,6 +2,8 @@ using ECommerce.Application.Interfaces;
 using ECommerce.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.Data.SqlClient;
+using ECommerce.Domain.Exceptions;
 
 namespace ECommerce.Infrastructure.Persistence;
 
@@ -27,6 +29,18 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     EntityEntry<TEntity> IAppDbContext.Entry<TEntity>(TEntity entity) => base.Entry(entity);
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try { return await base.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException ex) when (ex.InnerException is SqlException sql &&
+            sql.Number is 2601 or 2627 && ex.Entries.Any(e => e.Entity is Refund) &&
+            (sql.Message.Contains("IX_Refunds_OrderId", StringComparison.Ordinal) ||
+             sql.Message.Contains("IX_Refunds_PaymentId", StringComparison.Ordinal)))
+        {
+            throw new DuplicateRefundException(ex);
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder b)
     {

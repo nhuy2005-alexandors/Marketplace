@@ -2,7 +2,8 @@ namespace ECommerce.Application.DTOs.Orders;
 
 public record OrderItemDto(int Id, int ProductId, string ProductName, decimal UnitPrice, int Quantity, decimal Subtotal, string Status);
 
-public record PaymentDto(decimal Amount, string Method, string Status, string? TransactionId, DateTime? PaidAt);
+public record PaymentDto(decimal Amount, string Method, string Status, string? TransactionId, DateTime? PaidAt, bool RequiresReconciliation = false, bool IsDemo = false,
+    decimal? ReconciliationAmount = null, string? ReconciliationCurrency = null, string? ReconciliationReference = null);
 
 public record OrderDto(
     int Id,
@@ -14,7 +15,8 @@ public record OrderDto(
     decimal Total,
     DateTime CreatedAt,
     IReadOnlyList<OrderItemDto> Items,
-    PaymentDto? Payment);
+    PaymentDto? Payment,
+    bool RefundPending = false);
 
 // Phần chia của một seller trong đơn: giảm giá coupon toàn đơn chia tỉ lệ theo subtotal của seller.
 public record SellerSplitDto(

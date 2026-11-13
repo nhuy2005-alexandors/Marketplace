@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createServer } from 'vite';
 
 test('admin refund list reports a failed load instead of a blank page', async () => {
-  const vite = await createServer({ configFile: 'vite.config.ts', server: { middlewareMode: true }, appType: 'custom' });
+  const vite = await createServer({ configFile: 'vite.config.ts', server: { middlewareMode: true, hmr: false }, appType: 'custom' });
   try {
     const { AdminRefundsPage } = await vite.ssrLoadModule('/src/pages/AdminRefundsPage.tsx');
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false } } });

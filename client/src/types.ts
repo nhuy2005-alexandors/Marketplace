@@ -76,7 +76,7 @@ export interface Cart {
   total: number;
 }
 
-export type OrderStatus = "Pending" | "Paid" | "Shipped" | "Delivered" | "Cancelled";
+export type OrderStatus = "Pending" | "Paid" | "Shipped" | "Delivered" | "Cancelled" | "Accepted";
 
 export type FulfillmentStatus = "Pending" | "Shipped" | "Delivered" | "Cancelled";
 
@@ -91,6 +91,11 @@ export interface OrderItem {
 }
 
 export interface Payment {
+  requiresReconciliation?: boolean;
+  isDemo?: boolean;
+  reconciliationAmount?: number;
+  reconciliationCurrency?: string;
+  reconciliationReference?: string;
   amount: number;
   method: string;
   status: string;
@@ -99,6 +104,7 @@ export interface Payment {
 }
 
 export interface Order {
+  refundPending?: boolean;
   id: number;
   status: OrderStatus;
   shippingAddress: string;

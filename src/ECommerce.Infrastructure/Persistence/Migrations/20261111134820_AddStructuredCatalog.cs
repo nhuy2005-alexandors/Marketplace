@@ -26,6 +26,10 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
                 nullable: false,
                 defaultValue: "");
 
+            // Fresh upgrades from a populated pre-V2 schema need unique values
+            // before the unique index. Applied V2 databases do not rerun this Up.
+            migrationBuilder.Sql("UPDATE [Products] SET [Sku] = CONCAT(N'LEGACY-', [Id]) WHERE LEN(LTRIM(RTRIM([Sku]))) = 0;");
+
             migrationBuilder.AddUniqueConstraint(
                 name: "AK_Products_Id_CategoryId",
                 table: "Products",

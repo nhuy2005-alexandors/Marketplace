@@ -298,10 +298,12 @@ export function useUpdateOrderStatus() {
 }
 
 // ---- Refunds ----
-export function useMyRefunds(page = 1, pageSize = 100, enabled = true) {
+export function useMyRefunds(page = 1, pageSize = 100, enabled = true, orderIds?: number[]) {
   return useQuery({
-    queryKey: ["refunds", "mine", page, pageSize],
-    queryFn: () => api.get<Paged<Refund>>("/refunds/mine", { params: { page, pageSize } }).then((r) => r.data),
+    queryKey: ["refunds", "mine", page, pageSize, orderIds],
+    queryFn: () => api.get<Paged<Refund>>("/refunds/mine", {
+      params: { page, pageSize, orderIds }, paramsSerializer: { indexes: null },
+    }).then((r) => r.data),
     enabled,
   });
 }

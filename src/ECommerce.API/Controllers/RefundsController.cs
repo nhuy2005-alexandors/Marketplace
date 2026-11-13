@@ -20,7 +20,7 @@ public class RefundsController : ApiControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<RefundDto>> Request(RequestRefundRequest request, CancellationToken ct)
+    public async Task<ActionResult<RefundDto>> Create(RequestRefundRequest request, CancellationToken ct)
         => ToResponse(await _refunds.RequestAsync(UserId, request, ct));
 
     [HttpGet("mine")]
@@ -29,6 +29,7 @@ public class RefundsController : ApiControllerBase
     public async Task<ActionResult<PagedResult<RefundDto>>> Mine(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 100,
+        [FromQuery] int[]? orderIds = null,
         CancellationToken ct = default)
-        => ToResponse(await _refunds.GetForUserAsync(UserId, page, pageSize, ct));
+        => ToResponse(await _refunds.GetForUserAsync(UserId, page, pageSize, ct, orderIds));
 }

@@ -19,7 +19,7 @@ public static class TestDb
     public static IPaymentProviderFactory PaymentFactory() =>
         new PaymentProviderFactory(new IPaymentProvider[]
         {
-            new MockPaymentProvider(),
+            new MockPaymentProvider(Microsoft.Extensions.Options.Options.Create(new PaymentOptions { AllowDemo = true })),
             new CodPaymentProvider()
         });
 }

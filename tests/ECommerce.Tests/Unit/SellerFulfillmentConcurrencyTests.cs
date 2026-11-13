@@ -26,21 +26,11 @@ public class SellerFulfillmentConcurrencyTests
     {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
         await using var db = new FailOnSaveDb(options);
-        db.OrderItems.Add(new OrderItem
-        {
-            Id = 1,
-            OrderId = 1,
-            ProductId = 1,
-            SellerId = 7,
-            ProductName = "Isolated test",
-            UnitPrice = 1,
-            Quantity = 1,
-            Status = FulfillmentStatus.Pending
-        });
-        await db.SaveChangesAsync();
+        var order = await LifecycleSafetyTests.SeedAsync(db);
+        var item = order.Items.Single();
         db.Fail = true;
         var result = await new SellerOrderService(db).UpdateFulfillmentAsync(
-            7, 1, new UpdateFulfillmentStatusRequest("Shipped"));
+            item.SellerId, item.Id, new UpdateFulfillmentStatusRequest("Shipped"));
         Assert.False(result.Success);
         Assert.Equal(ErrorType.Conflict,result.ErrorType);
     }

@@ -17,6 +17,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Override secret/config nhạy cảm bằng file local (gitignored) khi deploy.
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+// Keep runtime and design-time precedence identical: explicit environment wins.
+builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
