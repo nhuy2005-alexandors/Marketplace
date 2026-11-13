@@ -43,7 +43,11 @@ try {
         @{ id='author-k05-1'; type='paraphrase'; query='portable visual machine'; expected_product_ids=@(1) },
         @{ id='author-k05-2'; type='paraphrase'; query='untethered play controls'; expected_product_ids=@(2) }
     )
-    $queryEntries = foreach ($row in @($development) + @($authors) + @($authorK05)) {
+    $noEvidence = @(
+        @{id='noe-test-1';query='qwerty mystery phrase';expected_product_ids=@();label_predicate='nonsense'},
+        @{id='noe-test-2';query='red apple';expected_product_ids=@();label_predicate='random-overlap'}
+    )
+    $queryEntries = foreach ($row in @($development) + @($authors) + @($authorK05) + @($noEvidence)) {
         $vector = switch ($row.id) {
             'dev-1' { @(1.0,0.0) }
             'dev-2' { @(0.0,1.0) }
@@ -52,6 +56,8 @@ try {
             'author-2' { @(1.0,0.0) }
             'author-k05-1' { @(1.0,0.0) }
             'author-k05-2' { @(0.0,1.0) }
+            'noe-test-1' { @(0.0,0.0) }
+            'noe-test-2' { @(1.0,0.0) }
         }
         $key = Get-QueryVectorCacheKey $row.query $model $dimensions
         @{ cacheKey=$key; contentHash=($key -split ':')[0]; modelName=$model; dimensions=$dimensions; vector=$vector }
@@ -59,7 +65,7 @@ try {
     Write-AtomicCacheFile -Path $queryCachePath -Content (ConvertTo-Json -InputObject @($queryEntries) -Depth 5)
     $fixture = @{
         modelName=$model; dimensions=$dimensions; catalogCachePath=$catalogCachePath; queryCachePath=$queryCachePath
-        selectionPath=$selectionPath; chunks=$chunks; development=$development; authorFixtures=$authors; authorK05Fixtures=$authorK05
+        selectionPath=$selectionPath; chunks=$chunks; development=$development; authorFixtures=$authors; authorK05Fixtures=$authorK05; noEvidenceFixtures=$noEvidence
     }
     Write-AtomicCacheFile -Path $fixturePath -Content (ConvertTo-Json -InputObject $fixture -Depth 8)
 
@@ -102,7 +108,18 @@ try {
     Assert-True ($output.Contains('K05_DIAG id=author-k05-1') -and $output.Contains('K05_DIAG id=author-k05-2')) 'K-05 diagnostic rows are missing.'
     Assert-True ($output.Contains('hybrid_results=n/a') -and $output.Contains('MissingQueryVectors=1') -and $output.Contains('Network=0;Database=0')) 'K-05 cache-miss diagnostics were not marked safely.'
 
-    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Scenarios=6;Modes=lexical,hybrid,author-k05-only,author-k05-diagnostics;RankTiming=on,off;CacheMiss=marked;ExternalCalls=0;Database=0;SelectionWritten=TRUE'
+    Write-AtomicCacheFile -Path $queryCachePath -Content (ConvertTo-Json -InputObject @($queryEntries) -Depth 5)
+    $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$evaluatorPath,'-RepoRoot',$repoRoot,'-RagInputs',$tempRoot,'-DryRunFromCache','-DryRunDataPath',$fixturePath,'-NoEvidenceOnly')
+    $output = (& $powershell @arguments 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "No-evidence-only dry-run failed: $output" }
+    Assert-True ($output.Contains('NO_EVIDENCE_FORECAST queries=2 missing_vectors=0') -and $output.Contains('NO_EVIDENCE_METRICS empty=1/2 empty_rate=50.00%')) 'No-evidence cache-only metric output is incorrect.'
+
+    $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$evaluatorPath,'-RepoRoot',$repoRoot,'-RagInputs',$tempRoot,'-DryRunFromCache','-DryRunDataPath',$fixturePath,'-ExplainQuery','qwerty mystery phrase')
+    $output = (& $powershell @arguments 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "Explain-query dry-run failed: $output" }
+    Assert-True ($output.Contains('EXPLAIN_SUMMARY') -and $output.Contains('ranking unchanged')) 'Explain-query diagnosis did not report its hypothesis.'
+
+    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Modes=lexical,hybrid,author-k05-only,diagnostics,no-evidence,explain;ExternalCalls=0;Database=0;SelectionWritten=TRUE'
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }

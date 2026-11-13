@@ -15,6 +15,9 @@ param(
     [switch]$CacheForecastOnly,
     [switch]$AuthorK05Only,
     [switch]$Diagnostics,
+    [string]$ExplainQuery,
+    [switch]$NoEvidenceOnly,
+    [switch]$AllowEmbeddingCall,
     [ValidateRange(0,1000000)][int]$ExpectedDocumentChunks = 1395
 )
 
@@ -24,12 +27,17 @@ Add-Type -AssemblyName System.Data
 . (Join-Path $PSScriptRoot 'EvaluationResilience.ps1')
 . (Join-Path $PSScriptRoot 'EvaluationMetrics.ps1')
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
-if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only) { throw 'Specify -DevelopmentOnly, -HoldoutFinal, -AuthorK05Only, -CacheForecastOnly, or -DryRunFromCache; holdout is never run by default.' }
+if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
 if ($AuthorK05Only -and ($LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly)) { throw '-AuthorK05Only must run by itself (it may be combined with -DryRunFromCache).' }
 if ($Diagnostics) {
     if (-not $AuthorK05Only -or $LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly) { throw '-Diagnostics must be used with -AuthorK05Only only; it never runs provider or database paths.' }
     if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
     if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw '-Diagnostics requires a local cache-only dry-run fixture at -DryRunDataPath (default: obj/rag-dryrun-data.json).' }
+    $DryRunFromCache = $true
+}
+if (($NoEvidenceOnly -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and -not $DryRunFromCache) {
+    if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
+    if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw 'Explain/no-evidence modes require the local cache-only obj/rag-dryrun-data.json fixture.' }
     $DryRunFromCache = $true
 }
 
@@ -82,11 +90,14 @@ if ($DryRunFromCache) {
     $development = @($dry.development)
     $authorFixtures = @($dry.authorFixtures)
     $authorK05Fixtures = @($dry.authorK05Fixtures)
-    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}else{@($development.query) + @($authorFixtures.query)}
+    $noEvidencePath = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_NO_EVIDENCE.jsonl'
+    $noEvidenceRows = if($dry.noEvidenceFixtures){@($dry.noEvidenceFixtures)}elseif(Test-Path -LiteralPath $noEvidencePath){@(Get-Content -LiteralPath $noEvidencePath | ForEach-Object { $_ | ConvertFrom-Json })}else{@()}
+    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query)}
     $queryCache = Read-QueryVectorCache -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions)
     $script:TrackRankTiming = [bool]$DryRunTrackRankTiming
     $script:RankTimes = [System.Collections.Generic.List[double]]::new()
-    $queryVectors = if($Diagnostics){@()}else{Resolve-CachedQueryVectors -Queries $allQueries -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -Cache $queryCache -BatchDelaySeconds 0 -EmbedMissing { throw 'Dry-run is cache-only and cannot embed.' }}
+    $missingRequested=@($allQueries | Where-Object { -not $queryCache.ContainsKey((Get-QueryVectorCacheKey ([string]$_) $dry.modelName ([int]$dry.dimensions))) } | Sort-Object -Unique)
+    $queryVectors = if($Diagnostics -or (-not [string]::IsNullOrWhiteSpace($ExplainQuery) -and $missingRequested.Count -gt 0)){@()}else{Resolve-CachedQueryVectors -Queries $allQueries -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions) -Cache $queryCache -BatchDelaySeconds 0 -EmbedMissing { throw 'Dry-run is cache-only and cannot embed.' }}
     $vectorMap = @{}
     if($Diagnostics) { }
     elseif($AuthorK05Only){for ($i=0; $i -lt $authorK05Fixtures.Count; $i++) { $vectorMap[[string]$authorK05Fixtures[$i].id] = $queryVectors[$i] }}
@@ -100,6 +111,47 @@ if ($DryRunFromCache) {
         foreach($row in $authorK05Fixtures){$key=Get-QueryVectorCacheKey ([string]$row.query) $dry.modelName ([int]$dry.dimensions);if($queryCache.ContainsKey($key)){$vectorMap[[string]$row.id]=[single[]]$queryCache[$key].vector}else{$missingK05Vectors++}}
     }
     Write-Output ('DryRunCacheForecast missing_chunks=0 missing_queries={0} estimated_api_calls=0 chunks={1} queries={2}' -f $(if($Diagnostics){$missingK05Vectors}else{0}),$chunks.Count,$allQueries.Count)
+    if($NoEvidenceOnly){
+        $missing=@($missingRequested).Count; $calls=[Math]::Ceiling($missing/16.0)
+        Write-Output ('NO_EVIDENCE_FORECAST queries={0} missing_vectors={1} estimated_query_batches={2} estimated_api_calls={2} cache_only=TRUE' -f $noEvidenceRows.Count,$missing,$calls)
+        if($missing -gt 0){Write-Output 'NO_EVIDENCE_METRICS=NOT_RUN; rerun only after explicitly allowing embeddings and populating the local cache.';exit 0}
+        $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
+        $vectors=@{};for($i=0;$i -lt $noEvidenceRows.Count;$i++){$vectors[[string]$noEvidenceRows[$i].id]=$queryVectors[$i]}
+        $empty=0
+        foreach($row in $noEvidenceRows){$ranked=[ECommerce.Infrastructure.AI.RetrievalScoring]::RankForEvaluation([string]$row.query,[single[]]$vectors[[string]$row.id],$chunks.ToArray(),$true,[double]$selection.threshold,[double]$selection.semanticWeight,8);if($ranked.Count -eq 0){$empty++}}
+        Write-Output ('NO_EVIDENCE_METRICS empty={0}/{1} empty_rate={2:P2} threshold={3} weight={4} tuning=FALSE' -f $empty,$noEvidenceRows.Count,($(if($noEvidenceRows.Count){$empty/[double]$noEvidenceRows.Count}else{0})),$selection.threshold,$selection.semanticWeight);exit 0
+    }
+    if(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){
+        $missing=@($missingRequested).Count
+        if($missing -gt 0 -and -not $AllowEmbeddingCall){Write-Output ('EXPLAIN_QUERY cache_miss=TRUE missing_vectors={0} forecast_api_calls=1 allow_embedding_call=FALSE; rerun with -AllowEmbeddingCall to request only this query vector' -f $missing);exit 0}
+        if($missing -gt 0 -and $AllowEmbeddingCall){
+            $envFile=Join-Path $RepoRoot '.env';$keyLine=Get-Content -LiteralPath $envFile|Where-Object{$_ -match '^\s*GEMINI_API_KEY\s*='}|Select-Object -First 1
+            if(-not $keyLine){throw 'GEMINI_API_KEY is missing; no query vector was requested.'}
+            $key=($keyLine -replace '^\s*GEMINI_API_KEY\s*=\s*','').Trim().Trim('"',"'");if([string]::IsNullOrWhiteSpace($key)){throw 'GEMINI_API_KEY is empty; no query vector was requested.'}
+            $payload=@{content=@{parts=@(@{text=$ExplainQuery})};taskType='RETRIEVAL_QUERY';outputDimensionality=[int]$dry.dimensions}|ConvertTo-Json -Depth 6 -Compress
+            try{$response=Invoke-RestMethod -Method Post -Uri ("https://generativelanguage.googleapis.com/v1beta/models/{0}:embedContent" -f $dry.modelName) -Headers @{'x-goog-api-key'=$key} -ContentType 'application/json' -Body $payload -TimeoutSec 30}
+            catch{throw ('Gemini query embedding failed safely (exception type: {0}); response content was not printed.' -f $_.Exception.GetType().Name)}
+            $vector=[single[]]$response.embedding.values;if($vector.Count -ne [int]$dry.dimensions){throw 'Gemini returned an unexpected vector dimension; query cache was not changed.'}
+            $cacheKey=Get-QueryVectorCacheKey $ExplainQuery $dry.modelName ([int]$dry.dimensions);$queryCache[$cacheKey]=[pscustomobject]@{cacheKey=$cacheKey;contentHash=($cacheKey -split ':')[0];modelName=$dry.modelName;dimensions=[int]$dry.dimensions;vector=$vector}
+            Write-AtomicCacheFile -Path $dry.queryCachePath -Content (ConvertTo-Json -InputObject @($queryCache.Values) -Depth 5)
+        }
+        $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
+        $qkey=Get-QueryVectorCacheKey $ExplainQuery $dry.modelName ([int]$dry.dimensions);$qvec=[single[]]$queryCache[$qkey].vector
+        $token='';$sku=[ECommerce.Infrastructure.AI.RetrievalScoring]::TryResolveSkuIntent($ExplainQuery,$chunks.ToArray(),[ref]$token)
+        $lexicalBroad=0;$semanticAbove=0;$other=0
+        foreach($group in ($chunks.ToArray() | Group-Object ProductId)){
+            $pcs=[ECommerce.Infrastructure.AI.RetrievalScoringChunk[]]$group.Group
+            $score=[ECommerce.Infrastructure.AI.RetrievalScoring]::ScoreProduct($ExplainQuery,$qvec,$pcs,$true,[double]$selection.threshold,[double]$selection.semanticWeight,[bool]$sku,[string]$token)
+            if(-not $score.Included){continue}
+            $terms=[ECommerce.Infrastructure.AI.RetrievalScoring]::Normalize($ExplainQuery).Split(' ',[StringSplitOptions]::RemoveEmptyEntries)|Where-Object Length -gt 1
+            $matches=@();foreach($chunk in $pcs){$norm=[ECommerce.Infrastructure.AI.RetrievalScoring]::Normalize($chunk.Content);$hit=@($terms|Where-Object{$norm -match ('(?<![a-z0-9])'+[regex]::Escape($_)+'(?![a-z0-9])')});if($hit.Count){$matches+=('{0}:[{1}]' -f $chunk.Type,($hit -join ','))}}
+            $reason=@();if($score.LexicalScore -gt 0){$reason+='lexical>0'};if($score.SemanticScore -ge [double]$selection.threshold){$reason+='semantic>=threshold'};if($score.CombinedScore -ge [ECommerce.Infrastructure.AI.RetrievalScoring]::MinimumCombinedScore){$reason+='combined>=0.22'}
+            if($score.LexicalScore -gt 0){$lexicalBroad++}elseif($score.SemanticScore -ge [double]$selection.threshold){$semanticAbove++}else{$other++}
+            Write-Output ('EXPLAIN_PRODUCT id={0} lexical={1:F4} overlap={2} semantic_max={3:F4} combined={4:F4} reason={5}' -f $score.ProductId,$score.LexicalScore,($matches -join ';'),$score.SemanticScore,$score.CombinedScore,($reason -join ','))
+        }
+        $hypothesis=if($lexicalBroad -gt 0){'a: lexical>0 includes products'}elseif($semanticAbove -gt 0){'b: semantic threshold includes products'}elseif($other -gt 0){'c: combined threshold or other inclusion path'}else{'none: no products included'}
+        Write-Output ('EXPLAIN_SUMMARY hypothesis={0} lexical_only_count={1} semantic_only_count={2} other_count={3} sku_branch={4}; ranking unchanged' -f $hypothesis,$lexicalBroad,$semanticAbove,$other,$sku);exit 0
+    }
     if ($LexicalOnly) {
         $lexicalDev = Get-Metrics $development @{} $chunks.ToArray() $false 0.38 0.5 $script:TrackRankTiming $script:RankTimes
         $lexicalAuthor = Get-Metrics $authorFixtures @{} $chunks.ToArray() $false 0.38 0.5 $script:TrackRankTiming $script:RankTimes
