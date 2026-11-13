@@ -111,3 +111,12 @@ This file records the baseline, decisions, code changes, and verification perfor
 - Moved runtime embedding-cache persistence into each successful document batch. If a later batch fails, vectors from earlier successful batches are already atomically present in the ignored local cache.
 - Added fake-provider coverage for 429 with `Retry-After`, 429 without the header then success, repeated 429 bounded at five requests, and persisted first-batch vectors when the next batch fails. Evaluator was deliberately not executed; no Gemini requests or DB access were made for this change.
 - Verification: .NET tests passed (101/101); solution Release build passed (0 errors); frontend lint passed; evaluator PowerShell parser check passed; `git diff --check` passed. NU1900 vulnerability-metadata warnings remain because nuget.org was unreachable.
+
+### 2026-11-13 — Windows PowerShell 5.1 atomic cache replacement fix
+
+- The previous checkpoint only parsed `evaluate-v2.ps1`; it did not execute the cache replacement path in Windows PowerShell 5.1. That left the PowerShell/.NET Framework `$null` binding bug undetected.
+- Extracted file replacement into `tools/rag/AtomicJsonCache.ps1` and changed the `File.Replace` backup argument to `[NullString]::Value`. Both initial creation and subsequent replacements use a same-directory temporary file. If replacement fails, the old destination stays in place and the temporary file is removed.
+- Added isolated regression test `tools/rag/tests/Test-AtomicCache.ps1`. It uses no evaluator, network, database, or key; performs three successive cache writes, verifies all three items, injects a missing temporary source during replacement, and confirms the prior cache bytes are unchanged.
+- Ran with Windows PowerShell 5.1 (`powershell.exe` 5.1.26100.9711): `powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\rag\\tests\\Test-AtomicCache.ps1` => PASS. `-ExecutionPolicy Bypass` is needed in this environment because the machine is `RemoteSigned` and otherwise blocks this local test script.
+- Scanned all `tools/rag/*.ps1` for .NET file replacement calls passing `$null`; the only file replace now passes `[NullString]::Value`. Other `$null` uses are defaults, comparisons, or assignments, not nullable .NET string overload arguments.
+- No evaluator, Gemini request, DB access, or holdout was run for this fix.

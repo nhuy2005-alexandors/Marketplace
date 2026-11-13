@@ -12,6 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Data
+. (Join-Path $PSScriptRoot 'AtomicJsonCache.ps1')
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
 if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal) { throw 'Specify -DevelopmentOnly or -HoldoutFinal; holdout is never run by default.' }
 
@@ -207,14 +208,8 @@ if(Test-Path -LiteralPath $cachePath){
 }
 
 function Save-EmbeddingCache {
-    $cacheDirectory=Split-Path $cachePath -Parent
-    [void](New-Item -ItemType Directory -Force -Path $cacheDirectory)
-    $tempCache="$cachePath.$([Guid]::NewGuid().ToString('N')).tmp"
-    try {
-        $jsonCache=ConvertTo-Json -InputObject @($cacheEntries.Values) -Depth 6
-        [IO.File]::WriteAllText($tempCache,$jsonCache,[Text.UTF8Encoding]::new($false))
-        if(Test-Path -LiteralPath $cachePath){[IO.File]::Replace($tempCache,$cachePath,$null)}else{[IO.File]::Move($tempCache,$cachePath)}
-    } finally { if(Test-Path -LiteralPath $tempCache){Remove-Item -LiteralPath $tempCache -Force -ErrorAction SilentlyContinue} }
+    $jsonCache=ConvertTo-Json -InputObject @($cacheEntries.Values) -Depth 6
+    Write-AtomicCacheFile -Path $cachePath -Content $jsonCache
 }
 
 function Get-Embeddings([string[]]$texts,[bool]$isQuery,[object[]]$cacheMetadata=@()) {
