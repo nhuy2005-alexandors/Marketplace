@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 'codex/marketplace-owner-*']
   pull_request:
-    branches: [main, master]
+    branches: [main, master, 'codex/marketplace-owner-*']
 
 jobs:
   backend:
