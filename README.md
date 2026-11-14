@@ -78,7 +78,7 @@ npm test
 npm run build
 ```
 
-Ba SQL Server facts là opt-in và được chạy trên disposable Windows LocalDB instances. GitHub CI chạy backend/frontend trên Linux và các SQL migration facts trên Windows; không dùng database phát triển bền vững.
+SQL Server facts là opt-in và chỉ được chạy trên disposable Windows LocalDB instances. Acceptance receipts ghi rõ test nào chạy trong CI và test nào được thực thi riêng; không dùng database phát triển bền vững.
 
 ## Thanh toán và currency boundary
 
