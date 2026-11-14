@@ -51,7 +51,7 @@ export function SellerProductsPage() {
       brandId: p.brandId ?? undefined, clearBrand: false,
       attributes: (p.attributes ?? []).map((a) => ({
         attributeDefinitionId: a.attributeDefinitionId,
-        valueText: a.valueText, valueNumber: a.valueNumber, valueBoolean: a.valueBoolean,
+        valueText: a.valueText ?? undefined, valueNumber: a.valueNumber ?? undefined, valueBoolean: a.valueBoolean ?? undefined,
       })),
     });
   };
