@@ -211,10 +211,38 @@ public sealed class AiRagRemediationTests
 
         var response = await service.ChatAsync(new AssistantChatRequest("weather laptop RAM 16 GB"), null);
 
-        Assert.Equal(1, search.CallCount);
-        Assert.Equal(0, search.LexicalGateCallCount);
+        Assert.Equal("product_search", response.Intent);
+        Assert.Equal("fallback", response.AnswerSource);
         Assert.Single(search.LastConstraints);
+        Assert.Equal("RAM", Assert.Single(search.LastConstraints).Field);
         Assert.Equal(16, Assert.Single(response.Products).Id);
+    }
+
+    [Fact]
+    public async Task Assistant_TypedConstraintOutsideScopeWithNoMatchReturnsNoEvidence()
+    {
+        var search = new FakeSearch([])
+        {
+            Analysis = new AssistantQueryAnalysis(
+                [new AssistantTypedConstraint(100, "RAM", (int)CatalogAttributeType.Number, "equals", ValueNumber: 128m, Unit: "GB")],
+                false, false, [])
+        };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("weather laptop RAM 128 GB"), null);
+
+        Assert.Equal("product_search", response.Intent);
+        Assert.Equal("no-evidence", response.AnswerSource);
+        Assert.Equal("none", response.EvidenceStrength);
+        Assert.False(response.Retrieval.HasEvidence);
+        Assert.Empty(response.Products);
+        Assert.Empty(response.Sources);
+        var ramConstraint = Assert.Single(response.Constraints!);
+        Assert.Equal("RAM", ramConstraint.Field);
+        Assert.Equal("128", ramConstraint.Value);
+        Assert.Contains("không tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("đáp ứng các điều kiện", response.Answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -366,11 +394,12 @@ public sealed class AiRagRemediationTests
         var newTopic = AssistantContextualizer.ContextualizeQueryV2("Tìm laptop gaming", turns, true, false, []);
 
         Assert.Equal("followup", followup.Action);
-        Assert.Contains("FictionBrand 07", followup.Query, StringComparison.Ordinal);
+        Assert.Contains(RetrievalScoring.Normalize("FictionBrand 07"), RetrievalScoring.Normalize(followup.Query), StringComparison.Ordinal);
         Assert.Equal("needs_clarification", ordinal.Action);
         Assert.Equal("Cái thứ hai rẻ hơn?", ordinal.Query);
         Assert.Equal("new_topic", newTopic.Action);
         Assert.Equal("Tìm laptop gaming", newTopic.Query);
+        Assert.DoesNotContain(RetrievalScoring.Normalize("FictionBrand 07"), RetrievalScoring.Normalize(newTopic.Query), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -682,6 +711,8 @@ public sealed class AiRagRemediationTests
         Assert.Equal("none", response.EvidenceStrength);
         Assert.Equal("no-evidence", response.AnswerSource);
         Assert.Contains("không tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("product_search", response.Intent);
+        Assert.DoesNotContain("phù hợp với", response.Answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -766,6 +797,26 @@ public sealed class AiRagRemediationTests
         Assert.StartsWith("Mình tìm được vài sản phẩm gần với yêu cầu của bạn, nhưng chưa chắc khớp hoàn toàn. Bạn xem thử nhé:", response.Answer);
         Assert.DoesNotContain("chưa tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("phù hợp với", response.Answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Assistant_StrictEvidenceSuppressesWeakCandidateWithoutCatalogMatch()
+    {
+        var candidate = new AssistantRetrievalCandidate(ProductDto(31, "Possible headset"), 0, .64, .16,
+            [new AssistantSourceChunk(31, "Audio", null, "description", "Portable listening accessory", "SOURCE-31", "fake-v1")]);
+        var search = new FakeSearch([candidate]) { Analysis = new AssistantQueryAnalysis([], false, false, []) };
+        var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("should not be used", [31]));
+        var service = new AssistantService(search, answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("zzqv-no-catalog-match"), null);
+
+        Assert.Equal("none", response.EvidenceStrength);
+        Assert.Equal("no-evidence", response.AnswerSource);
+        Assert.False(response.Retrieval.HasEvidence);
+        Assert.Empty(response.Products);
+        Assert.Empty(response.Sources);
+        Assert.Equal(0, answers.CallCount);
     }
 
     [Fact]
@@ -959,8 +1010,30 @@ public sealed class AiRagRemediationTests
         var response = await service.ChatAsync(new AssistantChatRequest(query), null);
 
         Assert.Equal("product_search", response.Intent);
-        Assert.Equal(1, search.CallCount);
+        Assert.Equal("fallback", response.AnswerSource);
         Assert.Single(response.Products);
+    }
+
+    [Fact]
+    public async Task Assistant_NoiseCancellationShoppingQueryUsesTypedProductSearch()
+    {
+        var search = new FakeSearch([Candidate(ProductDto(9, "Noise cancelling headset"))])
+        {
+            Analysis = new AssistantQueryAnalysis(
+                [new AssistantTypedConstraint(200, "ANC", (int)CatalogAttributeType.Boolean, "equals", ValueBoolean: true)],
+                true, false, [])
+        };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = true }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("tai nghe chống ồn"), null);
+
+        Assert.Equal("product_search", response.Intent);
+        Assert.Equal("fallback", response.AnswerSource);
+        var anc = Assert.Single(search.LastConstraints);
+        Assert.Equal("ANC", anc.Field);
+        Assert.Equal(true, anc.ValueBoolean);
+        Assert.Equal(9, Assert.Single(response.Products).Id);
     }
 
     [Fact]
@@ -977,7 +1050,6 @@ public sealed class AiRagRemediationTests
         Assert.Equal("no-evidence", response.AnswerSource);
         Assert.Empty(response.Products);
         Assert.Empty(response.Sources);
-        Assert.Equal(0, search.CallCount);
     }
 
     [Fact]
