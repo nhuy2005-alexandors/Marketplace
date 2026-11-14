@@ -110,7 +110,7 @@ public sealed class AssistantService : IAssistantService
         query.Contains("recommend", StringComparison.OrdinalIgnoreCase);
 
     private static AssistantChatResponse NoEvidence(string? conversationId, string evidenceStrength = "weak", string answerSource = "weak-evidence") => new(
-        "Mình chưa tìm thấy sản phẩm có đủ thông tin phù hợp trong catalog. Bạn thử đổi từ khóa hoặc bộ lọc nhé.",
+        "Mình chưa chắc có sản phẩm khớp hoàn toàn với yêu cầu. Bạn thử điều chỉnh từ khóa hoặc bộ lọc nhé.",
         [], [], new RetrievalMetadataDto("hybrid", false), conversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource);
 
     private static bool IsExplicitSkuBranch(string query, IReadOnlyList<AssistantRetrievalCandidate> candidates)
@@ -131,7 +131,7 @@ public sealed class AssistantService : IAssistantService
     }
 
     private static string BuildWeakEvidenceAnswer(IReadOnlyList<ProductDto> products) =>
-        $"Mình chưa tìm thấy sản phẩm khớp chắc chắn. Đây chỉ là gợi ý gần nhất:\n{BuildProductLines(products)}\nGiá và tồn kho được hiển thị từ dữ liệu sản phẩm hiện tại.";
+        $"Mình tìm được vài sản phẩm gần với yêu cầu của bạn, nhưng chưa chắc khớp hoàn toàn. Bạn xem thử nhé:\n{BuildProductLines(products)}\nGiá và tồn kho được hiển thị từ dữ liệu sản phẩm hiện tại.";
 
     private static string BuildProductLines(IReadOnlyList<ProductDto> products) =>
         string.Join("\n", products.Select(product => $"• {product.Name} — {product.CategoryName}"));

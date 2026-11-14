@@ -69,7 +69,7 @@ The request body limit is 32,768 bytes. The endpoint is rate-limited by the `ai`
 }
 ```
 
-`evidenceStrength` is `strong` or `weak`. It is additive; the existing `retrieval`, product and source fields retain their previous meaning and ordering. A weak result is returned from the local Vietnamese response without calling Gemini generation; it keeps the same retrieved products and source IDs in the same order, and explicitly calls them nearest suggestions rather than confirmed matches. A strong result follows the existing generation path (or its existing grounded fallback).
+`evidenceStrength` is `strong` or `weak`. It is additive; the existing `retrieval`, product and source fields retain their previous meaning and ordering. A weak result is returned from the local Vietnamese response without calling Gemini generation; it keeps the same retrieved products and source IDs in the same order and says they are near the request but may not fully match. It avoids claiming that no product was found when suggestions are present. A strong result follows the existing generation path (or its existing grounded fallback).
 
 `answerSource` is additive and identifies how `answer` was produced: `generated` for a valid Gemini response, `fallback` for a local recommendation/grounded response after a provider failure, timeout, or open circuit, and `weak-evidence` when retrieval evidence is weak and generation is skipped.
 

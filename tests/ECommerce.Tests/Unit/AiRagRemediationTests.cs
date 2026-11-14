@@ -3,6 +3,7 @@ using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
 using ECommerce.Domain.Entities;
 using ECommerce.Infrastructure.AI;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Net;
@@ -298,6 +299,7 @@ public sealed class AiRagRemediationTests
         Assert.Empty(response.Sources);
         Assert.Equal("weak", response.EvidenceStrength);
         Assert.Equal("weak-evidence", response.AnswerSource);
+        Assert.DoesNotContain("chưa tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -362,7 +364,8 @@ public sealed class AiRagRemediationTests
         Assert.Equal(0, answers.CallCount);
         Assert.Equal(31, Assert.Single(response.Products).Id);
         Assert.Contains(response.Sources, source => source.ProductId == 31 && source.ContentHash == "SOURCE-31");
-        Assert.StartsWith("Mình chưa tìm thấy sản phẩm khớp chắc chắn. Đây chỉ là gợi ý gần nhất:", response.Answer);
+        Assert.StartsWith("Mình tìm được vài sản phẩm gần với yêu cầu của bạn, nhưng chưa chắc khớp hoàn toàn. Bạn xem thử nhé:", response.Answer);
+        Assert.DoesNotContain("chưa tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("phù hợp với", response.Answer, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -493,6 +496,7 @@ public sealed class AiRagRemediationTests
         Assert.DoesNotContain("system instruction", response.Answer, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("weak", response.EvidenceStrength);
         Assert.Equal("weak-evidence", response.AnswerSource);
+        Assert.DoesNotContain("chưa tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -581,6 +585,67 @@ public sealed class AiRagRemediationTests
 
         Assert.DoesNotContain("private provider body", exception.Message);
         Assert.DoesNotContain("server-key-test", exception.Message);
+    }
+
+    [Fact]
+    public async Task Assistant_Generation429LogsOnlySafeQuotaMetadataAndReturnsFallback()
+    {
+        const string privateBody = "sensitive-provider-detail";
+        var handler = new FakeHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("""
+                {"error":{"status":"RESOURCE_EXHAUSTED","message":"sensitive-provider-detail","details":[
+                  {"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generateRequestsPerMinute","quotaId":"GenerateRequestsPerMinutePerProject"}]},
+                  {"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"2s"}
+                ]}}
+                """)
+        }));
+        var providerLogger = new CapturingLogger<GeminiAssistantProvider>();
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://generativelanguage.googleapis.com/") };
+        var provider = new GeminiAssistantProvider(new FakeHttpClientFactory(client), Options.Create(new GeminiOptions { ApiKey = "server-key-test" }), providerLogger);
+        var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Catalog lamp"))]), provider,
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+
+        var response = await service.ChatAsync(new AssistantChatRequest("lamp"), null);
+
+        Assert.Equal("fallback", response.AnswerSource);
+        Assert.Contains("Catalog lamp", response.Answer, StringComparison.Ordinal);
+        var logs = string.Join("\n", providerLogger.Messages);
+        Assert.Contains("HTTP 429", logs, StringComparison.Ordinal);
+        Assert.Contains("RESOURCE_EXHAUSTED", logs, StringComparison.Ordinal);
+        Assert.Contains("generativelanguage.googleapis.com/generateRequestsPerMinute", logs, StringComparison.Ordinal);
+        Assert.Contains("GenerateRequestsPerMinutePerProject", logs, StringComparison.Ordinal);
+        Assert.Contains("2s", logs, StringComparison.Ordinal);
+        Assert.Contains("per-minute", logs, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateBody, logs, StringComparison.Ordinal);
+        Assert.DoesNotContain("server-key-test", logs, StringComparison.Ordinal);
+        Assert.DoesNotContain("lamp", logs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GeminiProvider_OmitsThinkingConfigurationWhenLevelIsEmpty()
+    {
+        string? capturedBody = null;
+        var client = new HttpClient(new FakeHttpHandler(async (request, _) =>
+        {
+            capturedBody = await request.Content!.ReadAsStringAsync();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"answer\\\":\\\"ok\\\",\\\"sourceProductIds\\\":[9]}\"}]}}]}")
+            };
+        })) { BaseAddress = new Uri("https://generativelanguage.googleapis.com/") };
+        var provider = new GeminiAssistantProvider(new FakeHttpClientFactory(client), Options.Create(new GeminiOptions
+        {
+            ApiKey = "server-key-test",
+            GenerationThinkingLevel = string.Empty
+        }), NullLogger<GeminiAssistantProvider>.Instance);
+
+        await provider.GenerateAsync("question", [Candidate(ProductDto(9, "Catalog lamp"))], []);
+
+        using var document = JsonDocument.Parse(capturedBody!);
+        var generationConfig = document.RootElement.GetProperty("generationConfig");
+        Assert.False(generationConfig.TryGetProperty("thinkingConfig", out _));
+        Assert.Equal(600, generationConfig.GetProperty("maxOutputTokens").GetInt32());
     }
 
     [Fact]
@@ -826,6 +891,20 @@ public sealed class AiRagRemediationTests
     private sealed class FakeHttpHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => NoopScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
+        private sealed class NoopScope : IDisposable
+        {
+            public static NoopScope Instance { get; } = new();
+            public void Dispose() { }
+        }
     }
 
     private sealed class FakeEmbeddingProvider(

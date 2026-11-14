@@ -115,21 +115,26 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         using var request = new HttpRequestMessage(HttpMethod.Post,
             $"v1beta/models/{_options.GenerationModel}:generateContent");
         request.Headers.TryAddWithoutValidation("x-goog-api-key", key);
+        var generationConfig = new Dictionary<string, object>
+        {
+            ["maxOutputTokens"] = _options.MaxOutputTokens,
+            ["responseMimeType"] = "application/json"
+        };
+        if (!string.IsNullOrWhiteSpace(_options.GenerationThinkingLevel))
+            generationConfig["thinkingConfig"] = new { thinkingLevel = _options.GenerationThinkingLevel };
         request.Content = JsonContent.Create(new
         {
             systemInstruction = new { parts = new[] { new { text = systemInstruction } } },
             contents,
-            generationConfig = new
-            {
-                maxOutputTokens = _options.MaxOutputTokens,
-                responseMimeType = "application/json",
-                thinkingConfig = new { thinkingLevel = _options.GenerationThinkingLevel }
-            }
+            generationConfig
         });
         using var response = await SendBoundedAsync(request, ct);
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Gemini generation request failed with status {StatusCode}.", response.StatusCode);
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                await LogQuota429Async(response, ct);
+            else
+                _logger.LogWarning("Gemini generation request failed with status {StatusCode}.", (int)response.StatusCode);
             throw new AssistantProviderException("AI provider is temporarily unavailable.");
         }
         await using var responseStream = await response.Content.ReadAsStreamAsync(ct);
@@ -142,6 +147,57 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         var sourceIds = root.GetProperty("sourceProductIds").EnumerateArray().Select(item => item.GetInt32()).Distinct().ToArray();
         return new AssistantGeneratedAnswer(answer, sourceIds);
     }
+
+    private async Task LogQuota429Async(HttpResponseMessage response, CancellationToken ct)
+    {
+        var providerStatus = string.Empty;
+        var quotaMetric = string.Empty;
+        var quotaId = string.Empty;
+        var retryDelay = string.Empty;
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("error", out var error))
+            {
+                if (error.TryGetProperty("status", out var status)) providerStatus = SafeQuotaLogField(status.GetString());
+                if (error.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var detail in details.EnumerateArray())
+                    {
+                        if (detail.TryGetProperty("retryDelay", out var delay))
+                        {
+                            var candidate = delay.GetString() ?? string.Empty;
+                            if (Regex.IsMatch(candidate, @"^[0-9]+(?:\.[0-9]+)?s$", RegexOptions.CultureInvariant)) retryDelay = candidate;
+                        }
+                        if (!detail.TryGetProperty("violations", out var violations) || violations.ValueKind != JsonValueKind.Array) continue;
+                        foreach (var violation in violations.EnumerateArray())
+                        {
+                            if (string.IsNullOrEmpty(quotaMetric) && violation.TryGetProperty("quotaMetric", out var metric)) quotaMetric = SafeQuotaLogField(metric.GetString());
+                            if (string.IsNullOrEmpty(quotaId) && violation.TryGetProperty("quotaId", out var id)) quotaId = SafeQuotaLogField(id.GetString());
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            // Provider error bodies are intentionally suppressed; missing diagnostics remain empty.
+        }
+
+        var quotaFields = $"{quotaMetric} {quotaId}";
+        var classification = Regex.IsMatch(quotaFields, @"(?i)(per[_ -]?day|daily|quota[_ -]?day|day[_ -]?limit)")
+            ? "per-day"
+            : Regex.IsMatch(quotaFields, @"(?i)(per[_ -]?minute|minutely|minute[_ -]?limit)") ? "per-minute" : "unknown";
+        _logger.LogWarning(
+            "Gemini generation quota response: HTTP {HttpStatus}; status {ProviderStatus}; quotaMetric {QuotaMetric}; quotaId {QuotaId}; retryDelay {RetryDelay}; classification {QuotaClassification}.",
+            (int)response.StatusCode, providerStatus, quotaMetric, quotaId, retryDelay, classification);
+    }
+
+    private static string SafeQuotaLogField(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 160 && Regex.IsMatch(value, @"^[A-Za-z0-9][A-Za-z0-9._:/=-]*$", RegexOptions.CultureInvariant)
+            ? value
+            : string.Empty;
 
     public static string Hash(string content) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 

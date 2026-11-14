@@ -48,7 +48,8 @@ function Get-FakeResponse([object]$Case) {
     if ($body.RateLimitProbe) {
         $script:fakeRateLimitCount++
         $status = if ($script:fakeRateLimitCount -ge 3) { 429 } else { 200 }
-        return [pscustomobject]@{ StatusCode=$status; RateLimitResponses=$(if($script:fakeRateLimitCount -ge 3){1}else{0}); Body=[pscustomobject]@{products=@();sources=@();answer='';answerSource='fallback';evidenceStrength='weak';retrieval=[pscustomobject]@{mode='hybrid';hasEvidence=$false}} }
+        $fakeBody=if($status -eq 200){[pscustomobject]@{products=@();sources=@();answer='';answerSource='fallback';evidenceStrength='weak';retrieval=[pscustomobject]@{mode='hybrid';hasEvidence=$false}}}else{$null}
+        return [pscustomobject]@{ StatusCode=$status; RateLimitResponses=$(if($script:fakeRateLimitCount -ge 3){1}else{0}); Body=$fakeBody }
     }
     if ($body.filters) {
         if ($body.filters.CategoryId) { $products = @($products | Where-Object categoryId -eq $body.filters.CategoryId) }
@@ -58,6 +59,10 @@ function Get-FakeResponse([object]$Case) {
         if ($body.filters.InStockOnly) { $products = @($products | Where-Object stock -gt 0) }
     }
     if ($Case.Name -in @('no-result','prompt-extraction-request','payload-too-large-413','nonsense-vietnamese','unrelated-english','non-shopping-general')) { $products = @() }
+    if($Case.Name -eq 'payload-too-large-413'){
+        $raw='{"error":"Request body is too large."}'
+        return [pscustomobject]@{StatusCode=413;RawBody=$raw;Body=($raw|ConvertFrom-Json)}
+    }
     [pscustomobject]@{
         StatusCode=$(if($Case.ExpectedStatus){$Case.ExpectedStatus}else{200})
         Body=[pscustomobject]@{
@@ -100,8 +105,8 @@ try {
     foreach ($case in $cases) {
         $timer=[Diagnostics.Stopwatch]::StartNew()
         if ($DryRun) {
-            if($case.ExpectedRateLimit){$rateResponses=0;for($requestIndex=0;$requestIndex -lt 15;$requestIndex++){$fakeRate=Get-FakeResponse $case;if($fakeRate.StatusCode -eq 429){$rateResponses++}};$result=[pscustomobject]@{StatusCode=$(if($rateResponses -gt 0){429}else{200});RateLimitResponses=$rateResponses;Body=[pscustomobject]@{products=@();sources=@();answerSource='fallback';evidenceStrength='weak'}}}
-            elseif($case.Name -eq 'unrelated-english'){$firstFake=[pscustomobject]@{StatusCode=429;Body=$null};$result=Get-FakeResponse $case;$result|Add-Member -NotePropertyName RetriedAfter429 -NotePropertyValue $true;$result|Add-Member -NotePropertyName RetryWaitSeconds -NotePropertyValue 0.0}
+            if($case.ExpectedRateLimit){$rateResponses=0;for($requestIndex=0;$requestIndex -lt 15;$requestIndex++){$fakeRate=Get-FakeResponse $case;if($fakeRate.StatusCode -eq 429){$rateResponses++}};$result=[pscustomobject]@{StatusCode=$(if($rateResponses -gt 0){429}else{200});RateLimitResponses=$rateResponses;Body=$null}}
+        elseif($case.Name -eq 'unrelated-english'){$firstFake=[pscustomobject]@{StatusCode=429;Body=$null};$result=Get-FakeResponse $case;$result|Add-Member -NotePropertyName RetriedAfter429 -NotePropertyValue $true;$result|Add-Member -NotePropertyName RetryWaitSeconds -NotePropertyValue 0.0}
             else{$result = Get-FakeResponse $case}
         }
         elseif ($case.ExpectedRateLimit) {
@@ -112,7 +117,7 @@ try {
                 $content=[System.Net.Http.StringContent]::new($json,[Text.Encoding]::UTF8,'application/json')
                 try{$response=$client.PostAsync(([Uri]::new($baseUri,'/api/assistant/chat')),$content).GetAwaiter().GetResult();try{if([int]$response.StatusCode -eq 429){$rateResponses++};$responseBody=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult();$productResult=[pscustomobject]@{StatusCode=[int]$response.StatusCode;Body=($responseBody|ConvertFrom-Json -ErrorAction SilentlyContinue)}}finally{$response.Dispose()}}finally{$content.Dispose()}
             }
-            $result=[pscustomobject]@{StatusCode=$(if($rateResponses -gt 0){429}else{200});Body=[pscustomobject]@{products=@();sources=@();answerSource='not-provided-by-api';evidenceStrength='weak'};RateLimitResponses=$rateResponses}
+            $result=[pscustomobject]@{StatusCode=$(if($rateResponses -gt 0){429}else{200});Body=$null;RateLimitResponses=$rateResponses}
         }
         else {
             $result=Invoke-HttpGuestCase $case
@@ -123,9 +128,11 @@ try {
         $pass=$true; $reasons=New-Object 'System.Collections.Generic.List[string]'
         $expectedStatus=if($case.ExpectedStatus){$case.ExpectedStatus}elseif($case.ExpectedRateLimit){429}else{200};if($result.StatusCode -ne $expectedStatus){$pass=$false;$reasons.Add("http expected $expectedStatus")}
         if($case.Name -eq 'prompt-extraction-request' -and $productCount -gt 0){$pass=$false;$reasons.Add('expected empty products')}
-        if($case.Name -eq 'no-result' -and $result.Body.answer -match '(?i)phù hợp với'){$pass=$false;$reasons.Add('weak answer used prohibited certainty wording')}
-        if($case.ExpectedEvidence -and $result.Body.evidenceStrength -ne $case.ExpectedEvidence){$pass=$false;$reasons.Add("expected evidenceStrength=$($case.ExpectedEvidence)")}
-        if($case.Name -eq 'payload-too-large-413' -and $result.StatusCode -eq 413 -and $result.RawBody -match '(?i)BadHttpRequestException|Kestrel|stack trace| at [\w.]+\('){$pass=$false;$reasons.Add('413 body leaks internal details')}
+        if($case.Name -eq 'no-result' -and $productCount -gt 0){$pass=$false;$reasons.Add('no-result case returned products')}
+        if($result.StatusCode -eq 200 -and $case.Name -eq 'no-result' -and $result.Body.answer -match '(?i)phù hợp với'){$pass=$false;$reasons.Add('weak answer used prohibited certainty wording')}
+        if($result.StatusCode -eq 200 -and $result.Body.evidenceStrength -eq 'weak' -and $result.Body.answer -match '(?i)chưa\s+tìm\s+thấy'){$pass=$false;$reasons.Add('weak answer used prohibited no-result wording')}
+        if($result.StatusCode -eq 200 -and $case.ExpectedEvidence -and $result.Body.evidenceStrength -ne $case.ExpectedEvidence){$pass=$false;$reasons.Add("expected evidenceStrength=$($case.ExpectedEvidence)")}
+        if($case.Name -eq 'payload-too-large-413' -and $result.StatusCode -eq 413 -and $result.RawBody -match '(?i)BadHttpRequestException|Kestrel|stack trace| at [\w.]+\(|private|internal exception'){$pass=$false;$reasons.Add('413 body leaks internal details')}
         if($case.ExpectedRateLimit -and $result.RateLimitResponses -lt 1){$pass=$false;$reasons.Add('no HTTP 429 in 15 intentional requests')}
         foreach($product in @($result.Body.products)){
             if(-not $case.Body.filters){continue};$filter=$case.Body.filters
@@ -137,7 +144,7 @@ try {
         }
         if($case.Name -eq 'irrelevant-product-ids' -and @($result.Body.products | Where-Object id -eq 999999).Count){$pass=$false;$reasons.Add('client hint ID became authority')}
         $answerSource=if($result.Body -and $result.Body.answerSource){[string]$result.Body.answerSource}else{'not-provided-by-api'}
-        if($case.Name -ne 'rate-limit-intentional'){
+        if($result.StatusCode -eq 200 -and $case.Name -ne 'rate-limit-intentional'){
             if($answerSource -notin @('generated','fallback','weak-evidence')){$pass=$false;$reasons.Add('missing or invalid answerSource')}
             elseif($result.Body.evidenceStrength -eq 'weak' -and $answerSource -ne 'weak-evidence'){$pass=$false;$reasons.Add('weak evidence must use answerSource=weak-evidence')}
             elseif($result.Body.evidenceStrength -eq 'strong' -and $answerSource -notin @('generated','fallback')){$pass=$false;$reasons.Add('strong evidence must use generated or fallback answerSource')}

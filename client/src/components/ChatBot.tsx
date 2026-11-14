@@ -268,7 +268,7 @@ export function ChatBot() {
                         {msg.result.type === "matched" && (
                           <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${msg.result.evidenceStrength === "weak" ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"}`}>
                             {msg.result.evidenceStrength === "weak" ? <AlertTriangle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                            {msg.result.evidenceStrength === "weak" ? "Gợi ý gần nhất · chưa khớp chắc chắn" : "Có sản phẩm trên sàn"}
+                            {msg.result.evidenceStrength === "weak" ? "Gợi ý gần với yêu cầu · chưa chắc khớp hoàn toàn" : "Có sản phẩm trên sàn"}
                           </span>
                         )}
                         {msg.result.type === "similar" && (
@@ -278,7 +278,7 @@ export function ChatBot() {
                         )}
                         {msg.result.type === "not_found" && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 px-2.5 py-0.5 rounded-full">
-                            <HelpCircle className="w-3.5 h-3.5" /> {msg.result.evidenceStrength === "weak" ? "Chưa tìm thấy khớp chắc chắn" : "Chưa có trên thị trường"}
+                            <HelpCircle className="w-3.5 h-3.5" /> {msg.result.evidenceStrength === "weak" ? "Chưa có gợi ý chắc chắn" : "Chưa có trên thị trường"}
                           </span>
                         )}
                       </div>
