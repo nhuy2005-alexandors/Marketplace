@@ -93,6 +93,25 @@ public class SqlServerLifecycleTests
         Assert.Equal(skuBefore, await db.Products.AsNoTracking().OrderBy(p => p.Id).Select(p => p.Sku).ToArrayAsync());
         Assert.False(db.Database.HasPendingModelChanges());
 
+        var snapshotOrder = await LifecycleSafetyTests.SeedAsync(db);
+        var snapshotItem = snapshotOrder.Items.Single();
+        var originalSnapshotName = snapshotItem.ProductName;
+        await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync(
+            "UPDATE dbo.OrderItems SET ProductName = N'Tampered snapshot' WHERE Id = {0}", snapshotItem.Id));
+        db.ChangeTracker.Clear();
+        var storedSnapshotName = await db.OrderItems.AsNoTracking()
+            .Where(i => i.Id == snapshotItem.Id).Select(i => i.ProductName).SingleAsync();
+        Assert.Equal(originalSnapshotName, storedSnapshotName);
+
+        await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO dbo.OrderItems(OrderId, ProductId, SellerId, ProductName, UnitPrice, Quantity, Status, CreatedAt)
+            SELECT @orderId, p.Id, -999999, p.Name, p.Price, 1, 0, SYSUTCDATETIME()
+            FROM dbo.Products p WHERE p.Id = @productId;
+            """,
+            new SqlParameter("@orderId", snapshotItem.OrderId),
+            new SqlParameter("@productId", snapshotItem.ProductId)));
+        Console.WriteLine("ORDER_ITEM_SNAPSHOT_TRIGGER_AND_SELLER_FK PASS");
+
         // Refund request and seller shipment both validate the original parent rowversion.
         var order = await LifecycleSafetyTests.SeedAsync(db);
         int itemId = order.Items.Single().Id, sellerId = order.Items.Single().SellerId;
