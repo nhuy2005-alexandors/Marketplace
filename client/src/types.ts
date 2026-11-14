@@ -21,7 +21,7 @@ export interface Brand {
   id: number;
   name: string;
   slug: string;
-  description?: string;
+  description?: string | null;
 }
 
 export interface AttributeDefinition {
@@ -58,9 +58,9 @@ export interface ProductAttribute {
   displayName: string;
   dataType: CatalogAttributeType;
   unit?: string;
-  valueText?: string;
-  valueNumber?: number;
-  valueBoolean?: boolean;
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueBoolean?: boolean | null;
 }
 
 export interface Product {
@@ -183,10 +183,10 @@ export interface Refund {
   externalReference?: string;
   note?: string;
   processedByName?: string;
-  providerAmount?: number;
-  providerCurrency?: string;
-  paymentMethod?: string;
-  paymentTransactionId?: string;
+  providerAmount?: number | null;
+  providerCurrency?: string | null;
+  paymentMethod?: string | null;
+  paymentTransactionId?: string | null;
 }
 
 export interface PayResult {
