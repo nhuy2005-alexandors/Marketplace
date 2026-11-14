@@ -46,7 +46,7 @@ public class SellerVisibilityCartTests
     public async Task Checkout_rejects_cart_with_unapproved_seller_without_mutating_stock_or_cart()
     {
         await using var db = TestDb.Create();
-        var (buyer, _, approvedProduct, pendingProduct) = await SeedCheckoutCartAsync(db);
+        var (buyer, approvedProduct, pendingProduct) = await SeedCheckoutCartAsync(db);
 
         var result = await new OrderService(db).CheckoutAsync(
             buyer.Id, new CheckoutRequest("Synthetic address"));
