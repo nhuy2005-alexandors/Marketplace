@@ -38,8 +38,16 @@ public class FulfillmentTests
 
     private static async Task<(int sellerA, int sellerB, int prodA, int prodB, int customer)> SeedAsync(Infrastructure.Persistence.AppDbContext db)
     {
-        var sa = new User { Email = "sa@x.com", PasswordHash = "h", FullName = "SA", ShopName = "A", Role = UserRole.Seller };
-        var sb = new User { Email = "sb@x.com", PasswordHash = "h", FullName = "SB", ShopName = "B", Role = UserRole.Seller };
+        var sa = new User
+        {
+            Email = "sa@x.com", PasswordHash = "h", FullName = "SA", ShopName = "A",
+            Role = UserRole.Seller, SellerStatus = SellerStatus.Approved
+        };
+        var sb = new User
+        {
+            Email = "sb@x.com", PasswordHash = "h", FullName = "SB", ShopName = "B",
+            Role = UserRole.Seller, SellerStatus = SellerStatus.Approved
+        };
         var cust = new User { Email = "c@x.com", PasswordHash = "h", FullName = "C", Role = UserRole.Customer };
         var cat = new Category { Name = "Cat" };
         db.Users.AddRange(sa, sb, cust);
