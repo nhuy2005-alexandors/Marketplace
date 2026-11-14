@@ -187,6 +187,39 @@ public class ProductCatalogServiceTests
     }
 
     [Fact]
+    public async Task Updating_active_attributes_preserves_values_of_deactivated_definitions()
+    {
+        using var db = TestDb.Create();
+        var (sellerId, categoryId) = await SeedAsync(db);
+        var definition = await CreateNumberAttribute(db, categoryId);
+        var products = new ProductService(db);
+        var created = await products.CreateAsync(sellerId, new("Phone", null, 100m, 5, null, categoryId,
+            Attributes: [new ProductAttributeInput(definition.Id, ValueNumber: 8m)]));
+        Assert.True(created.Success, created.Error);
+
+        var definitions = new AttributeDefinitionService(db);
+        var deactivated = await definitions.UpdateAsync(definition.Id,
+            new(categoryId, "RAM_GB", "RAM", CatalogAttributeType.Number, "GB",
+                IsRequired: false, IsFilterable: true, IsComparable: false, IsActive: false));
+        Assert.True(deactivated.Success, deactivated.Error);
+
+        var updated = await products.UpdateAsync(sellerId, false, created.Value!.Id,
+            new("Phone updated", null, 100m, 5, null, categoryId, Attributes: Array.Empty<ProductAttributeInput>()));
+
+        Assert.True(updated.Success, updated.Error);
+        var stored = await db.ProductAttributeValues.SingleAsync(v => v.ProductId == created.Value.Id);
+        Assert.Equal(8m, stored.ValueNumber);
+
+        var reactivated = await definitions.UpdateAsync(definition.Id,
+            new(categoryId, "RAM_GB", "RAM", CatalogAttributeType.Number, "GB",
+                IsRequired: false, IsFilterable: true, IsComparable: false, IsActive: true));
+        Assert.True(reactivated.Success, reactivated.Error);
+        var reloaded = await products.GetByIdAsync(created.Value.Id);
+        Assert.Single(reloaded.Value!.Attributes!);
+        Assert.Equal(8m, reloaded.Value.Attributes!.Single().ValueNumber);
+    }
+
+    [Fact]
     public async Task Delete_removes_structured_values_before_product()
     {
         using var db = TestDb.Create();

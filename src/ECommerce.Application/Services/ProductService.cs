@@ -219,10 +219,14 @@ public class ProductService : IProductService
             if (!attributes.Success)
                 return Result.Fail<ProductDto>(attributes.Error!, attributes.ErrorType);
 
-            var existing = product.AttributeValues.ToDictionary(v => v.AttributeDefinitionId);
+            // Inactive definitions are hidden from ProductDto and cannot be edited by the
+            // product form. Preserve their historical values when the active set is replaced.
+            var existingActive = product.AttributeValues
+                .Where(v => v.AttributeDefinition is { IsActive: true })
+                .ToDictionary(v => v.AttributeDefinitionId);
             var incomingIds = attributes.Value!.Select(v => v.AttributeDefinitionId).ToHashSet();
 
-            foreach (var oldValue in existing.Values.Where(v => !incomingIds.Contains(v.AttributeDefinitionId)).ToList())
+            foreach (var oldValue in existingActive.Values.Where(v => !incomingIds.Contains(v.AttributeDefinitionId)).ToList())
             {
                 product.AttributeValues.Remove(oldValue);
                 _db.ProductAttributeValues.Remove(oldValue);
@@ -230,7 +234,7 @@ public class ProductService : IProductService
 
             foreach (var incoming in attributes.Value!)
             {
-                if (existing.TryGetValue(incoming.AttributeDefinitionId, out var current))
+                if (existingActive.TryGetValue(incoming.AttributeDefinitionId, out var current))
                 {
                     current.ValueText = incoming.ValueText;
                     current.ValueNumber = incoming.ValueNumber;
