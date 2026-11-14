@@ -5,7 +5,7 @@ public sealed class GeminiOptions
     public const string SectionName = "Gemini";
     public string? ApiKey { get; set; }
     public bool GenerationEnabled { get; set; } = false;
-    public string GenerationModel { get; set; } = "gemini-2.5-flash";
+    public string GenerationModel { get; set; } = "gemini-3.8-flash";
     public string EmbeddingModel { get; set; } = "gemini-embedding-001";
     public int EmbeddingDimensions { get; set; } = 768;
     public string GenerationThinkingLevel { get; set; } = "low";
