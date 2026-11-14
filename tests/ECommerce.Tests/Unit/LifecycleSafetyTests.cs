@@ -27,7 +27,15 @@ public class LifecycleSafetyTests
         await db.SaveChangesAsync();
         var order = new Order { UserId = buyer.Id, ShippingAddress = "Synthetic", Status = status };
         order.Items.Add(new OrderItem { ProductId = product.Id, ProductName = product.Name, SellerId = seller.Id, Quantity = 2, UnitPrice = 100 });
-        order.Payment = new Payment { Amount = 200, Method = PaymentMethod.EWallet, Status = status == OrderStatus.Paid ? PaymentStatus.Completed : PaymentStatus.Pending };
+        order.Payment = new Payment
+        {
+            Amount = 200,
+            Method = PaymentMethod.EWallet,
+            Status = status == OrderStatus.Paid ? PaymentStatus.Completed : PaymentStatus.Pending,
+            ProviderKey = "momo",
+            ProviderAmount = 5_000_000m,
+            ProviderCurrency = "VND"
+        };
         db.Orders.Add(order);
         await db.SaveChangesAsync();
         return order;
