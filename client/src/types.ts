@@ -15,6 +15,46 @@ export interface AuthResponse {
   user: User;
 }
 
+export type CatalogAttributeType = 0 | 1 | 2; // Text | Number | Boolean
+
+export interface Brand {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+}
+
+export interface AttributeDefinition {
+  id: number;
+  categoryId: number;
+  code: string;
+  displayName: string;
+  dataType: CatalogAttributeType;
+  unit?: string;
+  isRequired: boolean;
+  isFilterable: boolean;
+  isComparable: boolean;
+  isActive: boolean;
+}
+
+export interface ProductAttributeInput {
+  attributeDefinitionId: number;
+  valueText?: string;
+  valueNumber?: number;
+  valueBoolean?: boolean;
+}
+
+export interface ProductAttribute {
+  attributeDefinitionId: number;
+  code: string;
+  displayName: string;
+  dataType: CatalogAttributeType;
+  unit?: string;
+  valueText?: string;
+  valueNumber?: number;
+  valueBoolean?: boolean;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -28,6 +68,10 @@ export interface Product {
   sellerShopName: string;
   averageRating: number;
   reviewCount: number;
+  sku?: string;
+  brandId?: number | null;
+  brandName?: string | null;
+  attributes?: ProductAttribute[];
 }
 
 export interface Category {
