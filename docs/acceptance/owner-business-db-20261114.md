@@ -41,7 +41,7 @@ The migration is guarded to LocalDB and `ECommerceDb_Dev`. It checks orphan Sell
 
 ## Verification — current branch
 
-<badge>CI PASS</badge> Run [43589335753](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43589335753), associated with PR #4 branch head `ec8f0dc4781421b821cc7afe27ab94e232c18a85`.
+**CI PASS** Run [43589335753](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43589335753), associated with PR #4 branch head `ec8f0dc4781421b821cc7afe27ab94e232c18a85`.
 
 | Instrument | Result |
 |---|---:|
