@@ -6,8 +6,13 @@ import {
 import { apiError } from "../api/client";
 import type { Product } from "../types";
 import { Button, Card, Input, Select, Textarea } from "../components/ui";
+import { CatalogProductFields } from "../components/CatalogProductFields";
+import { AdminCatalogSettings } from "../components/AdminCatalogSettings";
 
-const EMPTY_FORM: ProductInput = { name: "", description: "", price: 0, stock: 0, imageUrl: "", categoryId: 0 };
+const EMPTY_FORM: ProductInput = {
+  name: "", description: "", price: 0, stock: 0, imageUrl: "", categoryId: 0,
+  sku: "", attributes: [], clearBrand: false,
+};
 
 export function AdminProductsPage() {
   const { data: categories } = useCategories();
@@ -26,7 +31,15 @@ export function AdminProductsPage() {
 
   const startEdit = (p: Product) => {
     setEditingId(p.id);
-    setForm({ name: p.name, description: p.description, price: p.price, stock: p.stock, imageUrl: p.imageUrl, categoryId: p.categoryId });
+    setForm({
+      name: p.name, description: p.description, price: p.price, stock: p.stock,
+      imageUrl: p.imageUrl, categoryId: p.categoryId, sku: p.sku ?? "",
+      brandId: p.brandId ?? undefined, clearBrand: false,
+      attributes: (p.attributes ?? []).map((a) => ({
+        attributeDefinitionId: a.attributeDefinitionId,
+        valueText: a.valueText, valueNumber: a.valueNumber, valueBoolean: a.valueBoolean,
+      })),
+    });
   };
 
   const resetForm = () => { setEditingId(null); setForm(EMPTY_FORM); };
@@ -34,9 +47,13 @@ export function AdminProductsPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    const body: ProductInput = { ...form, sku: form.sku?.trim() || undefined, attributes: form.attributes ?? [] };
     try {
-      if (editingId) await updateProduct.mutateAsync({ id: editingId, body: form });
-      else await createProduct.mutateAsync(form);
+      if (editingId) await updateProduct.mutateAsync({ id: editingId, body });
+      else {
+        const { clearBrand: _clearBrand, ...createBody } = body;
+        await createProduct.mutateAsync(createBody);
+      }
       resetForm();
     } catch (err) {
       setError(apiError(err));
@@ -55,10 +72,10 @@ export function AdminProductsPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 grid md:grid-cols-3 gap-6 animate-fade-in">
+    <div className="max-w-6xl mx-auto px-4 py-6 grid md:grid-cols-3 gap-6 animate-fade-in">
       <div className="md:col-span-1 space-y-6">
         <Card className="p-5">
-          <h2 className="font-semibold mb-3">{editingId ? `Sửa sản phẩm #${editingId}` : "Thêm sản phẩm"}</h2>
+          <h2 className="font-semibold mb-3">{editingId ? "Sửa sản phẩm #" + editingId : "Thêm sản phẩm"}</h2>
           <form onSubmit={submit} className="space-y-2">
             <Input required placeholder="Tên sản phẩm" value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -72,11 +89,14 @@ export function AdminProductsPage() {
                 onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
                 className="w-1/2" />
             </div>
-            <Select required value={form.categoryId || ""}
-              onChange={(e) => setForm({ ...form, categoryId: Number(e.target.value) })}>
+            <Select required value={form.categoryId || ""} disabled={!!editingId}
+              onChange={(e) => setForm({ ...form, categoryId: Number(e.target.value), attributes: [] })}>
               <option value="">-- Chọn danh mục --</option>
               {categories?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
+            {editingId && <p className="muted text-[11px]">Danh mục không thể đổi sau khi tạo sản phẩm vì ràng buộc dữ liệu thuộc tính.</p>}
+            <CatalogProductFields categoryId={form.categoryId} value={form}
+              onChange={(patch) => setForm((current) => ({ ...current, ...patch }))} />
             <div>
               <input type="file" accept="image/*" onChange={onFileChange} className="text-sm" />
               {uploadImage.isPending && <span className="text-xs muted ml-2">Đang tải ảnh...</span>}
@@ -87,9 +107,7 @@ export function AdminProductsPage() {
               <Button disabled={createProduct.isPending || updateProduct.isPending} className="flex-1">
                 {editingId ? "Lưu thay đổi" : "Thêm sản phẩm"}
               </Button>
-              {editingId && (
-                <Button type="button" variant="ghost" onClick={resetForm}>Hủy</Button>
-              )}
+              {editingId && <Button type="button" variant="ghost" onClick={resetForm}>Hủy</Button>}
             </div>
           </form>
         </Card>
@@ -99,7 +117,7 @@ export function AdminProductsPage() {
           <div className="flex gap-2 mb-3">
             <Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)}
               placeholder="Tên danh mục mới" className="flex-1" />
-            <Button
+            <Button type="button"
               onClick={() => { if (newCategory.trim()) { createCategory.mutate({ name: newCategory.trim() }); setNewCategory(""); } }}
             >Thêm</Button>
           </div>
@@ -107,24 +125,26 @@ export function AdminProductsPage() {
             {categories?.map((c) => (
               <div key={c.id} className="flex items-center justify-between text-sm py-1">
                 <span>{c.name}</span>
-                <button onClick={() => deleteCategory.mutate(c.id)} className="text-rose-500 hover:underline text-xs">Xóa</button>
+                <button type="button" onClick={() => deleteCategory.mutate(c.id)} className="text-rose-500 hover:underline text-xs">Xóa</button>
               </div>
             ))}
           </div>
         </Card>
+
+        <AdminCatalogSettings categories={categories ?? []} />
       </div>
 
       <Card className="md:col-span-2 divide-y divide-slate-200 dark:divide-slate-800">
         {products?.items.map((p) => (
           <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
             <img src={p.imageUrl ?? "https://via.placeholder.com/60"} alt={p.name} className="w-14 h-14 rounded-lg object-cover" />
-            <div className="flex-1">
-              <div className="font-medium text-sm">{p.name}</div>
-              <div className="text-xs muted">{p.categoryName} · Tồn: {p.stock}</div>
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm truncate">{p.name}</div>
+              <div className="text-xs muted truncate">{p.categoryName} · {p.brandName ?? "Chưa có brand"} · SKU: {p.sku || "—"} · Tồn: {p.stock}</div>
             </div>
-            <span className="font-semibold text-brand-600 dark:text-brand-400 text-sm">${p.price.toFixed(2)}</span>
-            <button onClick={() => startEdit(p)} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">Sửa</button>
-            <button onClick={() => deleteProduct.mutate(p.id)} className="text-sm text-rose-500 hover:underline">Xóa</button>
+            <span className="font-semibold text-brand-600 dark:text-brand-400 text-sm">{"$" + p.price.toFixed(2)}</span>
+            <button type="button" onClick={() => startEdit(p)} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">Sửa</button>
+            <button type="button" onClick={() => deleteProduct.mutate(p.id)} className="text-sm text-rose-500 hover:underline">Xóa</button>
           </div>
         ))}
       </Card>

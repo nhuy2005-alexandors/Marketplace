@@ -8,13 +8,17 @@ import { apiError } from "../api/client";
 import { useAuth } from "../store/auth";
 import type { Product } from "../types";
 import { Button, Card, Input, Select, Textarea } from "../components/ui";
+import { CatalogProductFields } from "../components/CatalogProductFields";
 
-const EMPTY_FORM: ProductInput = { name: "", description: "", price: 0, stock: 0, imageUrl: "", categoryId: 0 };
+const EMPTY_FORM: ProductInput = {
+  name: "", description: "", price: 0, stock: 0, imageUrl: "", categoryId: 0,
+  sku: "", attributes: [], clearBrand: false,
+};
 
 export function SellerProductsPage() {
   const sellerId = useAuth((s) => s.user?.id);
   const sellerStatus = useAuth((s) => s.user?.sellerStatus);
-  useMe(); // đồng bộ sellerStatus mới nhất (vd vừa được Admin duyệt) vào store
+  useMe();
   const { data: categories } = useCategories();
   const { data: products } = useProducts({ sellerId, pageSize: 50 });
   const createProduct = useCreateProduct();
@@ -32,7 +36,7 @@ export function SellerProductsPage() {
     if (!newCategory.trim()) return;
     try {
       const cat = await createCategory.mutateAsync({ name: newCategory.trim() });
-      setForm((f) => ({ ...f, categoryId: cat.id }));
+      setForm((f) => ({ ...f, categoryId: cat.id, attributes: [] }));
       setNewCategory("");
     } catch (err) {
       setError(apiError(err));
@@ -41,16 +45,28 @@ export function SellerProductsPage() {
 
   const startEdit = (p: Product) => {
     setEditingId(p.id);
-    setForm({ name: p.name, description: p.description, price: p.price, stock: p.stock, imageUrl: p.imageUrl, categoryId: p.categoryId });
+    setForm({
+      name: p.name, description: p.description, price: p.price, stock: p.stock,
+      imageUrl: p.imageUrl, categoryId: p.categoryId, sku: p.sku ?? "",
+      brandId: p.brandId ?? undefined, clearBrand: false,
+      attributes: (p.attributes ?? []).map((a) => ({
+        attributeDefinitionId: a.attributeDefinitionId,
+        valueText: a.valueText, valueNumber: a.valueNumber, valueBoolean: a.valueBoolean,
+      })),
+    });
   };
   const resetForm = () => { setEditingId(null); setForm(EMPTY_FORM); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    const body: ProductInput = { ...form, sku: form.sku?.trim() || undefined, attributes: form.attributes ?? [] };
     try {
-      if (editingId) await updateProduct.mutateAsync({ id: editingId, body: form });
-      else await createProduct.mutateAsync(form);
+      if (editingId) await updateProduct.mutateAsync({ id: editingId, body });
+      else {
+        const { clearBrand: _clearBrand, ...createBody } = body;
+        await createProduct.mutateAsync(createBody);
+      }
       resetForm();
     } catch (err) {
       setError(apiError(err));
@@ -71,7 +87,7 @@ export function SellerProductsPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 grid md:grid-cols-3 gap-6 animate-fade-in">
       <Card className="md:col-span-1 p-5 h-fit">
-        <h2 className="font-semibold mb-3">{editingId ? `Sửa sản phẩm #${editingId}` : "Thêm sản phẩm"}</h2>
+        <h2 className="font-semibold mb-3">{editingId ? "Sửa sản phẩm #" + editingId : "Thêm sản phẩm"}</h2>
         {sellerStatus === "Pending" && (
           <div className="rounded-2xl p-4 mb-3 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 text-sm border border-amber-200 dark:border-amber-500/20 flex items-start gap-2">
             <Clock className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
@@ -91,17 +107,19 @@ export function SellerProductsPage() {
               onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
               className="w-1/2" />
           </div>
-          <Select required value={form.categoryId || ""}
-            onChange={(e) => setForm({ ...form, categoryId: Number(e.target.value) })}>
+          <Select required value={form.categoryId || ""} disabled={!!editingId}
+            onChange={(e) => setForm({ ...form, categoryId: Number(e.target.value), attributes: [] })}>
             <option value="">-- Chọn danh mục --</option>
             {categories?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
+          {editingId && <p className="muted text-[11px]">Danh mục không thể đổi sau khi tạo sản phẩm vì ràng buộc dữ liệu thuộc tính.</p>}
           <div className="flex gap-2">
             <Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)}
-              placeholder="Hoặc tạo danh mục mới"
-              className="flex-1" />
+              placeholder="Hoặc tạo danh mục mới" className="flex-1" />
             <Button type="button" variant="ghost" onClick={addCategory} disabled={createCategory.isPending}>+ Danh mục</Button>
           </div>
+          <CatalogProductFields categoryId={form.categoryId} value={form}
+            onChange={(patch) => setForm((current) => ({ ...current, ...patch }))} />
           <div>
             <input type="file" accept="image/*" onChange={onFileChange} className="text-sm" />
             {uploadImage.isPending && <span className="text-xs muted ml-2">Đang tải ảnh...</span>}
@@ -109,12 +127,10 @@ export function SellerProductsPage() {
           </div>
           {error && <div className="text-rose-500 text-sm">{error}</div>}
           <div className="flex gap-2">
-            <Button disabled={createProduct.isPending || updateProduct.isPending || (sellerStatus === "Pending" && !editingId)} className="flex-1">
+            <Button disabled={createProduct.isPending || updateProduct.isPending || sellerStatus !== "Approved"} className="flex-1">
               {editingId ? "Lưu thay đổi" : "Thêm sản phẩm"}
             </Button>
-            {editingId && (
-              <Button type="button" variant="ghost" onClick={resetForm}>Hủy</Button>
-            )}
+            {editingId && <Button type="button" variant="ghost" onClick={resetForm}>Hủy</Button>}
           </div>
         </form>
       </Card>
@@ -126,13 +142,13 @@ export function SellerProductsPage() {
           {products?.items.map((p) => (
             <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
               <img src={p.imageUrl ?? "https://via.placeholder.com/60"} alt={p.name} className="w-14 h-14 rounded-lg object-cover" />
-              <div className="flex-1">
-                <div className="font-medium text-sm">{p.name}</div>
-                <div className="text-xs muted">{p.categoryName} · Tồn: {p.stock}</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm truncate">{p.name}</div>
+                <div className="text-xs muted truncate">{p.categoryName} · {p.brandName ?? "Chưa có brand"} · SKU: {p.sku || "—"} · Tồn: {p.stock}</div>
               </div>
-              <span className="font-semibold text-brand-600 dark:text-brand-400 text-sm">${p.price.toFixed(2)}</span>
-              <button onClick={() => startEdit(p)} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">Sửa</button>
-              <button onClick={() => deleteProduct.mutate(p.id)} className="text-sm text-rose-500 hover:underline">Xóa</button>
+              <span className="font-semibold text-brand-600 dark:text-brand-400 text-sm">{"$" + p.price.toFixed(2)}</span>
+              <button type="button" onClick={() => startEdit(p)} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">Sửa</button>
+              <button type="button" onClick={() => deleteProduct.mutate(p.id)} className="text-sm text-rose-500 hover:underline">Xóa</button>
             </div>
           ))}
         </Card>

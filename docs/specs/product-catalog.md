@@ -91,6 +91,14 @@ Only active, filterable AttributeDefinitions participate in filtering. Product s
 - TR_OrderItems_ProtectSnapshot validates ProductName/UnitPrice/SellerId against Product at insertion and prevents later changes to checkout snapshot fields.
 - The trigger does not prevent legitimate fulfillment-status changes.
 
-## 8. Explicit non-goals
+## 8. Frontend catalog vertical slice
+
+- Admin product form supports SKU, optional Brand and category-defined typed attributes.
+- Seller product form supports SKU, optional Brand and typed attributes for its selected category; sellers cannot manage Brand or AttributeDefinition definitions.
+- Admin catalog settings supports Brand create/update/delete and AttributeDefinition create/update/deactivate/delete. Deletion is rejected when referenced; deactivation is the safe path for definitions already used by products.
+- Public product cards/details show Brand/SKU/typed attributes, and product list supports server-side Brand filtering.
+- Product category is read-only while editing because it participates in the typed attribute composite key. Required attribute definitions are enforced by the backend; the UI marks them explicitly.
+
+## 9. Explicit non-goals
 
 No vector database, recommendation scoring, RAG logic, new database, dataset regeneration, product-image enrichment, currency conversion, or speculative ML infrastructure is part of this contract. USD is the accepted canonical catalog currency. MoMo FX remains a separate provider-boundary configuration and must be explicitly approved/set before real initiation.

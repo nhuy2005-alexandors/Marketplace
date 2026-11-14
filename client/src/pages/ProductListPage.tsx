@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { ArrowRight, Search, Ticket } from "lucide-react";
-import { useCategories, useProducts, type ProductFilters } from "../api/hooks";
+import { useBrands, useCategories, useProducts, type ProductFilters } from "../api/hooks";
 import { ProductCard } from "../components/ProductCard";
 import { PageHeader, Input, Select, Button, Spinner, EmptyState } from "../components/ui";
 
@@ -35,6 +35,7 @@ export function ProductListPage() {
   });
   const [searchInput, setSearchInput] = useState(urlSearch ?? "");
   const { data: categories } = useCategories();
+  const { data: brands } = useBrands();
   const { data, isLoading } = useProducts(filters);
 
   // sync when navbar search / category links change the URL
@@ -85,6 +86,14 @@ export function ProductListPage() {
             />
             <Button type="submit">Tìm</Button>
           </form>
+          <Select
+            className="w-auto"
+            value={filters.brandId ?? ""}
+            onChange={(e) => update({ brandId: e.target.value ? Number(e.target.value) : undefined })}
+          >
+            <option value="">Tất cả thương hiệu</option>
+            {brands?.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+          </Select>
           <Select
             className="w-auto"
             value={filters.sortBy ? `${filters.sortBy}:${filters.desc ? "desc" : "asc"}` : ""}

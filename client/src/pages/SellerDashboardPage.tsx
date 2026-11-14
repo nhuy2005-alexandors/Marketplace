@@ -46,7 +46,7 @@ export function SellerDashboardPage() {
         <StatCard icon={DollarSign} label="Doanh thu" value={`$${data.totalRevenue.toFixed(2)}`} accent="from-brand-500 to-brand-600" />
         <StatCard icon={Receipt} label="Đơn liên quan" value={data.totalOrders} accent="from-blue-500 to-blue-600" />
         <StatCard icon={Package} label="Sản phẩm" value={data.totalProducts} accent="from-amber-500 to-amber-600" />
-        <StatCard icon={Users} label="Khách hàng (toàn sàn)" value={data.totalCustomers} accent="from-emerald-500 to-emerald-600" />
+        <StatCard icon={Users} label="Khách hàng đã mua" value={data.totalCustomers} accent="from-emerald-500 to-emerald-600" />
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
