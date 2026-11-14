@@ -19,6 +19,8 @@ param(
     [switch]$NoEvidenceOnly,
     [switch]$EvidenceStrengthReport,
     [switch]$EvidenceFeatureReport,
+    [switch]$OwnerReviewedOnly,
+    [string]$OwnerReviewedQueriesPath,
     [switch]$AllowEmbeddingCall,
     [switch]$UseFakeEmbedder,
     [ValidateRange(0,1000000)][int]$ExpectedDocumentChunks = 1395
@@ -30,7 +32,8 @@ Add-Type -AssemblyName System.Data
 . (Join-Path $PSScriptRoot 'EvaluationResilience.ps1')
 . (Join-Path $PSScriptRoot 'EvaluationMetrics.ps1')
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
-if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and -not $EvidenceStrengthReport -and -not $EvidenceFeatureReport -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
+if($OwnerReviewedOnly -and ($LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly -or $AuthorK05Only -or $NoEvidenceOnly -or $EvidenceStrengthReport -or $EvidenceFeatureReport -or $Diagnostics -or -not [string]::IsNullOrWhiteSpace($ExplainQuery))){throw '-OwnerReviewedOnly runs by itself; cache mode is enabled automatically.'}
+if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and -not $EvidenceStrengthReport -and -not $EvidenceFeatureReport -and -not $OwnerReviewedOnly -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
 if ($AuthorK05Only -and ($LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly)) { throw '-AuthorK05Only must run by itself (it may be combined with -DryRunFromCache).' }
 if($NoEvidenceOnly -and ($AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-NoEvidenceOnly cannot be combined with K-05, diagnostics, development, holdout, or lexical-only modes.'}
 if($EvidenceStrengthReport -and ($AllowEmbeddingCall -or $NoEvidenceOnly -or $AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-EvidenceStrengthReport is cache-only and runs by itself; it never embeds or evaluates holdout metrics.'}
@@ -41,7 +44,7 @@ if ($Diagnostics) {
     if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw '-Diagnostics requires a local cache-only dry-run fixture at -DryRunDataPath (default: obj/rag-dryrun-data.json).' }
     $DryRunFromCache = $true
 }
-if (($NoEvidenceOnly -or $EvidenceStrengthReport -or $EvidenceFeatureReport -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and -not $DryRunFromCache) {
+if (($NoEvidenceOnly -or $EvidenceStrengthReport -or $EvidenceFeatureReport -or $OwnerReviewedOnly -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and -not $DryRunFromCache) {
     if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
     if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw 'Explain/no-evidence/evidence feature modes require the local obj/rag-dryrun-data.json fixture.' }
     $DryRunFromCache = $true
@@ -141,14 +144,21 @@ if ($DryRunFromCache) {
         [pscustomobject]@{id='smoke-headphones-price';query='headphones under $100';group='smoke_known';filters=@{MaxPrice=100}},
         [pscustomobject]@{id='smoke-wireless-headset';query='wireless headset';group='smoke_known'}
     )
-    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif($EvidenceStrengthReport){@($development.query)+@($authorK05Fixtures.query)+@($noEvidenceRows.query)}elseif($EvidenceFeatureReport){@($development.query)+@($noEvidenceRows.query)+@($naturalRows.query)+@($authorK05Fixtures.query)+@($smokeRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
+    $ownerReviewedPath = if([string]::IsNullOrWhiteSpace($OwnerReviewedQueriesPath)){Join-Path $RepoRoot 'docs/rag-evaluation/RAG_OWNER_REVIEWED_QUERIES.jsonl'}else{$OwnerReviewedQueriesPath}
+    $ownerReviewedRows = if(Test-Path -LiteralPath $ownerReviewedPath){@(Get-Content -LiteralPath $ownerReviewedPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })}else{@()}
+    $ownerConfirmedRows = @($ownerReviewedRows | Where-Object { $_.owner_confirmed -eq $true })
+    if($OwnerReviewedOnly){
+        . (Join-Path $PSScriptRoot 'DeduplicatedEvaluation.ps1')
+        $ownerConfirmedRows = Get-EvaluationUniqueRows -Rows $ownerConfirmedRows -SplitName 'owner-reviewed'
+    }
+    $allQueries = if($OwnerReviewedOnly){@($ownerConfirmedRows.query)}elseif($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif($EvidenceStrengthReport){@($development.query)+@($authorK05Fixtures.query)+@($noEvidenceRows.query)}elseif($EvidenceFeatureReport){@($development.query)+@($noEvidenceRows.query)+@($naturalRows.query)+@($authorK05Fixtures.query)+@($smokeRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
     $queryCache = Read-QueryVectorCache -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions)
     $script:TrackRankTiming = [bool]$DryRunTrackRankTiming
     $script:RankTimes = [System.Collections.Generic.List[double]]::new()
     $missingRequested=@($allQueries | Where-Object { -not $queryCache.ContainsKey((Get-QueryVectorCacheKey ([string]$_) $dry.modelName ([int]$dry.dimensions))) } | Sort-Object -Unique)
     $queryBatches=[int][Math]::Ceiling($missingRequested.Count/16.0)
     if($missingRequested.Count -gt 0 -and -not $AllowEmbeddingCall -and -not $Diagnostics){
-        Write-Output ('CACHE_MISS_FORECAST mode={0} queries={1} missing_vectors={2} estimated_batches={3} estimated_api_calls={4} cache_written=FALSE' -f $(if($EvidenceFeatureReport){'EvidenceFeatureReport'}elseif($EvidenceStrengthReport){'EvidenceStrengthReport'}elseif($NoEvidenceOnly){'NoEvidenceOnly'}elseif($ExplainQuery){'ExplainQuery'}elseif($AuthorK05Only){'AuthorK05Only'}else{'DryRunFromCache'}),$allQueries.Count,$missingRequested.Count,$queryBatches,$queryBatches)
+        Write-Output ('CACHE_MISS_FORECAST mode={0} queries={1} missing_vectors={2} estimated_batches={3} estimated_api_calls={4} cache_written=FALSE' -f $(if($OwnerReviewedOnly){'OwnerReviewedOnly'}elseif($EvidenceFeatureReport){'EvidenceFeatureReport'}elseif($EvidenceStrengthReport){'EvidenceStrengthReport'}elseif($NoEvidenceOnly){'NoEvidenceOnly'}elseif($ExplainQuery){'ExplainQuery'}elseif($AuthorK05Only){'AuthorK05Only'}else{'DryRunFromCache'}),$allQueries.Count,$missingRequested.Count,$queryBatches,$queryBatches)
         exit 0
     }
     if($missingRequested.Count -gt 0){
@@ -161,6 +171,7 @@ if ($DryRunFromCache) {
     if($Diagnostics) { }
     elseif($ExplainQuery){ }
     elseif($EvidenceStrengthReport){ }
+    elseif($OwnerReviewedOnly){for($i=0;$i -lt $ownerConfirmedRows.Count;$i++){$vectorMap[[string]$ownerConfirmedRows[$i].id]=$queryVectors[$i]}}
     elseif($NoEvidenceOnly){for($i=0;$i -lt $noEvidenceRows.Count;$i++){$vectorMap[[string]$noEvidenceRows[$i].id]=$queryVectors[$i]}}
     elseif($AuthorK05Only){for ($i=0; $i -lt $authorK05Fixtures.Count; $i++) { $vectorMap[[string]$authorK05Fixtures[$i].id] = $queryVectors[$i] }}
     else {
@@ -173,6 +184,13 @@ if ($DryRunFromCache) {
         foreach($row in $authorK05Fixtures){$key=Get-QueryVectorCacheKey ([string]$row.query) $dry.modelName ([int]$dry.dimensions);if($queryCache.ContainsKey($key)){$vectorMap[[string]$row.id]=[single[]]$queryCache[$key].vector}else{$missingK05Vectors++}}
     }
     Write-Output ('DryRunCacheForecast missing_chunks=0 missing_queries={0} estimated_api_calls=0 chunks={1} queries={2}' -f $(if($Diagnostics){$missingK05Vectors}else{0}),$chunks.Count,$allQueries.Count)
+    if($OwnerReviewedOnly){
+        if($ownerConfirmedRows.Count -eq 0){Write-Output 'OWNER_REVIEWED_ONLY chưa có dữ liệu; excluded_from_all_other_metrics=TRUE; cache_only=TRUE';exit 0}
+        $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
+        $ownerMetric=Get-DeduplicatedMetrics $ownerConfirmedRows $vectorMap $chunks.ToArray() $true ([double]$selection.threshold) ([double]$selection.semanticWeight)
+        Write-Output ('OWNER_REVIEWED_ONLY raw={0} unique_queries={1} answerable={2} no_result={3} R5={4:P2} MRR10={5:P2} no_result_false_positive_final_visible={6:P2} answerable_coverage={7:P2} threshold={8} weight={9}; separated=TRUE; cache_only=TRUE' -f $ownerMetric.RawRows,$ownerMetric.UniqueQueries,$ownerMetric.Answerable,$ownerMetric.NoResult,$ownerMetric.RecallAt5,$ownerMetric.MRRAt10,$ownerMetric.NoResultFalsePositiveRate,$ownerMetric.AnswerableCoverage,$selection.threshold,$selection.semanticWeight)
+        exit 0
+    }
     if($EvidenceStrengthReport){
         $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
         $report=New-Object 'System.Collections.Generic.List[object]'

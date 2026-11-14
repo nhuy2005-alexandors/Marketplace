@@ -10,7 +10,7 @@
 |---|---|---|
 | Integration | **PASS (owner-reported at `eb05190`)** | Owner reports API build OK and `dotnet test` Passed 129 / Failed 0 / Skipped 0. At `7f01c18`, owner reported 128/0/0. |
 | Frontend | **PASS (owner-reported at `eb05190`)** | Owner reports frontend build and lint passed. Command transcripts/artifacts were not provided. |
-| Localhost | **PASS một phần** | Guest/no-auth path was tried; authenticated login/account-switching has not been tested. At `eb05190`, owner reports 6/15 intentional rate-limit responses were 429 and the 413 case returned HTTP 413. Full smoke Summary and per-case list were not included in the supplied results, so the overall `eb05190` guest-smoke total is **chưa kiểm chứng**. See the run history below. |
+| Localhost | **PASS một phần** | Owner-reported guest smoke at `eb05190`: PASS=16, FAIL=0, KNOWN_LIMITATION=1; intentional rate-limit 429s and HTTP 413 behaved as expected. Authenticated login/account-switching has not been tested. |
 | Database safety | **PASS (owner-reported)** | Counts unchanged across repeated API runs, with SELECT-only logs and zero INSERT/UPDATE/DELETE. Owner supplied the counts below. No DB was accessed for this documentation change. |
 | Manual UI | **Owner-reported PASS** | Owner reports the UI was tried and looked good. No screenshots were supplied; account login/switching was not tried. See [MANUAL_FRONTEND_TEST_CHECKLIST.md](MANUAL_FRONTEND_TEST_CHECKLIST.md) for remaining reproducible evidence. |
 | Integrated AI | **CHƯA PASS** | Requires Khánh to merge the shared Recommendation contract and the owner to complete integrated acceptance. |
@@ -21,7 +21,7 @@ Guest smoke run history (all owner-reported):
 |---|---|---|
 | `69c7fc1` | 15/16 | Sole failure was a script assertion requiring `answerSource` on HTTP 413; API returned HTTP 413 with the expected safe body. |
 | `7f01c18` | 15/16 | Sole failure was strict-empty no-result, expected under Direction D because nearby suggestions remain in the response. |
-| `eb05190` | Summary/per-case list **chưa được cung cấp**; known observations: 6/15 intentional rate-limit calls returned 429, and payload-too-large returned HTTP 413. | The status of the full suite cannot be inferred from these partial observations. |
+| `eb05190` | **PASS=16, FAIL=0, KNOWN_LIMITATION=1** | Owner-reported final summary; intentional rate-limit 429s behaved as expected and HTTP 413 was correct. |
 
 ## Retrieval and evaluation evidence
 
@@ -62,7 +62,7 @@ Owner-reported database snapshot (unchanged over multiple API runs): `Database=E
 
 1. Confirm the working branch/commit and keep the Gemini key in the server secret store; do not paste it into logs or reports.
 2. Verify `ECommerceDb_Dev` identity and record read-only before/after counts and migration history. Start the API only after confirming its migration behavior is safe; verify API logs remain SELECT-only for the smoke scenarios.
-3. Complete the `eb05190` guest-smoke evidence by recording its actual final Summary and per-case results; the supplied report currently contains only the 6/15 rate-limit count and HTTP 413 observation. The 413 case should pass on HTTP 413 with a safe error body and must not require `answerSource`; record whether other cases were retried after 429.
+3. Preserve the owner-reported `eb05190` final summary (PASS=16 / FAIL=0 / KNOWN_LIMITATION=1). The per-case transcript was not supplied; attach it if reproducible case-by-case provenance is needed. The 413 case passed on HTTP 413 with a safe error body, and the intentional rate-limit case returned 429 as expected.
 4. Run the authenticated user flow separately and capture reproducible notes or screenshots for the manual UI check. Record browser/device, account role, relevant query/filter scenarios, and any failures.
 5. Ask Khánh to merge the shared Recommendation contract into the agreed integration commit. Confirm both lanes use the same commit before declaring Integrated AI PASS.
 6. Generation is disabled by default. If owner-authorized to probe, run `powershell -NoProfile -File .\scripts\local-acceptance\gemini-generation-probe.ps1 -Models 'model-a,model-b' -Thinking none` (or `low`/`medium` as explicitly selected), review `models.get` capabilities and safe quota fields, and leave pacing enabled. Do not put a key on the command line. Re-enable generation only after the owner approves quota/data terms and a generated response is verified.
@@ -73,9 +73,9 @@ Owner-reported database snapshot (unchanged over multiple API runs): `Database=E
 
 - Owner-reported at `eb05190`: build OK; `dotnet test` Passed 129 / Failed 0 / Skipped 0; frontend build and lint passed. At `7f01c18`, owner reported 128/0/0. Owner also reports manual UI looked good, no new migration (11 total), DB counts unchanged over repeated API runs with SELECT-only logs, no tracked secret file except the sample `appsettings.Local.json.example`, and `.env.example` unchanged.
 - Owner-reported at `3db14e5`: exactly one holdout run with the metrics shown above and one 30-query K-05 reporting-only run. Do not rerun `-HoldoutFinal` merely to reproduce these values.
-- Owner-reported smoke: `69c7fc1` 15/16 with the 413 metadata assertion bug; `7f01c18` 15/16 with strict-empty under Direction D; `eb05190` has 6/15 expected 429s in the intentional limiter case and a correct 413, but the owner did not include the final Summary or per-case list.
+- Owner-reported smoke: `69c7fc1` 15/16 with the 413 metadata assertion bug; `7f01c18` 15/16 with strict-empty under Direction D; `eb05190` PASS=16 / FAIL=0 / KNOWN_LIMITATION=1, including expected limiter 429s and correct HTTP 413. The owner supplied the final summary but not a per-case transcript.
 - Repository-recorded offline measurements: [RAG implementation log](RAG_IMPLEMENTATION_LOG.md), [assistant API delta](OPENAPI_ASSISTANT_DELTA.md), and the fixtures under `docs/rag-evaluation/`.
-- Still not supplied: frontend command transcripts, DB log/snapshot artifacts, UI screenshots, full `eb05190` smoke Summary/per-case list, and authenticated localhost acceptance. These do not negate the owner-reported pass results but remain absent as reproducible artifacts.
+- Still not supplied: frontend command transcripts, DB log/snapshot artifacts, UI screenshots, per-case `eb05190` smoke transcript, and authenticated localhost acceptance. The owner-reported smoke summary is available; these missing artifacts limit independent reproduction.
 - The owner has now reported build and .NET tests at `eb05190` after the generation-off change: 129/0/0. This supersedes the earlier note that the new C# unit test lacked owner-side validation.
 
 ## Post-`eb05190` scope-guard change
@@ -83,3 +83,11 @@ Owner-reported database snapshot (unchanged over multiple API runs): `Database=E
 The current integration work adds a deterministic, rule-based RAG intent guard and additive response field `intent`. It is not yet owner-reviewed or integrated with Khánh's lane. Offline PowerShell 5.1 classification over the recorded fixture corpora found zero guarded answerable rows in development (88), holdout (22), K-05 (30), natural queries (40), and answerable smoke cases; the dedicated 80-row authored intent fixture had zero label mismatches. The full list of non-product classifications is in [the intent classification report](rag-evaluation/INTENT_CLASSIFICATION_REPORT_20261114.md). This is not a holdout metric run. The 17 smoke inputs include the original 16 plus one product near-match; the prompt-extraction query is intentionally classified `blocked`.
 
 The rule set can miss unusual wording, K-11 remains partially mitigated, and the authored labels have not been reviewed by a person. “MiniShop” and support wording are provisional. The HttpListener fake API test was attempted in Windows PowerShell 5.1 and skipped because the sandbox denied loopback access. The 175-query golden fingerprint passed unchanged; PowerShell 5.1 local acceptance/fake dry-run and frontend lint passed. `dotnet test`/build are **không chạy được** because NU1900 cannot reach NuGet before compilation; `git diff --check` passed. The prior owner-reported Integration PASS at `eb05190` does not validate this change; integrated acceptance remains pending.
+
+## Deduplicated evaluation and owner-reviewed labels
+
+Cache-only analysis against the baseline runtime/cache at `86fb0dc` uses exact `RetrievalScoring.Normalize`: 120 raw V2 rows become 109 unique queries; 11 duplicate groups/22 rows; no conflicting Expected Product ID sets; no normalized-query leakage between development and holdout. Development is 96/88 raw/unique; holdout is 24/21. The holdout duplicates are `RAG-V2-031/041`, `RAG-V2-036/046`, and `RAG-V2-096/106`. Deduplicated metrics and formulas are in [RAG_EVALUATION_REPORT.md](RAG_EVALUATION_REPORT.md), alongside unchanged historical raw-row results. Holdout has already been viewed; it is not pristine. Threshold `0.59` / weight `0.25` were chosen from development at `3db14e5`.
+
+`RAG_OWNER_REVIEWED_QUERIES.jsonl` contains 12 drafts and zero confirmed rows. `-OwnerReviewedOnly` returns **chưa có dữ liệu** and keeps this set out of all other metrics. `label-check.ps1` and `owner-query-candidates.ps1` are owner-side read-only tools restricted to `ECommerceDb_Dev`; no DB access was made in this update. The current synthetic query file has no explicit predicate field. Non-SKU lexical checks are diagnostics and cannot certify semantic/category/attribute relevance.
+
+Owner-reported at `eb05190` for this update: `dotnet test` Passed 129 / Failed 0 / Skipped 0; guest smoke PASS=16 / FAIL=0 / KNOWN_LIMITATION=1; database counts unchanged. These results were not rerun in this sandbox.
