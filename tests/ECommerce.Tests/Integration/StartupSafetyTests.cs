@@ -47,7 +47,7 @@ public class StartupSafetyTests
         var exception = Record.Exception(() => factory.CreateClient());
 
         Assert.NotNull(exception);
-        Assert.Contains("isolated LocalDB", exception!.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MSSQLLocalDB/ECommerceDb target is forbidden", exception!.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
 }
