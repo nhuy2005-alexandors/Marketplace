@@ -14,7 +14,9 @@ public class RefundServiceTests
     private static async Task<Seed> SeedPaidOrderAsync(
         Infrastructure.Persistence.AppDbContext db,
         PaymentMethod method = PaymentMethod.CreditCard,
-        FulfillmentStatus fulfillment = FulfillmentStatus.Pending)
+        FulfillmentStatus fulfillment = FulfillmentStatus.Pending,
+        decimal? providerAmount = 200m,
+        string? providerCurrency = "USD")
     {
         var customer = new User
         {
@@ -77,6 +79,9 @@ public class RefundServiceTests
             Method = method,
             Status = PaymentStatus.Completed,
             TransactionId = "PAY-ORIGINAL-001",
+            ProviderKey = providerCurrency == "VND" ? "momo" : null,
+            ProviderAmount = providerAmount,
+            ProviderCurrency = providerCurrency,
             PaidAt = DateTime.UtcNow
         };
         db.Orders.Add(order);
@@ -99,6 +104,39 @@ public class RefundServiceTests
         result.Value!.Amount.Should().Be(200m);
         result.Value.Status.Should().Be(nameof(RefundStatus.Pending));
         (await db.Refunds.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Request_ReturnsOriginalProviderCaptureAmountAndCurrency()
+    {
+        using var db = TestDb.Create();
+        var seed = await SeedPaidOrderAsync(db, PaymentMethod.EWallet,
+            providerAmount: 5_000_000m, providerCurrency: "VND");
+
+        var result = await new RefundService(db).RequestAsync(
+            seed.CustomerId, new RequestRefundRequest(seed.OrderId, "Original MoMo capture check."));
+
+        result.Success.Should().BeTrue();
+        result.Value!.Amount.Should().Be(200m);
+        result.Value.ProviderAmount.Should().Be(5_000_000m);
+        result.Value.ProviderCurrency.Should().Be("VND");
+        result.Value.PaymentTransactionId.Should().Be("PAY-ORIGINAL-001");
+        result.Value.PaymentMethod.Should().Be(nameof(PaymentMethod.EWallet));
+        result.Value.PaymentProvider.Should().Be("momo");
+    }
+
+    [Fact]
+    public async Task Request_FailsClosedWhenProviderCaptureDetailsAreMissing()
+    {
+        using var db = TestDb.Create();
+        var seed = await SeedPaidOrderAsync(db, providerAmount: null, providerCurrency: null);
+
+        var result = await new RefundService(db).RequestAsync(
+            seed.CustomerId, new RequestRefundRequest(seed.OrderId, "Missing provider capture data."));
+
+        result.Success.Should().BeFalse();
+        result.ErrorType.Should().Be(ECommerce.Application.Common.ErrorType.Conflict);
+        (await db.Refunds.CountAsync()).Should().Be(0);
     }
 
     [Fact]

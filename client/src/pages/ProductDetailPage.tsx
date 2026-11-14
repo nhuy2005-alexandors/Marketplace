@@ -46,6 +46,10 @@ export function ProductDetailPage() {
         <div className="space-y-4">
           <div className="muted text-xs">{product.categoryName}</div>
           <h1 className="text-2xl font-bold tracking-tight">{product.name}</h1>
+          <div className="muted text-xs space-y-0.5">
+            {product.brandName && <div>Thương hiệu: {product.brandName}</div>}
+            {product.sku && <div>SKU: {product.sku}</div>}
+          </div>
           <div className="flex items-center gap-2">
             <Stars value={product.averageRating} size={16} />
             <span className="muted text-sm">({product.reviewCount} đánh giá)</span>
@@ -55,6 +59,26 @@ export function ProductDetailPage() {
             ${product.price.toFixed(2)}
           </div>
           <div className="muted text-sm">Còn lại: {product.stock}</div>
+          {!!product.attributes?.length && (
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-3">
+              <h2 className="font-semibold text-sm mb-2">Thông số kỹ thuật</h2>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                {product.attributes.map((attribute) => {
+                  const displayValue = attribute.dataType === 0
+                    ? attribute.valueText
+                    : attribute.dataType === 1
+                      ? String(attribute.valueNumber ?? "") + (attribute.unit ? " " + attribute.unit : "")
+                      : attribute.valueBoolean === true ? "Có" : attribute.valueBoolean === false ? "Không" : "—";
+                  return (
+                    <div key={attribute.attributeDefinitionId} className="min-w-0">
+                      <dt className="muted text-xs">{attribute.displayName}</dt>
+                      <dd className="font-medium break-words">{displayValue}</dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </div>
+          )}
           {isAuthed && (
             <div className="flex items-center gap-3">
               <Input

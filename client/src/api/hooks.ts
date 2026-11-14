@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
-  AuthResponse, Cart, Category, Coupon, CouponPreview, Dashboard, Order, Paged, PayResult,
-  OrderSplit, Product, Refund, Review, SellerApplication, SellerShop, User, WishlistItem,
+  AuthResponse, AttributeDefinition, Brand, Cart, Category, Coupon, CouponPreview, Dashboard,
+  Order, Paged, PayResult, OrderSplit, Product, ProductAttributeFilter, ProductAttributeInput, Refund, Review,
+  SellerApplication, SellerShop, User, WishlistItem,
 } from "../types";
 import { useAuth } from "../store/auth";
 
@@ -45,13 +46,30 @@ export interface ProductFilters {
   desc?: boolean;
   page?: number;
   pageSize?: number;
+  brandId?: number;
+  inStockOnly?: boolean;
+  attributeFilters?: ProductAttributeFilter[];
 }
 
 export function useProducts(filters: ProductFilters) {
   return useQuery({
     queryKey: ["products", filters],
-    queryFn: () =>
-      api.get<Paged<Product>>("/products", { params: filters }).then((r) => r.data),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (key === "attributeFilters" || value === undefined || value === null) continue;
+        params.set(key, String(value));
+      }
+      filters.attributeFilters?.forEach((filter, index) => {
+        const prefix = "AttributeFilters[" + index + "].";
+        params.set(prefix + "AttributeDefinitionId", String(filter.attributeDefinitionId));
+        if (filter.valueText !== undefined) params.set(prefix + "ValueText", filter.valueText);
+        if (filter.minValue !== undefined) params.set(prefix + "MinValue", String(filter.minValue));
+        if (filter.maxValue !== undefined) params.set(prefix + "MaxValue", String(filter.maxValue));
+        if (filter.valueBoolean !== undefined) params.set(prefix + "ValueBoolean", String(filter.valueBoolean));
+      });
+      return api.get<Paged<Product>>("/products", { params }).then((r) => r.data);
+    },
   });
 }
 
@@ -68,6 +86,93 @@ export function useSellerShop(id: number) {
     queryKey: ["seller-shop", id],
     queryFn: () => api.get<SellerShop>(`/sellers/${id}/shop`).then((r) => r.data),
     enabled: !!id,
+  });
+}
+
+export function useBrands() {
+  return useQuery({
+    queryKey: ["brands"],
+    queryFn: () => api.get<Brand[]>("/brands").then((r) => r.data),
+  });
+}
+
+export function useCreateBrand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; slug?: string; description?: string }) =>
+      api.post<Brand>("/brands", body).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["brands"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+}
+
+export function useUpdateBrand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: { name: string; slug?: string; description?: string } }) =>
+      api.put<Brand>("/brands/" + id, body).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["brands"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+}
+
+export function useDeleteBrand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.delete("/brands/" + id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["brands"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+}
+
+export function useCatalogAttributes(categoryId?: number, includeInactive = false) {
+  return useQuery({
+    queryKey: ["catalog-attributes", categoryId, includeInactive],
+    queryFn: () => api.get<AttributeDefinition[]>("/catalogattributes", {
+      params: { ...(categoryId ? { categoryId } : {}), ...(includeInactive ? { includeInactive: true } : {}) },
+    }).then((r) => r.data),
+    enabled: !!categoryId,
+  });
+}
+
+export function useCreateAttributeDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Omit<AttributeDefinition, "id">) =>
+      api.post<AttributeDefinition>("/catalogattributes", body).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["catalog-attributes"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+}
+
+export function useUpdateAttributeDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Omit<AttributeDefinition, "id"> }) =>
+      api.put<AttributeDefinition>("/catalogattributes/" + id, body).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["catalog-attributes"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+}
+
+export function useDeleteAttributeDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.delete("/catalogattributes/" + id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["catalog-attributes"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
   });
 }
 
@@ -102,6 +207,10 @@ export interface ProductInput {
   stock: number;
   imageUrl?: string;
   categoryId: number;
+  sku?: string;
+  brandId?: number;
+  attributes?: ProductAttributeInput[];
+  clearBrand?: boolean;
 }
 
 export function useCreateProduct() {

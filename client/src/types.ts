@@ -15,6 +15,54 @@ export interface AuthResponse {
   user: User;
 }
 
+export type CatalogAttributeType = 0 | 1 | 2; // Text | Number | Boolean
+
+export interface Brand {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string | null;
+}
+
+export interface AttributeDefinition {
+  id: number;
+  categoryId: number;
+  code: string;
+  displayName: string;
+  dataType: CatalogAttributeType;
+  unit?: string;
+  isRequired: boolean;
+  isFilterable: boolean;
+  isComparable: boolean;
+  isActive: boolean;
+}
+
+export interface ProductAttributeInput {
+  attributeDefinitionId: number;
+  valueText?: string;
+  valueNumber?: number;
+  valueBoolean?: boolean;
+}
+
+export interface ProductAttributeFilter {
+  attributeDefinitionId: number;
+  valueText?: string;
+  minValue?: number;
+  maxValue?: number;
+  valueBoolean?: boolean;
+}
+
+export interface ProductAttribute {
+  attributeDefinitionId: number;
+  code: string;
+  displayName: string;
+  dataType: CatalogAttributeType;
+  unit?: string;
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueBoolean?: boolean | null;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -28,6 +76,10 @@ export interface Product {
   sellerShopName: string;
   averageRating: number;
   reviewCount: number;
+  sku?: string;
+  brandId?: number | null;
+  brandName?: string | null;
+  attributes?: ProductAttribute[];
 }
 
 export interface Category {
@@ -131,6 +183,11 @@ export interface Refund {
   externalReference?: string;
   note?: string;
   processedByName?: string;
+  providerAmount?: number | null;
+  providerCurrency?: string | null;
+  paymentMethod?: string | null;
+  paymentProvider?: string | null;
+  paymentTransactionId?: string | null;
 }
 
 export interface PayResult {

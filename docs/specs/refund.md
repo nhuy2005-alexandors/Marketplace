@@ -23,7 +23,7 @@ Customer chỉ được tạo yêu cầu khi đồng thời thỏa mãn:
 
 Refund là hoàn tiền **toàn bộ**: `Refund.Amount = Payment.Amount = Order.Total`, tất cả đều là USD canonical. Không cho client tự truyền số tiền.
 
-Với MoMo, `Payment.ProviderAmount`/`ProviderCurrency` giữ nguyên số tiền capture theo provider (VND). Không quy đổi lại theo tỷ giá tại thời điểm refund. Refund MVP hiện chỉ lưu external reference/note, chưa lưu hoặc xác minh amount/currency thực tế của khoản chuyển tiền bên ngoài; Admin phải đối chiếu capture gốc trước khi xác nhận.
+Với MoMo, `Payment.ProviderAmount`/`ProviderCurrency` giữ nguyên số tiền capture theo provider (VND). Không quy đổi lại theo tỷ giá tại thời điểm refund. Refund API trả về capture gốc, currency, payment method, provider key và payment transaction ID để Admin đối chiếu. Request/complete đều fail-closed nếu thiếu provider capture amount/currency. Refund MVP vẫn chưa lưu hoặc xác minh actual external payout amount/currency; Admin phải đối chiếu capture gốc và chứng từ chuyển tiền bên ngoài trước khi xác nhận.
 
 COD bị loại khỏi Refund MVP vì hệ thống chưa ghi nhận được sự kiện thu tiền COD thực tế. Đơn COD chưa fulfillment có thể hủy mà không tạo Refund. Hỗ trợ hoàn COD sau thu tiền cần một collection event riêng, ngoài phạm vi này.
 
@@ -82,7 +82,7 @@ Unique indexes trên OrderId và PaymentId ngăn nhiều yêu cầu hoàn toàn 
 
 ## Giới hạn được công bố
 
-- Admin thực hiện chuyển tiền qua kênh ngoài hệ thống; ứng dụng chỉ lưu chứng từ tham chiếu và số tiền Refund theo USD canonical. Actual external payout amount/currency chưa được lưu hoặc xác minh. Trạng thái Completed không phải bằng chứng gateway đã xác nhận.
+- Admin thực hiện chuyển tiền qua kênh ngoài hệ thống; ứng dụng lưu external reference/note và hiển thị capture gốc theo provider-native currency. Actual external payout amount/currency chưa được lưu hoặc xác minh. Trạng thái Completed không phải bằng chứng gateway đã xác nhận.
 - Không tự động gọi MoMo refund API.
 - Không partial refund, không return-after-delivery, không refund cho đơn có item Shipped/Delivered.
 - COD không được refund cho đến khi hệ thống có collection event xác thực tiền đã thu.

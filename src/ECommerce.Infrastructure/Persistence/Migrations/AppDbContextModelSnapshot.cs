@@ -310,6 +310,7 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
                     b.ToTable("Orders", null, t =>
                         {
                             t.HasCheckConstraint("CK_Orders_Discount", "[DiscountAmount] >= 0");
+                            t.HasCheckConstraint("CK_Orders_Status", "[Status] IN (0, 1, 2, 3, 4, 5)");
                         });
                 });
 
@@ -366,6 +367,8 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
                     b.ToTable("OrderItems", null, t =>
                         {
                             t.HasCheckConstraint("CK_OrderItems_Amounts", "[UnitPrice] >= 0 AND [Quantity] > 0");
+                            t.HasCheckConstraint("CK_OrderItems_Status", "[Status] IN (0, 1, 2, 3)");
+                            t.HasTrigger("TR_OrderItems_ProtectSnapshot");
                         });
                 });
 
@@ -455,6 +458,8 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
                     b.ToTable("Payments", null, t =>
                         {
                             t.HasCheckConstraint("CK_Payments_Amount", "[Amount] >= 0");
+                            t.HasCheckConstraint("CK_Payments_Status", "[Status] IN (0, 1, 2, 3, 4)");
+                            t.HasCheckConstraint("CK_Payments_Method", "[Method] IN (0, 1, 2, 3)");
                         });
                 });
 
@@ -578,6 +583,12 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "CategoryId");
 
                     b.HasIndex("AttributeDefinitionId", "CategoryId", "DataType");
+
+                    b.HasIndex("AttributeDefinitionId", "ValueNumber")
+                        .HasFilter("[ValueNumber] IS NOT NULL");
+
+                    b.HasIndex("AttributeDefinitionId", "ValueBoolean")
+                        .HasFilter("[ValueBoolean] IS NOT NULL");
 
                     b.ToTable("ProductAttributeValues", null, t =>
                         {
@@ -878,6 +889,12 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ECommerce.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("SellerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Order");
 
                     b.Navigation("Product");
@@ -923,7 +940,7 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("ECommerce.Domain.Entities.ProductAttributeValue", b =>
                 {
                     b.HasOne("ECommerce.Domain.Entities.Product", "Product")
-                        .WithMany()
+                        .WithMany("AttributeValues")
                         .HasForeignKey("ProductId", "CategoryId")
                         .HasPrincipalKey("Id", "CategoryId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -1036,6 +1053,8 @@ namespace ECommerce.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("ECommerce.Domain.Entities.Product", b =>
                 {
                     b.Navigation("Reviews");
+
+                    b.Navigation("AttributeValues");
                 });
 
             modelBuilder.Entity("ECommerce.Domain.Entities.User", b =>

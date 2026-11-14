@@ -14,35 +14,30 @@ public class DashboardService : IDashboardService
     public async Task<DashboardDto> GetAsync(int? sellerId = null, CancellationToken ct = default)
     {
         var paidStatuses = new[] { OrderStatus.Paid, OrderStatus.Shipped, OrderStatus.Delivered };
-
-        // Nạp đơn đã thanh toán kèm item để tính doanh thu SAU giảm giá coupon.
         var paidOrders = await _db.Orders
             .Where(o => paidStatuses.Contains(o.Status) && o.Payment != null &&
                 o.Payment.Status == PaymentStatus.Completed && !o.Payment.RequiresReconciliation && !o.Payment.IsDemo)
             .Include(o => o.Items)
             .ToListAsync(ct);
 
-        var paidOrderIds = paidOrders.Select(o => o.Id).ToList();
-
-        // Doanh thu (đã trừ coupon). System = tổng Order.Total; seller = phần seller sau khi chia tỉ lệ giảm giá.
         decimal revenue = 0m;
-        foreach (var o in paidOrders)
+        foreach (var order in paidOrders)
         {
-            if (sellerId == null)
-            {
-                revenue += o.Total;
-            }
-            else
-            {
-                var sellerSub = o.Items.Where(i => i.SellerId == sellerId.Value).Sum(i => i.Subtotal);
-                if (sellerSub <= 0) continue;
-                var orderSub = o.Subtotal;
-                var sellerDiscount = orderSub > 0 ? Math.Round(o.DiscountAmount * (sellerSub / orderSub), 2) : 0m;
-                revenue += Math.Max(0, sellerSub - sellerDiscount);
-            }
+            var originalSubtotal = order.Items.Sum(i => i.Subtotal);
+            var activeItems = order.Items.Where(i => i.Status != FulfillmentStatus.Cancelled).ToList();
+            var activeSubtotal = activeItems.Sum(i => i.Subtotal);
+            if (activeSubtotal <= 0 || originalSubtotal <= 0) continue;
+
+            var sellerSubtotal = sellerId.HasValue
+                ? activeItems.Where(i => i.SellerId == sellerId.Value).Sum(i => i.Subtotal)
+                : activeSubtotal;
+            if (sellerSubtotal <= 0) continue;
+
+            var allocatedDiscount = Math.Round(
+                order.DiscountAmount * (sellerSubtotal / originalSubtotal), 2, MidpointRounding.AwayFromZero);
+            revenue += Math.Max(0m, sellerSubtotal - allocatedDiscount);
         }
 
-        // Số đơn có liên quan (seller: đơn chứa ít nhất 1 item của seller).
         var totalOrders = sellerId == null
             ? await _db.Orders.CountAsync(ct)
             : await _db.OrderItems.Where(oi => oi.SellerId == sellerId)
@@ -52,9 +47,10 @@ public class DashboardService : IDashboardService
             ? await _db.Products.CountAsync(ct)
             : await _db.Products.CountAsync(p => p.SellerId == sellerId, ct);
 
-        var totalCustomers = await _db.Users.CountAsync(u => u.Role == UserRole.Customer, ct);
-
-        // Đơn theo trạng thái — seller: chỉ đơn chứa item của mình.
+        var totalCustomers = sellerId == null
+            ? await _db.Users.CountAsync(u => u.Role == UserRole.Customer, ct)
+            : await _db.Orders.Where(o => o.Items.Any(i => i.SellerId == sellerId))
+                .Select(o => o.UserId).Distinct().CountAsync(ct);
         var statusQuery = sellerId == null
             ? _db.Orders
             : _db.Orders.Where(o => o.Items.Any(i => i.SellerId == sellerId));
@@ -63,12 +59,11 @@ public class DashboardService : IDashboardService
             .Select(g => new { Status = g.Key, Count = g.Count() })
             .ToListAsync(ct);
 
-        // Top sản phẩm bán chạy — từ item của các đơn đã thanh toán (seller: chỉ item của mình).
         var soldList = paidOrders
             .SelectMany(o => o.Items)
-            .Where(i => sellerId == null || i.SellerId == sellerId.Value)
+            .Where(i => i.Status != FulfillmentStatus.Cancelled &&
+                        (sellerId == null || i.SellerId == sellerId.Value))
             .ToList();
-
         var topProducts = soldList
             .GroupBy(oi => new { oi.ProductId, oi.ProductName })
             .Select(g => new TopProductDto(

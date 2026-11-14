@@ -27,7 +27,15 @@ public class LifecycleSafetyTests
         await db.SaveChangesAsync();
         var order = new Order { UserId = buyer.Id, ShippingAddress = "Synthetic", Status = status };
         order.Items.Add(new OrderItem { ProductId = product.Id, ProductName = product.Name, SellerId = seller.Id, Quantity = 2, UnitPrice = 100 });
-        order.Payment = new Payment { Amount = 200, Method = PaymentMethod.EWallet, Status = status == OrderStatus.Paid ? PaymentStatus.Completed : PaymentStatus.Pending };
+        order.Payment = new Payment
+        {
+            Amount = 200,
+            Method = PaymentMethod.EWallet,
+            Status = status == OrderStatus.Paid ? PaymentStatus.Completed : PaymentStatus.Pending,
+            ProviderKey = status == OrderStatus.Paid ? "momo" : null,
+            ProviderAmount = status == OrderStatus.Paid ? 5_000_000m : null,
+            ProviderCurrency = status == OrderStatus.Paid ? "VND" : null
+        };
         db.Orders.Add(order);
         await db.SaveChangesAsync();
         return order;
@@ -240,4 +248,18 @@ public class LifecycleSafetyTests
         Assert.Equal(5,(await db.Products.SingleAsync()).Stock);
         Assert.True((await service.ConfirmAsync("momo",new Dictionary<string,string>())).Success);
     }
+    [Fact]
+    public async Task Cancelled_order_items_are_excluded_from_revenue_and_top_products()
+    {
+        await using var db = TestDb.Create();
+        var order = await SeedAsync(db);
+        order.Items.Single().ChangeStatus(FulfillmentStatus.Cancelled);
+        await db.SaveChangesAsync();
+
+        var dashboard = await new DashboardService(db).GetAsync();
+
+        Assert.Equal(0m, dashboard.TotalRevenue);
+        Assert.Empty(dashboard.TopProducts);
+    }
+
 }

@@ -1,8 +1,8 @@
 # Software Requirements Specification (SRS)
 ## Nền tảng Thương mại điện tử tối giản — "MiniShop"
 
-**Phiên bản:** 1.1
-**Ngày:** 2026-11-12
+**Phiên bản:** 1.2
+**Ngày:** 2026-11-14
 
 ---
 
@@ -17,7 +17,7 @@ MiniShop gồm:
 - **SPA frontend** (React + Vite + TypeScript) cho khách hàng và quản trị viên.
 - **CSDL** SQL Server.
 
-MiniShop hiện là **marketplace đa người bán (multi-seller)**: hỗ trợ ba vai trò xác thực **Customer**, **Seller** và **Admin** (cộng vai trò Khách vãng lai). Thanh toán dùng cổng giả lập (mock). Email/thông báo không nằm trong phạm vi (mock).
+MiniShop hiện là **marketplace đa người bán (multi-seller)**: hỗ trợ ba vai trò xác thực **Customer**, **Seller** và **Admin** (cộng vai trò Khách vãng lai). Thanh toán hỗ trợ mock demo, COD và MoMo sandbox. COD chưa có cash-collection workflow; MoMo thật fail-closed cho tới khi Owner cấu hình rõ catalog currency và FX quote. Email/thông báo không nằm trong phạm vi.
 
 ### 1.3 Định nghĩa & thuật ngữ (Glossary)
 | Thuật ngữ | Ý nghĩa |
@@ -30,9 +30,9 @@ MiniShop hiện là **marketplace đa người bán (multi-seller)**: hỗ trợ
 | Order | Đơn hàng chốt từ giỏ — có thể chứa sản phẩm của **nhiều Seller khác nhau** |
 | Order Status | Trạng thái vòng đời đơn (Pending/Paid/Shipped/Delivered/Cancelled) — chỉ Admin thay đổi |
 | OrderItem.SellerId | Snapshot seller sở hữu sản phẩm tại thời điểm đặt hàng cho dòng item đó |
-| FulfillmentStatus | Trạng thái giao hàng riêng của từng `OrderItem` (Pending/Shipped/Delivered/Cancelled) — do Seller sở hữu item tự đổi, độc lập với `Order.Status` |
+| FulfillmentStatus | Trạng thái giao hàng riêng của từng `OrderItem`; Seller chỉ chuyển Pending→Shipped→Delivered. Cancelled chỉ do luồng hủy/hoàn tiền toàn đơn thực hiện |
 | Payment | Bản ghi thanh toán gắn với đơn |
-| Verified purchase | Khách đã mua sản phẩm — điều kiện để đánh giá |
+| Verified purchase | Đơn Paid/Shipped/Delivered, Payment Completed, không demo/không reconciliation và có OrderItem của sản phẩm chưa bị hủy |
 | Refund | Yêu cầu hoàn tiền toàn bộ đơn đã thanh toán, do Admin xử lý |
 | JWT | JSON Web Token dùng xác thực |
 | RBAC | Role-Based Access Control |
@@ -59,7 +59,7 @@ Kiến trúc 4 lớp (Clean Architecture):
 ### 2.2 Vai trò người dùng
 - **Khách (chưa đăng nhập):** xem/tìm sản phẩm, xem chi tiết & đánh giá.
 - **Customer:** + giỏ hàng, đặt hàng, thanh toán, xem/hủy đơn, đánh giá (đã mua), wishlist. Giỏ/đơn của Customer không bị giới hạn theo một seller — có thể mua sản phẩm của nhiều shop trong cùng một đơn.
-- **Seller:** tự đăng ký tài khoản (`register-seller`, kèm `ShopName`) — không cần Admin duyệt. + CRUD sản phẩm **của riêng mình** (tạo/sửa/xóa/upload ảnh), xem dashboard và danh sách đơn hàng **chỉ phần liên quan tới sản phẩm của mình** (doanh thu, số liệu, item trong đơn). Seller không đổi trạng thái đơn.
+- **Seller:** đăng ký (`register-seller`, kèm `ShopName`) ở trạng thái Pending; Admin phải duyệt trước khi Seller được tạo sản phẩm hoặc shop xuất hiện công khai. Seller CRUD sản phẩm của riêng mình, cập nhật fulfillment Shipped/Delivered cho item thuộc shop và xem dashboard/đơn hàng trong phạm vi của mình.
 - **Admin:** + CRUD sản phẩm/danh mục (mọi seller), đổi trạng thái đơn, xem dashboard toàn hệ thống.
 
 ### 2.3 Ràng buộc
@@ -77,7 +77,7 @@ Kiến trúc 4 lớp (Clean Architecture):
 |----|-----------|-------|---------|
 | FR-01 | Đăng ký / Đăng nhập | Tạo tài khoản, đăng nhập nhận JWT; mật khẩu hash BCrypt | Khách |
 | FR-02 | Phân quyền RBAC | Phân tách quyền Customer/Seller/Admin qua policy + role claim | Hệ thống |
-| FR-03 | Tìm kiếm / lọc / phân trang sản phẩm | Theo từ khóa, danh mục, khoảng giá, `sellerId`; sắp xếp; phân trang | Mọi người |
+| FR-03 | Tìm kiếm / lọc / phân trang sản phẩm | Theo từ khóa, danh mục, seller, brand, khoảng giá, tồn kho và typed structured attributes; sắp xếp; phân trang | Mọi người |
 | FR-04 | Giỏ hàng | Thêm/sửa/xóa item, kiểm tra tồn kho, tính tổng | Customer |
 | FR-05 | Đặt hàng (Checkout) | Chuyển giỏ → đơn, trừ tồn kho nguyên tử; một đơn có thể gồm sản phẩm của nhiều seller | Customer |
 | FR-06 | Thanh toán đa cổng | Mock / COD / MoMo sandbox (AIO v2) — redirect + callback verify | Customer |
@@ -85,25 +85,26 @@ Kiến trúc 4 lớp (Clean Architecture):
 | FR-08 | Đánh giá sản phẩm | Rating 1–5 + nhận xét, chỉ khách đã mua, 1 lần/sp | Customer |
 | FR-09 | Wishlist | Thêm/xóa sản phẩm yêu thích | Customer |
 | FR-10 | Dashboard quản trị / seller | Doanh thu, số đơn theo trạng thái, top sản phẩm — Admin xem toàn hệ thống, Seller chỉ xem phần của mình (`GET /api/seller/dashboard`) | Admin/Seller |
-| FR-11 | CRUD sản phẩm/danh mục | Quản lý danh mục (Admin); CRUD sản phẩm + upload ảnh (Admin toàn quyền, Seller chỉ trên sản phẩm của chính mình) | Admin/Seller |
+| FR-11 | CRUD catalog | CRUD sản phẩm; quản lý Brand và AttributeDefinition (Admin); Seller chỉ quản lý sản phẩm của mình và nhập typed attributes theo category | Admin/Seller |
 | FR-12 | Mã giảm giá (Coupon) | Percentage/Fixed, đơn tối thiểu, hạn dùng, giới hạn lượt | Customer/Admin |
 | FR-13 | Phân trang đơn hàng | Danh sách đơn (khách & admin) chia trang, tổng số trang | Customer/Admin |
-| FR-14 | Đăng ký Seller | Tự đăng ký tài khoản vai trò Seller kèm `ShopName` (`POST /api/auth/register-seller`), không cần Admin duyệt | Khách |
+| FR-14 | Đăng ký Seller | `POST /api/auth/register-seller` tạo Seller ở trạng thái Pending; Admin duyệt trước khi được bán hàng | Khách/Admin |
 | FR-15 | Đơn hàng theo Seller | `GET /api/seller/orders` — danh sách đơn có chứa sản phẩm của seller, phân trang; mỗi đơn trả về **chỉ** các `OrderItem` và phần doanh thu thuộc seller đó | Seller |
-| FR-16 | Giao hàng theo item (per-item fulfillment) | `PUT /api/seller/orders/items/{itemId}/status` — Seller đổi `FulfillmentStatus` (Pending/Shipped/Delivered/Cancelled) của **item thuộc chính mình** trong đơn trộn nhiều seller; chuyển sai cạnh → 409, item không thuộc seller gọi → 403. Độc lập với `Order.Status` (vẫn chỉ Admin đổi) | Seller |
+| FR-16 | Giao hàng theo item (per-item fulfillment) | `PUT /api/seller/orders/items/{itemId}/status` — Seller chỉ đổi Pending→Shipped→Delivered cho item thuộc mình; Cancelled chỉ được thực hiện bởi luồng hủy/hoàn tiền toàn đơn. Chuyển sai cạnh → 409, sai owner → 403 | Seller |
 | FR-17 | Tạo danh mục bởi Seller | `POST /api/categories` mở cho role `Admin,Seller` — Seller tạo danh mục mới ngay khi thêm sản phẩm, không cần chờ Admin. Xóa danh mục (`DELETE`) vẫn chỉ Admin | Admin/Seller |
+| FR-18 | Structured product catalog | Admin quản lý Brand và AttributeDefinition; Product có SKU, Brand optional và typed attributes theo Category; public search lọc theo Brand/attribute | Admin/Seller/Mọi người |
 | FR-18 | Hoàn tiền toàn bộ đơn hàng (Refund MVP) | Customer gửi yêu cầu cho đơn Paid đã thanh toán online, chưa fulfillment; Admin ghi nhận hoàn tiền thủ công hoặc từ chối có lý do; xem `docs/specs/refund.md` | Customer/Admin |
 
 ### 3.1 Chi tiết một số quy tắc
 - **FR-05:** Checkout thất bại nếu giỏ rỗng hoặc tồn kho không đủ; khi đủ, tồn kho giảm và giỏ được làm rỗng. Mỗi `OrderItem` lưu snapshot `SellerId` (seller sở hữu sản phẩm tại thời điểm đặt hàng) — giỏ hàng và đơn hàng **không** bị giới hạn theo một seller, một đơn có thể chứa item từ nhiều shop khác nhau.
-- **FR-06:** `IPaymentProvider` trừu tượng hóa cổng — MoMo gọi API tạo giao dịch, trả `RedirectUrl` (payUrl, chuyển hướng khách sang cổng), callback xác minh chữ ký HMAC-SHA256 rồi chốt `Order → Paid`. Mock/COD hoàn tất tức thì. MoMo dùng test credentials sandbox công khai nên chạy cổng thật ngay; nếu chưa cấu hình key và bật `AllowDemo` → chạy chế độ demo (hoàn tất ngay).
+- **FR-06:** `IPaymentProvider` trừu tượng hóa cổng. Mock demo được đánh dấu `IsDemo` và không được tính là doanh thu/verified purchase. COD chuyển Order sang `Accepted`, Payment vẫn `Pending` cho tới khi có collection event; hiện chưa có collection workflow nên COD chưa được tính là doanh thu/verified purchase. MoMo sandbox dùng redirect + callback HMAC-SHA256. Mỗi Order hiện có một payment attempt bất biến; không retry bằng cách ghi đè attempt. MoMo thật fail-closed nếu thiếu catalog currency/FX quote được Owner cấu hình.
 - **FR-07:** Chuyển trạng thái chỉ theo các cạnh hợp lệ (xem `diagrams/state-machine.md`); chuyển sai trả HTTP 409. Trạng thái được quản lý ở cấp toàn Order, chỉ Admin thực hiện — kể cả khi đơn có item của nhiều seller, Seller không tự đổi trạng thái phần của mình.
-- **FR-08:** Đánh giá yêu cầu tồn tại đơn (khác Cancelled) chứa sản phẩm đó; trùng đánh giá trả 409.
-- **FR-11 (Seller ownership):** `POST/PUT/DELETE /api/products` và `upload-image` cho phép role `Admin,Seller`. Với Seller, hệ thống kiểm tra `product.SellerId == currentUserId` trước khi sửa/xóa — không khớp trả 403 Forbidden. Admin bỏ qua kiểm tra này (sửa/xóa sản phẩm của bất kỳ seller nào). Khi tạo sản phẩm, `SellerId` luôn gán bằng id của người tạo (Seller tự tạo cho mình; Admin tạo thì gán chính Admin làm seller).
+- **FR-08:** Đánh giá yêu cầu Order ở Paid/Shipped/Delivered, Payment Completed, không phải demo, không yêu cầu reconciliation và có OrderItem của sản phẩm chưa Cancelled; COD chỉ đủ điều kiện sau khi có collection event. Mỗi user chỉ đánh giá một lần/sản phẩm; trùng trả 409.
+- **FR-11 (Seller ownership):** Product CRUD cho `Admin,Seller`; Seller phải Approved và chỉ sửa/xóa sản phẩm có `SellerId == currentUserId`. SKU được trim/uppercase và unique toàn catalog; nếu không gửi SKU, backend tạo SKU duy nhất. Brand là optional. AttributeDefinition thuộc một Category và có DataType cố định; ProductAttributeValue phải có đúng một typed value phù hợp. Các active required attributes phải được cung cấp khi tạo hoặc khi cập nhật danh sách attributes. CategoryId của Product và CategoryId/DataType của AttributeDefinition bất biến sau khi tạo vì tham gia composite FK.
 - **FR-10/FR-15 (Seller scope):** `DashboardService.GetAsync(int? sellerId)` — truyền `null` trả số liệu toàn hệ thống (Admin dùng), truyền id trả số liệu đã lọc theo `OrderItem.SellerId`/`Product.SellerId` của seller đó (doanh thu, số sản phẩm, số đơn liên quan, phân bố trạng thái, top sản phẩm). `SellerOrderService.GetForSellerAsync` trả đơn có chứa item của seller nhưng lọc `Order.Items` chỉ còn item của seller đó và tính lại subtotal/total trên phần này.
 - **FR-12:** Coupon áp dụng tại bước checkout; hệ thống validate hạn dùng, đơn tối thiểu, số lượt còn lại trước khi trừ giảm giá vào `Order.DiscountAmount`.
 - **FR-10/FR-15 (Pro-rate giảm giá coupon theo seller):** `Order.DiscountAmount` là giảm giá **toàn đơn**, không gắn riêng seller nào. Cả `SellerOrderService.GetForSellerAsync` và `DashboardService.GetAsync(sellerId)` chia tỉ lệ giảm giá này theo tỉ trọng subtotal của seller trong đơn: `sellerDiscount = DiscountAmount × (sellerSubtotal / orderSubtotal)`, sau đó `sellerTotal = sellerSubtotal - sellerDiscount`. Doanh thu hệ thống (`sellerId = null`) dùng trực tiếp `Order.Total` (đã trừ giảm giá) của các đơn đã thanh toán. Ví dụ đã verify: đơn $100 (seller A $60 + seller B $40), coupon giảm $20 → A thấy discount $12/total $48, B thấy discount $8/total $32, tổng $80 khớp `Order.Total` thực nhận.
-- **FR-16 (Giao hàng theo item):** `OrderItem.ChangeStatus()` là máy trạng thái riêng (xem `diagrams/state-machine.md` mục 4), tách biệt hoàn toàn khỏi `Order.ChangeStatus()`. Seller chỉ đổi được `FulfillmentStatus` của item có `SellerId == currentUserId`; sai chủ → 403. Chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi đơn được hủy hợp lệ, các item còn Pending được chuyển sang Cancelled.
+- **FR-16 (Giao hàng theo item):** `OrderItem.ChangeStatus()` tách biệt `Order.ChangeStatus()`. Seller chỉ chuyển Pending→Shipped→Delivered cho item thuộc mình; Seller không tự hủy item. Khi toàn đơn được hủy hợp lệ, hệ thống chuyển các item còn Pending sang Cancelled. SQL trigger bảo vệ snapshot OrderItem (`OrderId/ProductId/SellerId/ProductName/UnitPrice/Quantity`) sau checkout.
 - **FR-18 (Refund MVP):** Customer chỉ được yêu cầu hoàn tiền cho đơn thuộc mình, Order Paid, Payment Completed (không phải COD), Payment.Amount khớp Order.Total và tất cả OrderItem còn Pending. Refund là hoàn toàn bộ đơn, một Refund tối đa trên mỗi Order/Payment. Customer dùng `POST /api/refunds` và `GET /api/refunds/mine`; Admin dùng `GET /api/admin/refunds`, `POST /api/admin/refunds/{id}/complete` hoặc `/reject`. Admin bắt buộc ghi mã giao dịch/chứng từ sau khi chuyển tiền bên ngoài hệ thống; khi Completed, Refund/Payment/Order/OrderItems/tồn kho được cập nhật trong một SaveChanges transaction. Rejected không thay đổi Order/Payment/tồn kho. Không partial refund, COD refund hoặc refund sau khi fulfillment bắt đầu.
 - **Hủy đơn:** Customer tự hủy Pending; COD chưa thu tiền có thể hủy trước khi fulfillment bắt đầu, không tạo Refund. Đơn Paid online phải đi qua Refund workflow; Admin không được bỏ qua workflow này bằng cách đổi Order.Status trực tiếp. Tồn kho chỉ hoàn khi mọi item vẫn Pending.
 
@@ -121,19 +122,20 @@ Kiến trúc 4 lớp (Clean Architecture):
 | NFR-06 | Khả chuyển | CORS cho frontend; cấu hình qua appsettings |
 | NFR-07 | Kiểm thử | Unit test cho domain/service; có thể chạy `dotnet test` |
 | NFR-08 | Usability | Giao diện responsive (Tailwind), tiếng Việt |
+| NFR-09 | Database integrity | SQL Server enforces FK/check constraints; checkout snapshots are immutable via trigger; typed attributes use type/category constraints and indexes |
 
 ---
 
 ## 5. Giao diện ngoài
 
 ### 5.1 API
-REST/JSON. Nhóm endpoint chính: `/api/auth` (gồm `register-seller`), `/api/products`, `/api/categories` (`POST` nay cho `Admin,Seller`; `DELETE` vẫn `Admin`), `/api/cart`, `/api/orders`, `/api/refunds`, `/api/wishlist`, `/api/admin` (gồm refund management), `/api/seller` (`dashboard`, `orders`, `PUT orders/items/{itemId}/status` — riêng cho vai trò Seller, đổi `FulfillmentStatus` của item thuộc chính seller đó). Tài liệu tương tác qua Swagger UI (`/swagger`).
+REST/JSON. Nhóm endpoint chính: `/api/auth`, `/api/products` (SKU/Brand/structured attribute filters), `/api/brands`, `/api/catalogattributes`, `/api/categories`, `/api/cart`, `/api/orders`, `/api/refunds`, `/api/wishlist`, `/api/admin`, `/api/seller`. `GET /api/brands` và `GET /api/catalogattributes` công khai; CRUD Brand/AttributeDefinition chỉ Admin. Product search hỗ trợ `brandId` và tối đa 20 `attributeFilters` AND-combined với `ValueText`, `MinValue/MaxValue` hoặc `ValueBoolean`. Tài liệu tương tác qua Swagger UI (`/swagger`).
 
 ### 5.2 Người dùng
 SPA React: trang sản phẩm, chi tiết, giỏ, thanh toán, đơn hàng, wishlist, dashboard admin.
 
 ### 5.3 Dữ liệu
-SQL Server qua EF Core; migration `InitialCreate`; seed admin + customer demo + sản phẩm mẫu.
+SQL Server qua EF Core; migrations được quản lý theo thứ tự. Owner lane bổ sung FK/check constraints, typed-attribute indexes và SQL trigger bảo vệ checkout snapshot. Migration mới có preflight orphan/enum checks và safety guard theo convention hiện tại của LocalDB `ECommerceDb_Dev`; không seed, import, reset hoặc sửa dữ liệu V2.
 
 ---
 

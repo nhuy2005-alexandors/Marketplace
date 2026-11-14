@@ -2,6 +2,7 @@ using ECommerce.Application.Common;
 using ECommerce.Application.DTOs.Cart;
 using ECommerce.Application.Interfaces;
 using ECommerce.Domain.Entities;
+using ECommerce.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace ECommerce.Application.Services;
@@ -22,8 +23,10 @@ public class CartService : ICartService
     {
         if (r.Quantity <= 0)
             return Result.Fail<CartDto>("Quantity must be positive.");
-        var product = await _db.Products.FindAsync(new object[] { r.ProductId }, ct);
-        if (product is null)
+        var product = await _db.Products
+            .Include(p => p.Seller)
+            .FirstOrDefaultAsync(p => p.Id == r.ProductId, ct);
+        if (product is null || !IsPubliclyAvailable(product))
             return Result.Fail<CartDto>("Product not found.", ErrorType.NotFound);
 
         var cart = await LoadCartAsync(userId, ct);
@@ -58,6 +61,8 @@ public class CartService : ICartService
         }
         else
         {
+            if (!IsPubliclyAvailable(item.Product))
+                return Result.Fail<CartDto>("Product is no longer available.", ErrorType.Conflict);
             if (r.Quantity > item.Product.Stock)
                 return Result.Fail<CartDto>($"Only {item.Product.Stock} in stock.", ErrorType.Validation);
             item.Quantity = r.Quantity;
@@ -86,10 +91,14 @@ public class CartService : ICartService
         return Result.Ok();
     }
 
+    private static bool IsPubliclyAvailable(Product product) =>
+        product.Seller is not null &&
+        (product.Seller.Role != UserRole.Seller || product.Seller.SellerStatus == SellerStatus.Approved);
+
     private async Task<Cart> LoadCartAsync(int userId, CancellationToken ct)
     {
         var cart = await _db.Carts
-            .Include(c => c.Items).ThenInclude(i => i.Product)
+            .Include(c => c.Items).ThenInclude(i => i.Product).ThenInclude(p => p.Seller)
             .FirstOrDefaultAsync(c => c.UserId == userId, ct);
         if (cart is null)
         {

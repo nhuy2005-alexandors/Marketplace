@@ -13,12 +13,32 @@ internal static class MappingExtensions
         var count = p.Reviews?.Count ?? 0;
         var avg = count > 0 ? p.Reviews!.Average(r => r.Rating) : 0;
         var shopName = p.Seller?.ShopName ?? p.Seller?.FullName ?? string.Empty;
+        var attributes = p.AttributeValues?
+            .Where(v => v.AttributeDefinition is { IsActive: true })
+            .OrderBy(v => v.AttributeDefinition.DisplayName)
+            .Select(v => new ProductAttributeDto(
+                v.AttributeDefinitionId,
+                v.AttributeDefinition.Code,
+                v.AttributeDefinition.DisplayName,
+                v.DataType,
+                v.AttributeDefinition.Unit,
+                v.ValueText,
+                v.ValueNumber,
+                v.ValueBoolean))
+            .ToList() ?? new List<ProductAttributeDto>();
+
         return new ProductDto(p.Id, p.Name, p.Description, p.Price, p.Stock, p.ImageUrl,
             p.CategoryId, p.Category?.Name ?? string.Empty, p.SellerId, shopName,
-            Math.Round(avg, 2), count);
+            Math.Round(avg, 2), count, p.Sku, p.BrandId, p.Brand?.Name, attributes);
     }
 
     public static CategoryDto ToDto(this Category c) => new(c.Id, c.Name, c.Description);
+
+    public static BrandDto ToDto(this Brand b) => new(b.Id, b.Name, b.Slug, b.Description);
+
+    public static AttributeDefinitionDto ToDto(this AttributeDefinition a) =>
+        new(a.Id, a.CategoryId, a.Code, a.DisplayName, a.DataType, a.Unit,
+            a.IsRequired, a.IsFilterable, a.IsComparable, a.IsActive);
 
     public static CartItemDto ToDto(this CartItem i) =>
         new(i.Id, i.ProductId, i.Product.Name, i.Product.Price, i.Quantity, i.Subtotal, i.Product.ImageUrl);
