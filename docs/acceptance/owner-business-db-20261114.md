@@ -77,8 +77,9 @@ The current PR #3 base head `4c7c3d8bf977f2b1ca7eec869c57950ec222c963` is includ
 ## GitHub state
 
 - PR #3 remains open and Ready for Review.
-- PR #4 remains open and Draft; it is synchronized on PR #3's latest head and is not behind.
+- PR #4 is open and Ready for Review, stacked on PR #3 head `4c7c3d8bf977f2b1ca7eec869c57950ec222c963`; it is mergeable and not behind.
 - Neither PR was merged. No merge or deployment is authorized by this receipt.
+- Khang and Khánh AI branches were not modified, merged, rebased or synchronized.
 
 
 ## Owner UI and refund-auditability addendum — 2026-11-14
