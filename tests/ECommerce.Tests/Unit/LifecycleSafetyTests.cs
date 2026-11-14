@@ -32,7 +32,7 @@ public class LifecycleSafetyTests
             Amount = 200,
             Method = PaymentMethod.EWallet,
             Status = status == OrderStatus.Paid ? PaymentStatus.Completed : PaymentStatus.Pending,
-            ProviderKey = "momo",
+            ProviderKey = status == OrderStatus.Paid ? "momo" : null,
             ProviderAmount = status == OrderStatus.Paid ? 5_000_000m : null,
             ProviderCurrency = status == OrderStatus.Paid ? "VND" : null
         };
