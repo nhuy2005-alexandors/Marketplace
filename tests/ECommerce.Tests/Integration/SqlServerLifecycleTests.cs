@@ -271,4 +271,43 @@ public class SqlServerLifecycleTests
         Console.WriteLine("POPULATED_PREV2_SKU_UPGRADE PASS");
         Console.WriteLine("EXISTING_REFUND_PENDING_HOLD_BACKFILL PASS");
     }
+    [LocalSqlFact("MARKETPLACE_OWNER_CATALOG_TEST_CONNECTION")]
+    public async Task Owner_catalog_migration_enforces_seller_fk_and_checkout_snapshot()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(Connection("MARKETPLACE_OWNER_CATALOG_TEST_CONNECTION"))
+            .Options;
+        await using var db = new AppDbContext(options);
+
+        Assert.Empty(await db.Database.GetAppliedMigrationsAsync());
+        await db.Database.MigrateAsync();
+        Assert.False(db.Database.HasPendingModelChanges());
+
+        var order = await LifecycleSafetyTests.SeedAsync(db);
+        var item = order.Items.Single();
+        var originalName = item.ProductName;
+
+        await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync(
+            "UPDATE dbo.OrderItems SET ProductName = N'Tampered snapshot' WHERE Id = {0}", item.Id));
+
+        db.ChangeTracker.Clear();
+        var storedName = await db.OrderItems.AsNoTracking()
+            .Where(i => i.Id == item.Id).Select(i => i.ProductName).SingleAsync();
+        Assert.Equal(originalName, storedName);
+
+        var shipped = await new SellerOrderService(db)
+            .UpdateFulfillmentAsync(item.SellerId, item.Id, new("Shipped"));
+        Assert.True(shipped.Success, shipped.Error);
+        Console.WriteLine("ORDER_ITEM_SNAPSHOT_TRIGGER_ALLOWS_FULFILLMENT_STATUS PASS");
+
+        await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO dbo.OrderItems(OrderId, ProductId, SellerId, ProductName, UnitPrice, Quantity, Status, CreatedAt)
+            SELECT @orderId, p.Id, -999999, p.Name, p.Price, 1, 0, SYSUTCDATETIME()
+            FROM dbo.Products p WHERE p.Id = @productId;
+            """,
+            new SqlParameter("@orderId", item.OrderId),
+            new SqlParameter("@productId", item.ProductId)));
+        Console.WriteLine("ORDER_ITEM_SELLER_FOREIGN_KEY_ENFORCED PASS");
+    }
+
 }

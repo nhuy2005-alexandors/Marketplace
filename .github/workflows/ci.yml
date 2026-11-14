@@ -58,3 +58,53 @@ jobs:
 
       - name: Test
         run: npm test
+
+  windows-sql-migration:
+    name: SQL Server LocalDB migration + trigger
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Start disposable LocalDB instances
+        shell: pwsh
+        run: |
+          if (-not (Get-Command sqllocaldb -ErrorAction SilentlyContinue)) {
+            throw "SQL Server LocalDB is not installed on this runner."
+          }
+
+          $instances = @(
+            "MarketplaceSafetyTestMigration",
+            "MarketplaceSafetyTestOwnerCatalog"
+          )
+          foreach ($instance in $instances) {
+            & sqllocaldb create $instance
+            if ($LASTEXITCODE -ne 0) { throw "Could not create LocalDB instance $instance." }
+            & sqllocaldb start $instance
+            if ($LASTEXITCODE -ne 0) { throw "Could not start LocalDB instance $instance." }
+          }
+
+          "MARKETPLACE_MIGRATION_TEST_CONNECTION=Server=(localdb)\MarketplaceSafetyTestMigration;Database=ECommerceDb_Dev;Integrated Security=true;TrustServerCertificate=true" >> $env:GITHUB_ENV
+          "MARKETPLACE_OWNER_CATALOG_TEST_CONNECTION=Server=(localdb)\MarketplaceSafetyTestOwnerCatalog;Database=ECommerceDb_Dev;Integrated Security=true;TrustServerCertificate=true" >> $env:GITHUB_ENV
+
+      - name: Restore
+        run: dotnet restore ECommerce.sln
+
+      - name: Run opt-in SQL migration tests
+        run: >
+          dotnet test tests/ECommerce.Tests/ECommerce.Tests.csproj
+          --configuration Release
+          --filter "FullyQualifiedName~Populated_preV2_upgrade_backfills_unique_skus|FullyQualifiedName~Owner_catalog_migration_enforces_seller_fk_and_checkout_snapshot"
+
+      - name: Stop disposable LocalDB instances
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($instance in @("MarketplaceSafetyTestMigration", "MarketplaceSafetyTestOwnerCatalog")) {
+            & sqllocaldb stop $instance -k 2>$null
+            & sqllocaldb delete $instance 2>$null
+          }
