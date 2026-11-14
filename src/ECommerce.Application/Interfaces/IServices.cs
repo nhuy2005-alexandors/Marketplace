@@ -50,6 +50,7 @@ public interface IPaymentProvider
     Task<PaymentVerifyResult> VerifyAsync(IReadOnlyDictionary<string, string> callbackData, CancellationToken ct = default);
 }
 
+// ReturnUrl is retained for contract compatibility; providers must use server-owned redirect configuration.
 public record PaymentContext(int OrderId, decimal Amount, string ReturnUrl, string ClientIp, string? RequestId = null);
 public record PaymentQuote(decimal Amount, string Currency, string? Error);
 

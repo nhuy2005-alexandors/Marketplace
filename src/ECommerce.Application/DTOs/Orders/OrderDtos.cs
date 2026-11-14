@@ -40,7 +40,7 @@ public record UpdateOrderStatusRequest(string Status);
 
 public record UpdateFulfillmentStatusRequest(string Status);
 
-// Method: mock | cod | momo. ReturnUrl: nơi cổng redirect về sau thanh toán.
+// Method: mock | cod | momo. ReturnUrl is retained for compatibility; the backend ignores client-selected redirect destinations.
 public record PayOrderRequest(string Method, string? ReturnUrl);
 
 // Kết quả khởi tạo thanh toán: hoặc hoàn tất ngay (Order), hoặc cần redirect.

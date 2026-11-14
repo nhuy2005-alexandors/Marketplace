@@ -38,4 +38,16 @@ public class StartupSafetyTests
         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name = '__EFMigrationsHistory'";
         Assert.Equal(0L, (long)(await command.ExecuteScalarAsync())!);
     }
+    [Fact]
+    public void Development_startup_rejects_the_repository_default_database_target()
+    {
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.UseEnvironment("Development"));
+
+        var exception = Record.Exception(() => factory.CreateClient());
+
+        Assert.NotNull(exception);
+        Assert.Contains("MSSQLLocalDB/ECommerceDb target is forbidden", exception!.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
 }

@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Data.SqlClient;
 
 namespace ECommerce.Infrastructure.Persistence;
 
@@ -26,14 +25,9 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
             .AddJsonFile("appsettings.Local.json", optional: true)
             .AddEnvironmentVariables().Build();
         var connection = Arg("--connection") ?? config.GetConnectionString("DefaultConnection");
-        SqlConnectionStringBuilder target;
-        try { target = new SqlConnectionStringBuilder(connection ?? ""); }
-        catch (ArgumentException) { throw new InvalidOperationException("Invalid design-time database configuration."); }
-        if (target.InitialCatalog != "ECommerceDb_Dev" || !target.DataSource.StartsWith(@"(localdb)\", StringComparison.OrdinalIgnoreCase) ||
-            target.DataSource.Equals(@"(localdb)\MSSQLLocalDB", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("An explicit isolated LocalDB / ECommerceDb_Dev target is required. Original MSSQLLocalDB is forbidden.");
+        var safeConnection = DatabaseTargetGuard.ValidateIsolatedDevelopmentTarget(connection);
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(target.ConnectionString)
+            .UseSqlServer(safeConnection)
             .Options;
         return new AppDbContext(options);
     }

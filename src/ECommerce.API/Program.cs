@@ -20,6 +20,10 @@ builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, relo
 // Keep runtime and design-time precedence identical: explicit environment wins.
 builder.Configuration.AddEnvironmentVariables();
 
+// Development must never fall back to the repository's legacy MSSQLLocalDB/ECommerceDb target.
+if (builder.Environment.IsDevelopment())
+    DatabaseTargetGuard.ValidateIsolatedDevelopmentTarget(builder.Configuration.GetConnectionString("DefaultConnection"));
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
