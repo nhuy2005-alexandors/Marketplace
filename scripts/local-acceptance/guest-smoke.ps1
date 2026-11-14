@@ -79,6 +79,16 @@ function Get-FakeResponse([object]$Case) {
         $raw='{"error":"Request body is too large."}'
         return [pscustomobject]@{StatusCode=413;RawBody=$raw;Body=($raw|ConvertFrom-Json)}
     }
+    $constraints = New-Object 'System.Collections.Generic.List[object]'
+    if ($Case.Name -eq 'K-11-strict-empty') { $constraints.Add(@{ field='RAM'; operator='equals'; value='64'; unit='GB' }) }
+    if ($Case.Body.filters) {
+        $filter = $Case.Body.filters
+        if ($null -ne $filter.MinPrice) { $constraints.Add(@{ field='price'; operator='greaterThanOrEqual'; value=[string]$filter.MinPrice; unit='currency' }) }
+        if ($null -ne $filter.MaxPrice) { $constraints.Add(@{ field='price'; operator='lessThanOrEqual'; value=[string]$filter.MaxPrice; unit='currency' }) }
+        if ($filter.InStockOnly) { $constraints.Add(@{ field='stock'; operator='greaterThan'; value='0'; unit='items' }) }
+        if ($filter.CategoryId) { $constraints.Add(@{ field='categoryId'; operator='equals'; value=[string]$filter.CategoryId }) }
+        if ($filter.SellerId) { $constraints.Add(@{ field='sellerId'; operator='equals'; value=[string]$filter.SellerId }) }
+    }
     [pscustomobject]@{
         StatusCode=$(if($Case.ExpectedStatus){$Case.ExpectedStatus}else{200})
         Body=[pscustomobject]@{
@@ -89,7 +99,7 @@ function Get-FakeResponse([object]$Case) {
             intent=$(if($Case.ExpectedIntent){$Case.ExpectedIntent}else{'product_search'})
             evidenceStrength=$(if($Case.ExpectedEvidence){$Case.ExpectedEvidence}elseif($Case.Name -eq 'lexical-positive' -or $Case.Name -in @('strict-satisfied-condition','context-followup','context-new-topic')){'strong'}else{'weak'})
             contextAction=$(if($Case.ExpectedContextAction){$Case.ExpectedContextAction}else{'none'})
-            constraints=$(if($Case.Name -eq 'K-11-strict-empty'){@(@{field='RAM';operator='equals';value='64';unit='GB'})}else{@()})
+            constraints=$constraints.ToArray()
             retrieval=[pscustomobject]@{mode='hybrid';hasEvidence=($products.Count -gt 0)}
         }
     }
@@ -162,12 +172,19 @@ try {
         if($case.Name -eq 'payload-too-large-413' -and $result.StatusCode -eq 413 -and $result.RawBody -match '(?i)BadHttpRequestException|Kestrel|stack trace| at [\w.]+\(|private|internal exception'){$pass=$false;$reasons.Add('413 body leaks internal details')}
         if($case.ExpectedRateLimit -and $result.RateLimitResponses -lt 1){$pass=$false;$reasons.Add('no HTTP 429 in 15 intentional requests')}
         foreach($product in @($result.Body.products)){
-            if(-not $case.Body.filters){continue};$filter=$case.Body.filters
-            if($null -ne $filter.MinPrice -and [decimal]$product.price -lt [decimal]$filter.MinPrice){$pass=$false;$reasons.Add("product $($product.id) below min price")}
-            if($null -ne $filter.MaxPrice -and [decimal]$product.price -gt [decimal]$filter.MaxPrice){$pass=$false;$reasons.Add("product $($product.id) above max price")}
-            if($filter.InStockOnly -and [int]$product.stock -le 0){$pass=$false;$reasons.Add("product $($product.id) out of stock")}
-            if($filter.SellerId -and [int]$product.sellerId -ne [int]$filter.SellerId){$pass=$false;$reasons.Add("product $($product.id) wrong seller")}
-            if($filter.CategoryId -and [int]$product.categoryId -ne [int]$filter.CategoryId){$pass=$false;$reasons.Add("product $($product.id) wrong category")}
+            foreach($constraint in @($result.Body.constraints)){
+                $value=[string]$constraint.value
+                switch -Regex ([string]$constraint.field) {
+                    '^price$' {
+                        $bound=[decimal]::Parse($value,[Globalization.CultureInfo]::InvariantCulture)
+                        if($constraint.operator -eq 'greaterThanOrEqual' -and [decimal]$product.price -lt $bound){$pass=$false;$reasons.Add("product $($product.id) violates minimum price constraint")}
+                        if($constraint.operator -eq 'lessThanOrEqual' -and [decimal]$product.price -gt $bound){$pass=$false;$reasons.Add("product $($product.id) violates maximum price constraint")}
+                    }
+                    '^stock$' { if([int]$product.stock -le 0){$pass=$false;$reasons.Add("product $($product.id) violates stock constraint")} }
+                    '^categoryId$' { if([int]$product.categoryId -ne [int]$value){$pass=$false;$reasons.Add("product $($product.id) violates category constraint")} }
+                    '^sellerId$' { if([int]$product.sellerId -ne [int]$value){$pass=$false;$reasons.Add("product $($product.id) violates seller constraint")} }
+                }
+            }
         }
         if($case.Name -eq 'irrelevant-product-ids' -and @($result.Body.products | Where-Object id -eq 999999).Count){$pass=$false;$reasons.Add('client hint ID became authority')}
         $answerSource=if($result.Body -and $result.Body.answerSource){[string]$result.Body.answerSource}else{'not-provided-by-api'}

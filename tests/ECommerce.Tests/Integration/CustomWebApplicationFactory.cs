@@ -76,7 +76,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
 
             // Integration tests must never discover a developer's repo-root .env and call Gemini.
-            services.PostConfigure<GeminiOptions>(options => options.ApiKey = string.Empty);
+            services.PostConfigure<GeminiOptions>(options =>
+            {
+                options.ApiKey = string.Empty;
+                options.EmbeddingWarmupEnabled = false;
+            });
         });
     }
 

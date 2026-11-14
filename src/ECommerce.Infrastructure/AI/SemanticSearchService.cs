@@ -34,23 +34,54 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private readonly AssistantDomainOptions _domainOptions;
     private readonly bool _lexicalFallbackWhileWarming;
 
-    public bool IsHybridReady => Volatile.Read(ref WarmupCompleted) != 0;
+    public bool IsHybridReady => Volatile.Read(ref WarmupCompleted) != 0 && Volatile.Read(ref WarmupEmbeddingFailed) == 0;
+    public string RetrievalMode => IsHybridReady ? "hybrid" :
+        Volatile.Read(ref WarmupScheduled) != 0 && Volatile.Read(ref WarmupCompleted) == 0 ? "lexical-warming" : "lexical";
 
-    public static void MarkWarmupScheduled() => Volatile.Write(ref WarmupScheduled, 1);
-    public static void MarkWarmupDisabled() => Volatile.Write(ref WarmupCompleted, 1);
+    public static void MarkWarmupScheduled()
+    {
+        Volatile.Write(ref WarmupEmbeddingFailed, 0);
+        Volatile.Write(ref WarmupCompleted, 0);
+        Volatile.Write(ref WarmupScheduled, 1);
+    }
+
+    public static void MarkWarmupDisabled()
+    {
+        Volatile.Write(ref WarmupScheduled, 0);
+        Volatile.Write(ref WarmupEmbeddingFailed, 0);
+        Volatile.Write(ref WarmupCompleted, 1);
+    }
 
     public async Task WarmUpAsync(CancellationToken ct = default)
     {
         if (Interlocked.CompareExchange(ref WarmupRunning, 1, 0) != 0) return;
+        Volatile.Write(ref WarmupCompleted, 0);
         IsWarmupCall.Value = true;
         Volatile.Write(ref WarmupEmbeddingFailed, 0);
         try
         {
+            if (!await _db.Products.AsNoTracking().AnyAsync(ct))
+            {
+                Volatile.Write(ref WarmupEmbeddingFailed, 1);
+                return;
+            }
             await SearchCandidatesAsync("catalog warmup", null, 8, ct);
+            if (Volatile.Read(ref WarmupEmbeddingFailed) == 0)
+            {
+                var queryVectors = await _embeddings.GenerateEmbeddingsAsync(["catalog warmup"], isQuery: true, ct);
+                if (queryVectors.Count != 1 || queryVectors[0].Length == 0)
+                    Volatile.Write(ref WarmupEmbeddingFailed, 1);
+            }
             if (Volatile.Read(ref WarmupEmbeddingFailed) == 0) Volatile.Write(ref WarmupCompleted, 1);
+        }
+        catch
+        {
+            Volatile.Write(ref WarmupEmbeddingFailed, 1);
+            throw;
         }
         finally
         {
+            if (Volatile.Read(ref WarmupEmbeddingFailed) != 0) Volatile.Write(ref WarmupCompleted, 1);
             IsWarmupCall.Value = false;
             Volatile.Write(ref WarmupRunning, 0);
         }
@@ -228,7 +259,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
                     var batch = batches[batchIndex];
                     var vectors = await _embeddings.GenerateEmbeddingsAsync(batch.Select(chunk => chunk.Content).ToArray(), isQuery: false, ct);
-                    if (vectors.Count != batch.Length) throw new AssistantProviderException("Embedding provider returned an invalid batch.");
+                    if (vectors.Count != batch.Length || vectors.Any(vector => vector is null || vector.Length == 0))
+                        throw new AssistantProviderException("Embedding provider returned an invalid batch.");
                     for (var i = 0; i < batch.Length; i++) EmbeddingCache[CacheKey(batch[i])] = vectors[i];
 
                     if (_cacheStore is not null)

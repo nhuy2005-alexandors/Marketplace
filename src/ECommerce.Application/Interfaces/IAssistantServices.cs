@@ -10,6 +10,7 @@ public interface IAssistantService
 public interface ISemanticSearchService
 {
     bool IsHybridReady { get; }
+    string RetrievalMode { get; }
     Task WarmUpAsync(CancellationToken ct = default);
     Task<bool> HasLexicalEvidenceAsync(string query, AssistantChatFilters? filters, CancellationToken ct = default);
     Task<AssistantQueryAnalysis> AnalyzeQueryAsync(string query, CancellationToken ct = default);

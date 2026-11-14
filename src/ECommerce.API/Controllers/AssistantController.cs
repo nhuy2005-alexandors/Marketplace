@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace ECommerce.API.Controllers;
 
-[EnableRateLimiting("ai")]
 public sealed class AssistantController : ApiControllerBase
 {
     private const int MaxRequestBytes = 32 * 1024;
@@ -15,6 +14,7 @@ public sealed class AssistantController : ApiControllerBase
     public AssistantController(IAssistantService assistant) => _assistant = assistant;
 
     [AllowAnonymous]
+    [EnableRateLimiting("ai")]
     [HttpPost("chat")]
     [RequestSizeLimit(MaxRequestBytes)]
     [ProducesResponseType(typeof(AssistantChatResponse), StatusCodes.Status200OK)]
@@ -46,5 +46,5 @@ public sealed class AssistantController : ApiControllerBase
     [HttpGet("readiness")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<object> Readiness([FromServices] ISemanticSearchService search) =>
-        Ok(new { hybridReady = search.IsHybridReady, retrievalMode = search.IsHybridReady ? "hybrid" : "lexical-warming" });
+        Ok(new { hybridReady = search.IsHybridReady, retrievalMode = search.RetrievalMode });
 }

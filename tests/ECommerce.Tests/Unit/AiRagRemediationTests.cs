@@ -110,6 +110,7 @@ public sealed class AiRagRemediationTests
         };
         var options = new AssistantDomainOptions
         {
+            SupportedAttributeCodes = ["ram", "storage", "anc", "color"],
             AttributeAliases = new Dictionary<string, string[]> { ["ram"] = ["memory"], ["color"] = ["mau"] },
             UnitAliases = new Dictionary<string, string[]> { ["GB"] = ["gb"] },
             ValueAliases = new Dictionary<string, Dictionary<string, string[]>>
@@ -194,6 +195,157 @@ public sealed class AiRagRemediationTests
 
         Assert.Equal("lexical-warming", response.RetrievalMode);
         Assert.Equal("lexical-warming", response.Retrieval.Mode);
+    }
+
+    [Fact]
+    public async Task Assistant_TypedAttributeConstraintRunsBeforeOutOfScopeDictionaryGuard()
+    {
+        var search = new FakeSearch([Candidate(ProductDto(16, "Fiction Laptop RAM16"))])
+        {
+            Analysis = new AssistantQueryAnalysis(
+                [new AssistantTypedConstraint(100, "RAM", (int)CatalogAttributeType.Number, "equals", ValueNumber: 16m, Unit: "GB")],
+                false, false, [])
+        };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("weather laptop RAM 16 GB"), null);
+
+        Assert.Equal(1, search.CallCount);
+        Assert.Equal(0, search.LexicalGateCallCount);
+        Assert.Single(search.LastConstraints);
+        Assert.Equal(16, Assert.Single(response.Products).Id);
+    }
+
+    [Fact]
+    public void AssistantQueryAnalyzer_DoesNotInferBooleanTrueFromUnknownValueAndRecognizesExplicitNegation()
+    {
+        var category = new Category { Id = 1, Name = "Audio & Wearables" };
+        var anc = new AttributeDefinition { Id = 200, CategoryId = 1, Code = "anc", DisplayName = "ANC", DataType = CatalogAttributeType.Boolean, IsActive = true };
+        var options = new AssistantDomainOptions
+        {
+            SupportedAttributeCodes = ["anc"],
+            AttributeAliases = new Dictionary<string, string[]> { ["anc"] = ["noise cancellation"] },
+            ValueAliases = new Dictionary<string, Dictionary<string, string[]>>
+            {
+                ["anc"] = new(StringComparer.OrdinalIgnoreCase) { ["true"] = ["with", "has"], ["false"] = ["without"] }
+            }
+        };
+
+        var unknown = AssistantQueryAnalyzer.Analyze("headphones ANC perhaps", [category], [], [], [anc], [], options);
+        var negative = AssistantQueryAnalyzer.Analyze("headphones không có ANC", [category], [], [], [anc], [], options);
+        var negativeEnglish = AssistantQueryAnalyzer.Analyze("headphones without ANC", [category], [], [], [anc], [], options);
+
+        Assert.DoesNotContain(unknown.Constraints, constraint => constraint.AttributeDefinitionId == anc.Id);
+        Assert.Contains(negative.Constraints, constraint => constraint.AttributeDefinitionId == anc.Id && constraint.ValueBoolean == false);
+        Assert.Contains(negativeEnglish.Constraints, constraint => constraint.AttributeDefinitionId == anc.Id && constraint.ValueBoolean == false);
+    }
+
+    [Fact]
+    public void AssistantQueryAnalyzer_ParsesPublishedV2CatalogValues()
+    {
+        var category = new Category { Id = 1, Name = "Computers & Laptops" };
+        var definitions = new[]
+        {
+            new AttributeDefinition { Id = 1, CategoryId = 1, Code = "ram", DisplayName = "RAM", DataType = CatalogAttributeType.Number, Unit = "GB", IsActive = true },
+            new AttributeDefinition { Id = 2, CategoryId = 1, Code = "storage", DisplayName = "Storage", DataType = CatalogAttributeType.Number, Unit = "GB", IsActive = true },
+            new AttributeDefinition { Id = 3, CategoryId = 1, Code = "color", DisplayName = "Color", DataType = CatalogAttributeType.Text, IsActive = true },
+            new AttributeDefinition { Id = 4, CategoryId = 1, Code = "connection", DisplayName = "Connection", DataType = CatalogAttributeType.Text, IsActive = true }
+        };
+        var values = new List<ProductAttributeValue>();
+        for (var id = 1; id <= 35; id++)
+        {
+            values.Add(new ProductAttributeValue { ProductId = id, AttributeDefinitionId = 3, DataType = CatalogAttributeType.Text,
+                ValueText = new[] { "White", "Black", "Blue", "Green", "Silver" }[(id - 1) % 5], AttributeDefinition = definitions[2] });
+            values.Add(new ProductAttributeValue { ProductId = id, AttributeDefinitionId = 4, DataType = CatalogAttributeType.Text,
+                ValueText = new[] { "Bluetooth", "Wired", "Wireless" }[(id - 1) % 3], AttributeDefinition = definitions[3] });
+        }
+        var brands = Enumerable.Range(1, 35).Select(id => new Brand { Id = id, Name = $"FictionBrand {id:00}", Slug = $"fictionbrand-{id:00}" }).ToArray();
+        var options = new AssistantDomainOptions
+        {
+            SupportedAttributeCodes = ["ram", "storage", "color", "connection"],
+            AttributeAliases = new Dictionary<string, string[]> { ["ram"] = ["memory"] },
+            UnitAliases = new Dictionary<string, string[]> { ["GB"] = ["gb"] }
+        };
+
+        foreach (var ram in new[] { 8, 16, 32, 64 })
+            Assert.Contains(AssistantQueryAnalyzer.Analyze($"Tìm máy tính with {ram} GB RAM", [category], [], brands, definitions, values, options).Constraints,
+                constraint => constraint.AttributeDefinitionId == 1 && constraint.ValueNumber == ram);
+        foreach (var storage in new[] { 128, 256, 512, 1024, 2048 })
+            Assert.Contains(AssistantQueryAnalyzer.Analyze($"Laptop {storage} GB storage", [category], [], brands, definitions, values, options).Constraints,
+                constraint => constraint.AttributeDefinitionId == 2 && constraint.ValueNumber == storage);
+        foreach (var color in new[] { "White", "Black", "Blue", "Green", "Silver" })
+            Assert.Contains(AssistantQueryAnalyzer.Analyze($"Laptop color {color}", [category], [], brands, definitions, values, options).Constraints,
+                constraint => constraint.AttributeDefinitionId == 3 && constraint.ValueText == color);
+        foreach (var connection in new[] { "Bluetooth", "Wired", "Wireless" })
+            Assert.Contains(AssistantQueryAnalyzer.Analyze($"Laptop connection {connection}", [category], [], brands, definitions, values, options).Constraints,
+                constraint => constraint.AttributeDefinitionId == 4 && constraint.ValueText == connection);
+        foreach (var brand in brands)
+            Assert.Contains(AssistantQueryAnalyzer.Analyze($"brand {brand.Name} laptop", [category], [], brands, definitions, values, options).Constraints,
+                constraint => constraint.BrandId == brand.Id);
+    }
+
+    [Fact]
+    public void AssistantQueryAnalyzer_RamConditionIsParsedFromRequestedRegressionPhrase()
+    {
+        var category = new Category { Id = 1, Name = "Computers & Laptops" };
+        var ram = new AttributeDefinition { Id = 1, CategoryId = 1, Code = "ram", DisplayName = "RAM", DataType = CatalogAttributeType.Number, Unit = "GB", IsActive = true };
+        var options = new AssistantDomainOptions { SupportedAttributeCodes = ["ram"] };
+
+        var analysis = AssistantQueryAnalyzer.Analyze("Tìm máy tính with 16 GB RAM", [category], [], [], [ram], [], options);
+
+        Assert.Contains(analysis.Constraints, constraint => constraint.AttributeDefinitionId == ram.Id && constraint.ValueNumber == 16m);
+    }
+
+    [Fact]
+    public async Task SemanticSearch_WarmupDoesNotReportHybridReadyForEmptyCatalogOrMissingVectors()
+    {
+        SemanticSearchService.MarkWarmupScheduled();
+        await using (var emptyDb = TestDb.Create())
+        {
+            var emptySearch = new SemanticSearchService(emptyDb, new FakeEmbeddingProvider(_ => [1f]), NullLogger<SemanticSearchService>.Instance);
+            await emptySearch.WarmUpAsync();
+            Assert.False(emptySearch.IsHybridReady);
+            Assert.Equal("lexical", emptySearch.RetrievalMode);
+        }
+
+        SemanticSearchService.MarkWarmupScheduled();
+        await using var db = TestDb.Create();
+        var category = new Category { Id = 1, Name = "Warmup category" };
+        var seller = new User { Id = 10, Email = "warmup@example.test", PasswordHash = "test-hash", FullName = "Seller" };
+        db.Categories.Add(category); db.Users.Add(seller);
+        db.Products.Add(Product(1, "Warmup product", category, 10m, 1, seller));
+        await db.SaveChangesAsync();
+        var unavailable = new FakeEmbeddingProvider(_ => []);
+        var failedSearch = new SemanticSearchService(db, unavailable, NullLogger<SemanticSearchService>.Instance);
+        await failedSearch.WarmUpAsync();
+        Assert.False(failedSearch.IsHybridReady);
+        Assert.Equal("lexical", failedSearch.RetrievalMode);
+    }
+
+    [Fact]
+    public async Task SemanticSearch_EnforcesParsedRamConstraintAgainstReturnedDtos()
+    {
+        await using var db = TestDb.Create();
+        var category = new Category { Id = 1, Name = "Computers & Laptops" };
+        var seller = new User { Id = 10, Email = "ram-regression@example.test", PasswordHash = "test-hash", FullName = "Seller" };
+        var ram = new AttributeDefinition { Id = 100, CategoryId = 1, Code = "ram", DisplayName = "RAM", DataType = CatalogAttributeType.Number, Unit = "GB", IsActive = true };
+        db.Categories.Add(category); db.Users.Add(seller); db.AttributeDefinitions.Add(ram);
+        db.Products.AddRange(Product(1, "Fiction Laptop RAM16", category, 700m, 3, seller), Product(2, "Fiction Laptop RAM32", category, 900m, 2, seller));
+        db.ProductAttributeValues.AddRange(
+            new ProductAttributeValue { ProductId = 1, CategoryId = 1, AttributeDefinitionId = 100, DataType = CatalogAttributeType.Number, ValueNumber = 16m },
+            new ProductAttributeValue { ProductId = 2, CategoryId = 1, AttributeDefinitionId = 100, DataType = CatalogAttributeType.Number, ValueNumber = 32m });
+        await db.SaveChangesAsync();
+        var analysis = AssistantQueryAnalyzer.Analyze("Tìm máy tính with 16 GB RAM", [category],
+            db.Products.ToList(), [], [ram], db.ProductAttributeValues.ToList(),
+            new AssistantDomainOptions { SupportedAttributeCodes = ["ram"] });
+        var search = new SemanticSearchService(db, new FakeEmbeddingProvider(_ => [1f, 0f]), NullLogger<SemanticSearchService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { EmbeddingBatchDelaySeconds = 0 }));
+
+        var results = await search.SearchCandidatesAsync("Tìm máy tính with 16 GB RAM", null, analysis.Constraints, 4);
+
+        Assert.NotEmpty(results);
+        Assert.All(results, result => Assert.Equal(1, result.Product.Id));
     }
 
     [Fact]
@@ -580,7 +732,7 @@ public sealed class AiRagRemediationTests
     [Fact]
     public async Task Assistant_ExplicitSkuBranchIsStrongEvenWhenTheExactSkuIsMissing()
     {
-        var search = new FakeSearch([]);
+        var search = new FakeSearch([]) { Analysis = new AssistantQueryAnalysis([], false, false, []) };
         var answers = new FakeAnswerProvider(null);
         var service = new AssistantService(search, answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
 
@@ -666,7 +818,7 @@ public sealed class AiRagRemediationTests
 
         Assert.True(response.Retrieval.HasEvidence);
         Assert.Equal("does it come in blue?", answers.LastQuery);
-        Assert.Equal(turns, answers.LastTurns);
+        Assert.Equal(turns.TakeLast(3), answers.LastTurns);
         Assert.Equal("conversation-9", response.ConversationId);
     }
 
@@ -1323,6 +1475,7 @@ public sealed class AiRagRemediationTests
     private sealed class FakeSearch(IReadOnlyList<AssistantRetrievalCandidate> candidates) : ISemanticSearchService
     {
         public bool IsHybridReady { get; set; } = true;
+        public string RetrievalMode => IsHybridReady ? "hybrid" : "lexical-warming";
         public Task WarmUpAsync(CancellationToken ct = default) => Task.CompletedTask;
         public int CallCount { get; private set; }
         public int LexicalGateCallCount { get; private set; }

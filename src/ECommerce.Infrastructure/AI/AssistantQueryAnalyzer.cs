@@ -145,8 +145,23 @@ public static partial class AssistantQueryAnalyzer
             if (values.TryGetValue("false", out var falseAliases) && falseAliases.Any(a => ContainsPhrase(query, a))) return false;
             if (values.TryGetValue("true", out var trueAliases) && trueAliases.Any(a => ContainsPhrase(query, a))) return true;
         }
-        if (ContainsPhrase(query, "without") || ContainsPhrase(query, "khong")) return false;
-        return true;
+        var attributes = new[] { definition.Code, definition.DisplayName }
+            .Concat(GetAliases(options.AttributeAliases, definition.Code))
+            .Select(RetrievalScoring.Normalize)
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(Regex.Escape)
+            .ToArray();
+        if (attributes.Length == 0) return null;
+        var attributePattern = string.Join("|", attributes);
+        var negativeBefore = Regex.IsMatch(query,
+            @"\b(?:without|no|khong(?:\s+co)?)\b.{0,24}\b(?:" + attributePattern + @")\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var negativeAfter = Regex.IsMatch(query,
+            @"\b(?:" + attributePattern + @")\b.{0,16}\b(?:not|khong)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (negativeBefore || negativeAfter) return false;
+        return null;
     }
 
     private static bool TryReadExplicitBrand(string normalized, out string brand)

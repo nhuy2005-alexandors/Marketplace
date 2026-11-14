@@ -39,13 +39,13 @@ public sealed class AssistantService : IAssistantService
         var query = request.Query!.Trim();
         var intent = AssistantIntentClassifier.Classify(query);
         var subjectiveQuestion = AssistantIntentClassifier.HasSubjectiveQuestion(query);
+        var explicitSkuQuery = RetrievalScoring.TryFindSkuCandidate(query, out var requestedSku) &&
+                               RetrievalScoring.HasNearbySkuCue(query, requestedSku);
         if (intent.Intent is "blocked" or "account_action" or "greeting")
             return ScopeGuard(intent.Intent, request.Conversation?.ConversationId);
         var filters = AssistantQueryFilters.Merge(query, request.Filters);
         if (filters.MinPrice.HasValue && filters.MaxPrice.HasValue && filters.MinPrice.Value > filters.MaxPrice.Value)
             return NoEvidence(request.Conversation?.ConversationId, filters: filters);
-        if (intent.Intent == "out_of_scope" && !await _search.HasLexicalEvidenceAsync(intent.LexicalGateQuery, filters, ct))
-            return ScopeGuard("out_of_scope", request.Conversation?.ConversationId);
 
         var analysis = _geminiOptions.StrictEvidenceEnabled || _geminiOptions.ContextualizerV2Enabled
             ? await _search.AnalyzeQueryAsync(query, ct)
@@ -61,9 +61,13 @@ public sealed class AssistantService : IAssistantService
         var constraints = _geminiOptions.StrictEvidenceEnabled ? analysis.Constraints : Array.Empty<AssistantTypedConstraint>();
         var missingAttribute = analysis.UnsupportedConstraints.FirstOrDefault(value => value.StartsWith("context-attribute:", StringComparison.Ordinal));
         var unsupportedConstraint = analysis.UnsupportedConstraints.Any(value => !value.StartsWith("context-attribute:", StringComparison.Ordinal));
+        var hasTypedIntent = constraints.Count > 0 || analysis.UnsupportedConstraints.Count > 0;
+        if (intent.Intent == "out_of_scope" && !explicitSkuQuery && !hasTypedIntent &&
+            !await _search.HasLexicalEvidenceAsync(intent.LexicalGateQuery, filters, ct))
+            return ScopeGuard("out_of_scope", request.Conversation?.ConversationId);
         if (_geminiOptions.StrictEvidenceEnabled && unsupportedConstraint)
             return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
-        if (_geminiOptions.StrictEvidenceEnabled && constraints.Count == 0 && !analysis.HasCatalogTerm)
+        if (_geminiOptions.StrictEvidenceEnabled && constraints.Count == 0 && !analysis.HasCatalogTerm && !explicitSkuQuery)
             return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
 
         var searchFilters = contextualQuery != query ? AssistantQueryFilters.Merge(contextualQuery, filters) : filters;
@@ -82,8 +86,8 @@ public sealed class AssistantService : IAssistantService
                 new ProductSourceDto("product", candidate.Product.Id, source.ChunkType, source.ContentHash))).Distinct().ToArray();
             var infoStrength = candidates.Any(candidate => candidate.LexicalScore > 0) ? "strong" : "weak";
             return new AssistantChatResponse(NoAttributeInfoAnswer(field), infoProducts, infoSources,
-                new RetrievalMetadataDto("hybrid", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), infoStrength,
-                "fallback", "product_search", "hybrid", ToConstraintDtos(constraints, filters), context.Action);
+                new RetrievalMetadataDto(_search.RetrievalMode, true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), infoStrength,
+                "fallback", "product_search", _search.RetrievalMode, ToConstraintDtos(constraints, filters), context.Action);
         }
 
         if (candidates.Count == 0 && !_geminiOptions.StrictEvidenceEnabled && IsRecommendationIntent(query))
@@ -96,12 +100,14 @@ public sealed class AssistantService : IAssistantService
                     new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong", "fallback", "product_search");
             }
         }
-        var skuBranch = IsExplicitSkuBranch(query, candidates) || (contextualQuery != query && IsExplicitSkuBranch(contextualQuery, candidates));
+        var skuBranch = explicitSkuQuery || IsExplicitSkuBranch(query, candidates) || (contextualQuery != query && IsExplicitSkuBranch(contextualQuery, candidates));
         var evidenceStrength = skuBranch || candidates.Any(candidate => candidate.LexicalScore > 0) ? "strong" : "weak";
         if (candidates.Count == 0)
         {
             if (_geminiOptions.StrictEvidenceEnabled)
-                return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
+                return skuBranch
+                    ? NoSkuMatch(request.Conversation?.ConversationId, constraints, context.Action, filters)
+                    : NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
             var noEvidence = LegacyNoEvidence(request.Conversation?.ConversationId, evidenceStrength,
                 skuBranch ? "fallback" : "weak-evidence");
             return subjectiveQuestion ? noEvidence with { Answer = noEvidence.Answer + "\n\n" + AssistantIntentClassifier.SubjectiveCaveat } : noEvidence;
@@ -157,7 +163,7 @@ public sealed class AssistantService : IAssistantService
             : BuildLocalAnswer(query, selected.Select(candidate => candidate.Product).ToArray());
         if (subjectiveQuestion) answer += "\n\n" + AssistantIntentClassifier.SubjectiveCaveat;
         if (evidenceStrength == "weak") answerSource = "weak-evidence";
-        var retrievalMode = _search.IsHybridReady ? "hybrid" : "lexical-warming";
+        var retrievalMode = _search.RetrievalMode;
         return new AssistantChatResponse(answer, selected.Select(candidate => candidate.Product).ToArray(), sourcesOut,
             new RetrievalMetadataDto(retrievalMode, true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource, "product_search",
             retrievalMode, ToConstraintDtos(constraints, filters), context.Action);
@@ -181,20 +187,27 @@ public sealed class AssistantService : IAssistantService
         query.Contains("đề xuất", StringComparison.OrdinalIgnoreCase) ||
         query.Contains("recommend", StringComparison.OrdinalIgnoreCase);
 
-    private static AssistantChatResponse NoEvidence(string? conversationId, IReadOnlyList<AssistantTypedConstraint>? constraints = null,
+    private AssistantChatResponse NoEvidence(string? conversationId, IReadOnlyList<AssistantTypedConstraint>? constraints = null,
         string contextAction = "none", AssistantChatFilters? filters = null) => new(
         "Mình không tìm thấy sản phẩm nào đáp ứng các điều kiện bạn đưa ra.",
-        [], [], new RetrievalMetadataDto("hybrid", false), conversationId ?? Guid.NewGuid().ToString("N"), "none", "no-evidence", "product_search",
-        "hybrid", ToConstraintDtos(constraints ?? [], filters), contextAction);
+        [], [], new RetrievalMetadataDto(_search.RetrievalMode, false), conversationId ?? Guid.NewGuid().ToString("N"), "none", "no-evidence", "product_search",
+        _search.RetrievalMode, ToConstraintDtos(constraints ?? [], filters), contextAction);
 
-    private static AssistantChatResponse LegacyNoEvidence(string? conversationId, string evidenceStrength, string answerSource) => new(
+    private AssistantChatResponse NoSkuMatch(string? conversationId, IReadOnlyList<AssistantTypedConstraint> constraints,
+        string contextAction, AssistantChatFilters? filters) => new(
+        "Mình không tìm thấy sản phẩm có mã SKU này trong cửa hàng.", [], [], new RetrievalMetadataDto(_search.RetrievalMode, false),
+        conversationId ?? Guid.NewGuid().ToString("N"), "strong", "fallback", "product_search", _search.RetrievalMode,
+        ToConstraintDtos(constraints, filters), contextAction);
+
+    private AssistantChatResponse LegacyNoEvidence(string? conversationId, string evidenceStrength, string answerSource) => new(
         "Mình chưa chắc có sản phẩm khớp hoàn toàn với yêu cầu. Bạn thử điều chỉnh từ khóa hoặc bộ lọc nhé.",
-        [], [], new RetrievalMetadataDto("hybrid", false), conversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource);
+        [], [], new RetrievalMetadataDto(_search.RetrievalMode, false), conversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource,
+        RetrievalMode: _search.RetrievalMode);
 
-    private static AssistantChatResponse NoAttributeInfo(string? conversationId, string field, string contextAction,
+    private AssistantChatResponse NoAttributeInfo(string? conversationId, string field, string contextAction,
         IReadOnlyList<AssistantTypedConstraint> constraints, AssistantChatFilters? filters) => new(
-        NoAttributeInfoAnswer(field), [], [], new RetrievalMetadataDto("hybrid", false),
-        conversationId ?? Guid.NewGuid().ToString("N"), "none", "no-evidence", "product_search", "hybrid", ToConstraintDtos(constraints, filters), contextAction);
+        NoAttributeInfoAnswer(field), [], [], new RetrievalMetadataDto(_search.RetrievalMode, false),
+        conversationId ?? Guid.NewGuid().ToString("N"), "none", "no-evidence", "product_search", _search.RetrievalMode, ToConstraintDtos(constraints, filters), contextAction);
 
     private static string NoAttributeInfoAnswer(string field) =>
         $"Mình không có thông tin có cấu trúc về {field} trong dữ liệu của cửa hàng nên không thể xác nhận.";

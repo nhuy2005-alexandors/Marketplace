@@ -25,8 +25,27 @@ public sealed class AssistantEndpointTests
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Empty(body.RootElement.GetProperty("products").EnumerateArray());
         Assert.Empty(body.RootElement.GetProperty("sources").EnumerateArray());
-        Assert.Equal("weak", body.RootElement.GetProperty("evidenceStrength").GetString());
-        Assert.Equal("weak-evidence", body.RootElement.GetProperty("answerSource").GetString());
+        Assert.Equal("none", body.RootElement.GetProperty("evidenceStrength").GetString());
+        Assert.Equal("no-evidence", body.RootElement.GetProperty("answerSource").GetString());
+    }
+
+    [Fact]
+    public async Task Assistant_ReadinessDoesNotConsumeChatRateLimit()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        using var client = factory.CreateClient();
+        for (var index = 0; index < 12; index++)
+        {
+            using var chatResponse = await client.PostAsJsonAsync("/api/assistant/chat", new { query = "" });
+            Assert.Equal(HttpStatusCode.BadRequest, chatResponse.StatusCode);
+        }
+        for (var index = 0; index < 20; index++)
+        {
+            using var readiness = await client.GetAsync("/api/assistant/readiness");
+            Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
+        }
+        using var limitedChat = await client.PostAsJsonAsync("/api/assistant/chat", new { query = "" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, limitedChat.StatusCode);
     }
 
     [Fact]
