@@ -41,7 +41,7 @@ export async function executeRagQuery(
       query: userQuery.slice(0, 1000),
       conversation: {
         conversationId,
-        recentTurns: recentTurns.slice(-4).map((turn) => ({
+        recentTurns: recentTurns.slice(-6).map((turn) => ({
           role: turn.role,
           content: turn.content.slice(0, 500),
         })),

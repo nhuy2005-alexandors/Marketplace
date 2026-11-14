@@ -97,7 +97,7 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
             sourceChunks = candidate.Sources.Select(source => new { source.ChunkType, source.Content, source.ContentHash })
         });
         var contents = new List<object>();
-        foreach (var turn in recentTurns.TakeLast(4))
+        foreach (var turn in AssistantContextualizer.TakeLastThreeConversationPairs(recentTurns))
         {
             contents.Add(new
             {

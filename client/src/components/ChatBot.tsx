@@ -121,7 +121,7 @@ export function ChatBot() {
     try {
       const recentTurns = messagesRef.current
         .filter((message) => message.id !== "welcome-1" && message.id !== "welcome-reset")
-        .slice(-4)
+        .slice(-6)
         .map((message) => ({ role: message.sender === "bot" ? "assistant" as const : "user" as const, content: message.text }));
       const ragResult = await executeRagQuery(userMsg.text, recentTurns, conversationIdRef.current);
       conversationIdRef.current = ragResult.conversationId;

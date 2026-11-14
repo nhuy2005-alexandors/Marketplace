@@ -32,7 +32,7 @@ public sealed class AssistantController : ApiControllerBase
             return BadRequest(new { error = "Category and seller filters must be positive IDs." });
 
         var turns = request.Conversation?.RecentTurns;
-        if (turns?.Count > 4 || turns?.Any(turn => turn.Content is null || turn.Content.Length > 500 || turn.Role is null || turn.Role.Length > 16) == true)
+        if (turns?.Count > 6 || turns?.Any(turn => turn.Content is null || turn.Content.Length > 500 || turn.Role is null || turn.Role.Length > 16) == true)
             return BadRequest(new { error = "Conversation context exceeds the allowed bounds." });
         if (request.Context?.VisibleProductIds?.Count > 20)
             return BadRequest(new { error = "Visible product hints exceed the allowed limit." });

@@ -55,6 +55,9 @@ public sealed class AssistantService : IAssistantService
                 analysis.HasNewProductTerm, analysis.Constraints.Count > 0, _domainOptions.FollowUpCues)
             : new AssistantContextualizer.ContextualizationResult(
                 AssistantContextualizer.ContextualizeQuery(query, request.Conversation?.RecentTurns), "none");
+        if (context.Action == "needs_clarification")
+            return NoEvidence(request.Conversation?.ConversationId, contextAction: context.Action) with
+            { Answer = "Bạn đang hỏi đến sản phẩm hoặc lựa chọn nào? Vui lòng nói rõ tên sản phẩm nhé." };
         var contextualQuery = context.Query;
         if (contextualQuery != query && (_geminiOptions.StrictEvidenceEnabled || _geminiOptions.ContextualizerV2Enabled))
             analysis = await _search.AnalyzeQueryAsync(contextualQuery, ct);
@@ -121,10 +124,11 @@ public sealed class AssistantService : IAssistantService
         {
             try
             {
-                var turns = (request.Conversation?.RecentTurns ?? []).TakeLast(3).Where(turn =>
+                var turns = AssistantContextualizer.TakeLastThreeConversationPairs(
+                    context.Action == "new_topic" ? null : request.Conversation?.RecentTurns).Where(turn =>
                         (turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase) || turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase)) &&
                         !string.IsNullOrWhiteSpace(turn.Content))
-                    .TakeLast(4).Select(turn => turn with { Content = turn.Content.Trim()[..Math.Min(turn.Content.Trim().Length, 500)] }).ToArray();
+                    .Select(turn => turn with { Content = turn.Content.Trim()[..Math.Min(turn.Content.Trim().Length, 500)] }).ToArray();
                 generated = await _answers.GenerateAsync(query, candidates, turns, ct);
                 _generationCircuitBreaker.RecordSuccess();
                 answerSource = "generated";

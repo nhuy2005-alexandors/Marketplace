@@ -361,13 +361,68 @@ public sealed class AiRagRemediationTests
             new AssistantConversationTurn("assistant", "result")
         };
 
-        var followup = AssistantContextualizer.ContextualizeQueryV2("Cái thứ hai rẻ hơn?", turns, false, false, ["cai thu hai"]);
+        var followup = AssistantContextualizer.ContextualizeQueryV2("Có màu xanh không?", turns, false, false, []);
+        var ordinal = AssistantContextualizer.ContextualizeQueryV2("Cái thứ hai rẻ hơn?", turns, false, false, ["cai thu hai"]);
         var newTopic = AssistantContextualizer.ContextualizeQueryV2("Tìm laptop gaming", turns, true, false, []);
 
         Assert.Equal("followup", followup.Action);
         Assert.Contains("FictionBrand 07", followup.Query, StringComparison.Ordinal);
+        Assert.Equal("needs_clarification", ordinal.Action);
+        Assert.Equal("Cái thứ hai rẻ hơn?", ordinal.Query);
         Assert.Equal("new_topic", newTopic.Action);
         Assert.Equal("Tìm laptop gaming", newTopic.Query);
+    }
+
+    [Fact]
+    public void AssistantContextualizerV2_DoesNotGuessWhenSubjectFallsOutsideThreePairs()
+    {
+        var turns = new[]
+        {
+            new AssistantConversationTurn("user", "Tìm tai nghe FictionBrand 07"), new AssistantConversationTurn("assistant", "result"),
+            new AssistantConversationTurn("user", "Màu trắng thì sao?"), new AssistantConversationTurn("assistant", "result"),
+            new AssistantConversationTurn("user", "Có màu đen không?"), new AssistantConversationTurn("assistant", "result"),
+            new AssistantConversationTurn("user", "Còn màu xanh?"), new AssistantConversationTurn("assistant", "result")
+        };
+
+        var result = AssistantContextualizer.ContextualizeQueryV2("Có màu bạc không?", turns, false, false, []);
+
+        Assert.Equal("needs_clarification", result.Action);
+        Assert.Equal("Có màu bạc không?", result.Query);
+    }
+
+    [Fact]
+    public void AssistantContextualizerV2_UsesNewSubjectAfterTopicSwitch()
+    {
+        var turns = new[]
+        {
+            new AssistantConversationTurn("user", "Tìm tai nghe FictionBrand 07"), new AssistantConversationTurn("assistant", "result"),
+            new AssistantConversationTurn("user", "Tìm laptop gaming"), new AssistantConversationTurn("assistant", "result")
+        };
+
+        var result = AssistantContextualizer.ContextualizeQueryV2("RAM 16 GB thì sao?", turns, false, true, []);
+
+        Assert.Equal("followup", result.Action);
+        Assert.Contains("laptop gaming", result.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FictionBrand 07", result.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Assistant_ReportsNoInformationForUncataloguedLaptopColor()
+    {
+        var search = new FakeSearch([])
+        {
+            Analysis = new AssistantQueryAnalysis([], true, true, ["context-attribute:color"])
+        };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), new FakeRecommendationProvider(),
+            NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("laptop màu tím"), null);
+
+        Assert.Contains("không có thông tin", response.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(response.Products);
+        Assert.Empty(response.Sources);
+        Assert.Equal("none", response.EvidenceStrength);
     }
 
     [Fact]
@@ -614,10 +669,26 @@ public sealed class AiRagRemediationTests
     }
 
     [Fact]
-    public async Task Assistant_ReturnsNoEvidenceWhenRetrievalIsEmpty()
+    public async Task Assistant_ReturnsStrictNoEvidenceWhenRetrievalIsEmpty()
     {
         var service = new AssistantService(new FakeSearch([]), new FakeAnswerProvider(null), new FakeRecommendationProvider(),
-            NullLogger<AssistantService>.Instance);
+            NullLogger<AssistantService>.Instance, geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("unknown product"), null);
+
+        Assert.False(response.Retrieval.HasEvidence);
+        Assert.Empty(response.Products);
+        Assert.Empty(response.Sources);
+        Assert.Equal("none", response.EvidenceStrength);
+        Assert.Equal("no-evidence", response.AnswerSource);
+        Assert.Contains("chưa tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Assistant_ReturnsLegacyWeakWhenStrictEvidenceIsDisabled()
+    {
+        var service = new AssistantService(new FakeSearch([]), new FakeAnswerProvider(null), new FakeRecommendationProvider(),
+            NullLogger<AssistantService>.Instance, geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = false, ContextualizerV2Enabled = false }));
 
         var response = await service.ChatAsync(new AssistantChatRequest("unknown product"), null);
 
@@ -626,7 +697,6 @@ public sealed class AiRagRemediationTests
         Assert.Empty(response.Sources);
         Assert.Equal("weak", response.EvidenceStrength);
         Assert.Equal("weak-evidence", response.AnswerSource);
-        Assert.DoesNotContain("chưa tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -818,7 +888,7 @@ public sealed class AiRagRemediationTests
 
         Assert.True(response.Retrieval.HasEvidence);
         Assert.Equal("does it come in blue?", answers.LastQuery);
-        Assert.Equal(turns.TakeLast(3), answers.LastTurns);
+        Assert.Equal(turns, answers.LastTurns);
         Assert.Equal("conversation-9", response.ConversationId);
     }
 

@@ -17,14 +17,19 @@ public sealed class AssistantEndpointTests
         using var response = await client.PostAsJsonAsync("/api/assistant/chat", new
         {
             query = "unmatched catalog phrase qzxv",
-            productIds = new[] { 1 },
-            products = new[] { new { id = 1, name = "Injected product", price = 0.01 } }
+            productIds = new[] { 999999 },
+            context = new { visibleProductIds = new[] { 999999 } },
+            products = new[] { new { id = 999999, name = "Injected product", price = 0.01 } }
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Empty(body.RootElement.GetProperty("products").EnumerateArray());
-        Assert.Empty(body.RootElement.GetProperty("sources").EnumerateArray());
+        var products = body.RootElement.GetProperty("products").EnumerateArray().ToArray();
+        var sources = body.RootElement.GetProperty("sources").EnumerateArray().ToArray();
+        Assert.Empty(products);
+        Assert.Empty(sources);
+        Assert.DoesNotContain(products, product => product.GetProperty("id").GetInt32() == 999999);
+        Assert.DoesNotContain(sources, source => source.TryGetProperty("productId", out var id) && id.GetInt32() == 999999);
         Assert.Equal("none", body.RootElement.GetProperty("evidenceStrength").GetString());
         Assert.Equal("no-evidence", body.RootElement.GetProperty("answerSource").GetString());
     }
@@ -71,7 +76,19 @@ public sealed class AssistantEndpointTests
         using var tooManyTurns = await client.PostAsJsonAsync("/api/assistant/chat", new
         {
             query = "lamp",
-            conversation = new { recentTurns = Enumerable.Range(0, 5).Select(index => new { role = "user", content = $"turn {index}" }) }
+            conversation = new { recentTurns = Enumerable.Range(0, 7).Select(index => new { role = "user", content = $"turn {index}" }) }
+        });
+        using var threePairs = await client.PostAsJsonAsync("/api/assistant/chat", new
+        {
+            query = "hello",
+            conversation = new
+            {
+                recentTurns = Enumerable.Range(0, 3).SelectMany(index => new[]
+                {
+                    new { role = "user", content = $"turn {index}" },
+                    new { role = "assistant", content = $"reply {index}" }
+                })
+            }
         });
         using var longTurn = await client.PostAsJsonAsync("/api/assistant/chat", new
         {
@@ -86,6 +103,7 @@ public sealed class AssistantEndpointTests
 
         Assert.Equal(HttpStatusCode.BadRequest, longQuery.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, tooManyTurns.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, threePairs.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, longTurn.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, tooManyVisibleIds.StatusCode);
     }

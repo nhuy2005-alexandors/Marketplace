@@ -22,6 +22,10 @@ public static class AssistantContextualizer
         @"\b(?:bao hanh|pin|trong luong|nang|xuat xu|san xuat o dau|chong on|bluetooth|chong nuoc|kich thuoc|warranty|battery|weight|waterproof)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    private static readonly Regex OrdinalReference = new(
+        @"\b(?:(?:cai|mon|loai|san pham)\s+)?thu\s+(?:hai|ba|tu|nam|sau|bay|tam|chin|muoi|[0-9]+)\b|\b(?:the\s+)?(?:second|third|fourth|fifth)\s+(?:one|item|product)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private static readonly Regex ConversationalPrefix = new(
         @"^(?:(?:xin chao|chao ban|hello|hi|shop oi|ad oi|ban oi|cho minh hoi|cho toi hoi|minh muon tim|toi muon tim|tim giup|tim cho minh|tim cho toi|tim|mua)\s+)+",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -73,24 +77,60 @@ public static class AssistantContextualizer
         IReadOnlyList<AssistantConversationTurn>? recentTurns, bool hasNewProductTerm,
         bool hasTypedConstraint, IReadOnlyList<string> configuredFollowUpCues)
     {
-        var turns = recentTurns?.TakeLast(3).ToArray() ?? [];
-        var hasPriorProductTurn = turns.Any(turn => turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+        var turns = TakeLastThreeConversationPairs(recentTurns);
+        var userTurns = turns.Where(turn => turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var hasPriorProductTurn = userTurns.Any(turn =>
             AssistantIntentClassifier.Classify(turn.Content).Intent == "product_search");
-        if (!hasPriorProductTurn) return new ContextualizationResult(query, "none");
-        if (hasNewProductTerm) return new ContextualizationResult(query, "new_topic");
-
+        if (hasNewProductTerm)
+            return new ContextualizationResult(query, hasPriorProductTurn ? "new_topic" : "none");
         var normalized = RetrievalScoring.Normalize(query);
         var cueMatch = configuredFollowUpCues.Any(cue => ContainsPhrase(normalized, cue));
         var existingRuleMatch = FollowUpPronouns.IsMatch(normalized) || RefinementPhrases.IsMatch(normalized) ||
                                 EllipticalPrefix.IsMatch(normalized) || SpecificationInquiry.IsMatch(normalized);
-        if (!cueMatch && !existingRuleMatch && !hasTypedConstraint) return new ContextualizationResult(query, "none");
+        var isFollowUp = cueMatch || existingRuleMatch || hasTypedConstraint || OrdinalReference.IsMatch(normalized);
+        if (!isFollowUp) return new ContextualizationResult(query, "none");
+        if (OrdinalReference.IsMatch(normalized))
+            return new ContextualizationResult(query, "needs_clarification");
 
-        var priorSubject = turns.Reverse().FirstOrDefault(turn => turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
-            AssistantIntentClassifier.Classify(turn.Content).Intent == "product_search")?.Content;
-        if (string.IsNullOrWhiteSpace(priorSubject)) return new ContextualizationResult(query, "none");
-        var contextual = ContextualizeQuery(query, turns);
-        if (contextual == query && (hasTypedConstraint || cueMatch)) contextual = $"{priorSubject} {query}".Trim();
-        return new ContextualizationResult(contextual, contextual == query ? "none" : "followup");
+        var priorSubject = userTurns.Reverse()
+            .Where(turn => AssistantIntentClassifier.Classify(turn.Content).Intent == "product_search")
+            .FirstOrDefault(turn => !IsFollowUpMessage(turn.Content, configuredFollowUpCues))?.Content;
+        if (string.IsNullOrWhiteSpace(priorSubject))
+            return new ContextualizationResult(query, "needs_clarification");
+
+        var cleanedSubject = ConversationalPrefix.Replace(RetrievalScoring.Normalize(priorSubject), " ").Trim();
+        var strippedQuery = FollowUpPronouns.Replace(normalized, " ").Trim();
+        strippedQuery = Regex.Replace(strippedQuery, @"\s+", " ").Trim();
+        return new ContextualizationResult($"{cleanedSubject} {strippedQuery}".Trim(), "followup");
+    }
+
+    public static IReadOnlyList<AssistantConversationTurn> TakeLastThreeConversationPairs(
+        IReadOnlyList<AssistantConversationTurn>? recentTurns)
+    {
+        if (recentTurns is null || recentTurns.Count < 2) return [];
+        var pairs = new List<AssistantConversationTurn[]>();
+        for (var index = 0; index < recentTurns.Count - 1;)
+        {
+            var user = recentTurns[index];
+            var assistant = recentTurns[index + 1];
+            if (user.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+                assistant.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
+            {
+                pairs.Add([user, assistant]);
+                index += 2;
+            }
+            else index++;
+        }
+        return pairs.TakeLast(3).SelectMany(pair => pair).ToArray();
+    }
+
+    private static bool IsFollowUpMessage(string message, IReadOnlyList<string> configuredFollowUpCues)
+    {
+        var normalized = RetrievalScoring.Normalize(message);
+        return FollowUpPronouns.IsMatch(normalized) || RefinementPhrases.IsMatch(normalized) ||
+               EllipticalPrefix.IsMatch(normalized) ||
+               OrdinalReference.IsMatch(normalized) ||
+               configuredFollowUpCues.Any(cue => ContainsPhrase(normalized, cue));
     }
 
     private static bool ContainsPhrase(string normalized, string phrase)
