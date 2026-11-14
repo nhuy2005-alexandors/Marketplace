@@ -219,4 +219,31 @@ public class ProductCatalogServiceTests
         Assert.Equal(ErrorType.Conflict, (await new AttributeDefinitionService(db).DeleteAsync(definition.Id)).ErrorType);
         Assert.Equal(ErrorType.Conflict, (await new CategoryService(db).DeleteAsync(categoryId)).ErrorType);
     }
+    [Fact]
+    public async Task Create_rejects_slug_that_normalizes_to_empty()
+    {
+        using var db = TestDb.Create();
+
+        var result = await new BrandService(db).CreateAsync(new("Invalid brand", "!!!"));
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorType.Validation, result.ErrorType);
+        Assert.Empty(await db.Brands.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_rejects_slug_that_normalizes_to_empty()
+    {
+        using var db = TestDb.Create();
+        var service = new BrandService(db);
+        var created = await service.CreateAsync(new("Acme", "acme"));
+        Assert.True(created.Success, created.Error);
+
+        var result = await service.UpdateAsync(created.Value!.Id, new("Acme", "!!!"));
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorType.Validation, result.ErrorType);
+        Assert.Equal("acme", (await db.Brands.SingleAsync()).Slug);
+    }
+
 }
