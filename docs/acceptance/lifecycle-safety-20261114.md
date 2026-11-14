@@ -86,3 +86,22 @@ Browser form submissions used DOM click/requestSubmit; pointer hit-target reliab
 Local evidence resides under `%USERPROFILE%\Documents\Marketplace-Lifecycle-20261114`. The repository transcript contains only sanitized synthetic fixture output. Initial execution issues (default LocalDB file-path collision, a duplicate synthetic category and concurrent Vite HMR ports) were corrected without weakening integrity or touching source data. Raw test output remains outside the commit.
 
 Independent financial/concurrency review identified reservation, legacy cutover and capture-recording gaps; these were corrected and checked with focused tests. Following the owner's model instruction, the continuing review used GPT-6 Luna Max. No additional architecture or review gate was introduced.
+
+## Post-acceptance hardening addendum — 2026-11-14
+
+**Updated implementation head:** `c3b2d24a66549e95ed25ee49cb3a0530c2abec2c`
+
+Two additional safety gaps were closed after the original lifecycle acceptance:
+
+- Development runtime now validates the database target before service registration. Only a named isolated LocalDB instance with catalog `ECommerceDb_Dev` is accepted; the repository's legacy `MSSQLLocalDB/ECommerceDb` target is rejected. The EF design-time factory uses the same guard.
+- Client-provided payment `ReturnUrl` is not forwarded to providers. MoMo uses its server-configured `RedirectUrl`.
+
+Regression coverage:
+- Development startup rejects the unsafe repository-default database target.
+- A client-supplied external return URL is not forwarded to the payment provider.
+
+CI on the updated implementation head: [run 43589178284](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43589178284) — backend 122 passed, 0 failed, 2 opt-in SQL facts skipped; frontend build and 3 regression tests passed.
+
+This addendum changed runtime configuration/payment redirect handling and tests only; it did not change migration source or the accepted database lifecycle SQL behavior. The Windows LocalDB lifecycle evidence recorded above remains scoped to its original tested migration/source revision. The subsequent Owner catalog CI run separately exercises the populated pre-V2 migration and Owner catalog FK/trigger tests.
+
+No persistent development database was migrated by this addendum. Currency remains OPEN, MoMo remains fail-closed until explicit catalog currency/FX configuration, and no external payment/refund was executed.
