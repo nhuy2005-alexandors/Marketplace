@@ -72,6 +72,17 @@ public class UpdateProductRequestValidator : AbstractValidator<UpdateProductRequ
 
 public class ProductQueryValidator : AbstractValidator<ProductQuery>
 {
+    private const decimal MaxPrice = 9999999999999999.99m; // decimal(18,2)
+    private const decimal MaxAttributeNumber = 99999999999999.9999m; // decimal(18,4)
+
+    private static bool IsValidPrice(decimal? value) =>
+        !value.HasValue || (value.Value <= MaxPrice &&
+            decimal.Round(value.Value, 2, MidpointRounding.AwayFromZero) == value.Value);
+
+    private static bool IsValidAttributeNumber(decimal? value) =>
+        !value.HasValue || (value.Value >= -MaxAttributeNumber && value.Value <= MaxAttributeNumber &&
+            decimal.Round(value.Value, 4, MidpointRounding.AwayFromZero) == value.Value);
+
     public ProductQueryValidator()
     {
         RuleFor(x => x.Search).MaximumLength(200);
@@ -79,6 +90,10 @@ public class ProductQueryValidator : AbstractValidator<ProductQuery>
         RuleFor(x => x.PageSize).InclusiveBetween(1, 100);
         RuleFor(x => x.MinPrice).GreaterThanOrEqualTo(0).When(x => x.MinPrice.HasValue);
         RuleFor(x => x.MaxPrice).GreaterThanOrEqualTo(0).When(x => x.MaxPrice.HasValue);
+        RuleFor(x => x.MinPrice).Must(IsValidPrice)
+            .WithMessage("MinPrice must fit decimal(18,2) without rounding.");
+        RuleFor(x => x.MaxPrice).Must(IsValidPrice)
+            .WithMessage("MaxPrice must fit decimal(18,2) without rounding.");
         RuleFor(x => x).Must(x => !x.MinPrice.HasValue || !x.MaxPrice.HasValue || x.MinPrice <= x.MaxPrice)
             .WithMessage("MinPrice cannot exceed MaxPrice.");
         RuleFor(x => x.AttributeFilters).Must(x => x is null || x.Count <= 20)
@@ -86,6 +101,11 @@ public class ProductQueryValidator : AbstractValidator<ProductQuery>
         RuleForEach(x => x.AttributeFilters).ChildRules(filter =>
         {
             filter.RuleFor(x => x.AttributeDefinitionId).GreaterThan(0);
+            filter.RuleFor(x => x.ValueText).MaximumLength(2000);
+            filter.RuleFor(x => x.MinValue).Must(IsValidAttributeNumber)
+                .WithMessage("Attribute MinValue must fit decimal(18,4) without rounding.");
+            filter.RuleFor(x => x.MaxValue).Must(IsValidAttributeNumber)
+                .WithMessage("Attribute MaxValue must fit decimal(18,4) without rounding.");
             filter.RuleFor(x => x).Must(x =>
                 (string.IsNullOrWhiteSpace(x.ValueText) ? 0 : 1) +
                 ((x.MinValue.HasValue || x.MaxValue.HasValue) ? 1 : 0) +
