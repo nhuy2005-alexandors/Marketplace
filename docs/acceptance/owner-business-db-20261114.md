@@ -2,8 +2,8 @@
 
 **Date:** 2026-11-14  
 **Repository:** nhuy2005-alexandors/Marketplace  
-**PR #3 base:** `18d6bb6dcacb409c918e00f9a2ab0ce7793bdb7a`  
-**PR #4 implementation head tested by CI:** `ec8f0dc4781421b821cc7afe27ab94e232c18a85`  
+**PR #3 base:** `4c7c3d8bf977f2b1ca7eec869c57950ec222c963`  
+**PR #4 implementation head tested by CI:** `fa73c02c3d166c03cf211078789d3ff7597237c4`  
 **Branch:** `codex/marketplace-owner-catalog-integrity-20261114`
 
 ## Scope
@@ -41,12 +41,12 @@ The migration is guarded to LocalDB and `ECommerceDb_Dev`. It checks orphan Sell
 
 ## Verification — current branch
 
-**CI PASS** Run [43589335753](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43589335753), associated with PR #4 branch head `ec8f0dc4781421b821cc7afe27ab94e232c18a85`.
+**CI PASS** Run [43597463025](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43597463025), associated with PR #4 implementation head `fa73c02c3d166c03cf211078789d3ff7597237c4`.
 
 | Instrument | Result |
 |---|---:|
-| Backend build | PASS, 0 warnings / 0 errors |
-| Backend tests | 144 passed, 0 failed, 3 opt-in SQL facts skipped in Linux |
+| Backend build | PASS |
+| Backend tests | 147 passed, 0 failed, 3 opt-in SQL facts skipped in Linux |
 | Frontend type-check + build | PASS |
 | Frontend regression tests | 3/3 PASS |
 | Windows LocalDB migration/trigger tests | 2/2 PASS |
@@ -58,8 +58,11 @@ Additional regression coverage on the current Owner branch:
 - Price and typed-attribute query filters rejected when outside SQL precision/scale or text storage limits.
 - Client-selected payment return URL not forwarded to the payment provider.
 - Development startup rejects the repository's legacy database target.
+- MoMo rejects non-USD catalog currencies even when an FX rate is supplied; USD requires an explicit VND-per-USD rate and does not fall back to the legacy 25,000 setting.
+- Explicit USD-to-VND quote rounding and provider currency are covered by regression tests.
+- Payment.Amount remains USD while the frozen Payment.ProviderAmount/ProviderCurrency quote is VND.
 
-PR #3's USD currency-policy branch head `18d6bb6dcacb409c918e00f9a2ab0ce7793bdb7a` passed CI run [43596917326](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43596917326): backend 125 passed, 0 failed, 2 opt-in SQL facts skipped; frontend type-check/build and 3 regression tests passed.
+The current PR #3 base head `4c7c3d8bf977f2b1ca7eec869c57950ec222c963` is included in this stacked PR #4 run. The run verifies the shared lifecycle/currency implementation plus the Owner catalog changes.
 
 ## Open boundaries
 
