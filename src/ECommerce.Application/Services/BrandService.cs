@@ -110,6 +110,7 @@ public class BrandService : IBrandService
                 separator = true;
             }
         }
-        return builder.ToString().Trim('-');
+        var slug = builder.ToString().Trim('-');
+        return slug.Length == 0 ? null : slug;
     }
 }
