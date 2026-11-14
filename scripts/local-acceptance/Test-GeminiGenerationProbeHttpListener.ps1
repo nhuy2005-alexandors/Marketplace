@@ -1,7 +1,8 @@
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Net.Http
+$googleKeyPrefix='AI'+'za';$alternateKeyPrefix='A'+'Q'+'.';$keyPrefixPattern=[regex]::Escape($googleKeyPrefix)+'|'+[regex]::Escape($alternateKeyPrefix)
 $dryRun=& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'gemini-generation-probe.ps1') -DryRun -Models 'gemini-3.8-flash,gemini-2.5-flash' -Thinking low 2>&1|Out-String
-if($LASTEXITCODE -ne 0 -or -not $dryRun.Contains('Models=gemini-3.8-flash,gemini-2.5-flash') -or -not $dryRun.Contains('Thinking=low') -or -not $dryRun.Contains('KeyRead=FALSE;Network=0')){throw "Gemini probe option dry-run failed: $dryRun"}
+if($LASTEXITCODE -ne 0 -or -not $dryRun.Contains('Models=gemini-3.8-flash,gemini-2.5-flash;ModelCount=2') -or -not $dryRun.Contains('Thinking=low') -or -not $dryRun.Contains('KeyRead=FALSE;Network=0')){throw "Gemini probe option dry-run failed: $dryRun"}
 $listenerJob=$null
 try {
     $tcp=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$tcp.Start();$port=([Net.IPEndPoint]$tcp.LocalEndpoint).Port;$tcp.Stop()
@@ -25,7 +26,7 @@ try {
     }
     Start-Sleep -Milliseconds 500
     $scriptPath=Join-Path $PSScriptRoot 'gemini-generation-probe.ps1';$output=& powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath -BaseUrl "http://127.0.0.1:$port" -Model gemini-3.8-flash -Thinking none -InterRequestDelaySeconds 0 2>&1|Out-String
-    $passed=$LASTEXITCODE -eq 0 -and $output.Contains('ModelCapability model=gemini-3.8-flash;listed=True;HTTP=200;supportedGenerationMethods=generateContent,streamGenerateContent;inputTokenLimit=8192;outputTokenLimit=2048') -and $output.Contains('Probe=generateContent;Model=gemini-3.8-flash;HTTP=429') -and $output.Contains('QuotaMetric=generativelanguage.googleapis.com/generateRequestsPerMinute') -and $output.Contains('QuotaId=GenerateRequestsPerMinutePerProject') -and $output.Contains('RetryDelay=1s') -and $output.Contains('QuotaClass=per-minute') -and $output.Contains('Probe=streamGenerateContent;Model=gemini-3.8-flash;HTTP=200') -and $output -notmatch 'private-provider-body-sentinel|AIza|AQ\.[A-Za-z0-9_-]{20,}|thinkingConfig should be omitted'
+    $passed=$LASTEXITCODE -eq 0 -and $output.Contains('ModelCapability model=gemini-3.8-flash;listed=True;HTTP=200;supportedGenerationMethods=generateContent,streamGenerateContent;inputTokenLimit=8192;outputTokenLimit=2048') -and $output.Contains('Probe=generateContent;Model=gemini-3.8-flash;HTTP=429') -and $output.Contains('QuotaMetric=generativelanguage.googleapis.com/generateRequestsPerMinute') -and $output.Contains('QuotaId=GenerateRequestsPerMinutePerProject') -and $output.Contains('RetryDelay=1s') -and $output.Contains('QuotaClass=per-minute') -and $output.Contains('Probe=streamGenerateContent;Model=gemini-3.8-flash;HTTP=200') -and $output -notmatch ('private-provider-body-sentinel|'+$keyPrefixPattern+'|thinkingConfig should be omitted')
     if(-not $passed){$jobErrors='';try{$jobErrors=Receive-Job $listenerJob -Keep 2>&1|Out-String}catch{$jobErrors=$_.Exception.Message};if($jobErrors -match '(?i)access is denied|access denied|access to the path'){Write-Warning 'Gemini probe HttpListener test skipped: sandbox denied loopback listener access.';Write-Output 'GeminiGenerationProbeHttpListener=SKIP;Reason=loopback access denied';exit 0};throw "Gemini generation probe fake-server assertions failed: $output`nListener: $jobErrors"}
     Write-Output 'GeminiGenerationProbeHttpListener=PASS;PowerShell=5.1;System.Net.Http=loaded;Requests=4;QuotaRedaction=PASS;ThinkingNone=PASS;KeyPrinted=FALSE'
 }finally{if($listenerJob){Stop-Job $listenerJob -ErrorAction SilentlyContinue;Remove-Job $listenerJob -Force -ErrorAction SilentlyContinue}}

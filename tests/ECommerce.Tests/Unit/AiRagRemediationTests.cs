@@ -307,7 +307,7 @@ public sealed class AiRagRemediationTests
     {
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(7, "Possible but unsupported item"))]),
             new FakeAnswerProvider(new AssistantGeneratedAnswer("Insufficient evidence", [])), new FakeRecommendationProvider(),
-            NullLogger<AssistantService>.Instance);
+            NullLogger<AssistantService>.Instance, geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("question"), null);
 
@@ -323,7 +323,7 @@ public sealed class AiRagRemediationTests
         var candidate = Candidate(ProductDto(7, "Real catalog item"));
         var service = new AssistantService(new FakeSearch([candidate]), new FakeAnswerProvider(
             new AssistantGeneratedAnswer("Unsupported answer", [999])), new FakeRecommendationProvider(),
-            NullLogger<AssistantService>.Instance);
+            NullLogger<AssistantService>.Instance, geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("find item", Context: new AssistantClientHints([999])), null);
 
@@ -337,7 +337,8 @@ public sealed class AiRagRemediationTests
     public async Task Assistant_UsesSafeGroundedFallbackWhenProviderFails()
     {
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Catalog lamp"))]),
-            new FakeAnswerProvider(null, fail: true), new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+            new FakeAnswerProvider(null, fail: true), new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("lamp"), null);
 
@@ -374,13 +375,31 @@ public sealed class AiRagRemediationTests
     {
         var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("Có mẫu này.", [9]));
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Wireless headset"))]), answers,
-            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
 
         Assert.Equal("strong", response.EvidenceStrength);
         Assert.Equal(1, answers.CallCount);
         Assert.Equal("generated", response.AnswerSource);
+    }
+
+    [Fact]
+    public async Task Assistant_GenerationDisabledUsesFallbackWithoutCallingProvider()
+    {
+        Assert.False(new GeminiOptions().GenerationEnabled);
+        var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("should not be used", [9]));
+        var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Wireless headset"))]), answers,
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { GenerationEnabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
+
+        Assert.Equal("strong", response.EvidenceStrength);
+        Assert.Equal("fallback", response.AnswerSource);
+        Assert.Equal(0, answers.CallCount);
+        Assert.Contains("Wireless headset", response.Answer, StringComparison.Ordinal);
+        Assert.Single(response.Products);
     }
 
     [Fact]
@@ -405,7 +424,8 @@ public sealed class AiRagRemediationTests
         var candidate = new AssistantRetrievalCandidate(product, 0, .64, .16,
             [new AssistantSourceChunk(17, "Demo", null, "summary", "Wireless audio device. SKU: DEMO-V2-00038.", "HASH-SKU", "fake-v1")]);
         var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("Found by exact SKU.", [17]));
-        var service = new AssistantService(new FakeSearch([candidate]), answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+        var service = new AssistantService(new FakeSearch([candidate]), answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("DEMO-V2-00038"), null);
 
@@ -439,7 +459,7 @@ public sealed class AiRagRemediationTests
         var breaker = new AssistantGenerationCircuitBreaker(options, clock);
         var answers = new FakeAnswerProvider(null, fail: true);
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Wireless headset"))]), answers,
-            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, breaker);
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, breaker, GenerationEnabledOptions());
 
         await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
         await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
@@ -458,7 +478,7 @@ public sealed class AiRagRemediationTests
     {
         var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("Yes, the catalog item is available.", [9]));
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Catalog lamp"))]), answers,
-            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, geminiOptions: GenerationEnabledOptions());
         var turns = new[]
         {
             new AssistantConversationTurn("user", "Earlier unrelated question"),
@@ -604,7 +624,7 @@ public sealed class AiRagRemediationTests
         var client = new HttpClient(handler) { BaseAddress = new Uri("https://generativelanguage.googleapis.com/") };
         var provider = new GeminiAssistantProvider(new FakeHttpClientFactory(client), Options.Create(new GeminiOptions { ApiKey = "server-key-test" }), providerLogger);
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Catalog lamp"))]), provider,
-            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("lamp"), null);
 
@@ -654,7 +674,7 @@ public sealed class AiRagRemediationTests
         var handler = new FakeHttpHandler((_, _) => Task.FromException<HttpResponseMessage>(new TaskCanceledException("timeout with private transport detail")));
         var provider = Provider(handler);
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Catalog lamp"))]), provider,
-            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("lamp"), null);
 
@@ -728,7 +748,7 @@ public sealed class AiRagRemediationTests
             Content = new StringContent("not-json")
         })));
         var service = new AssistantService(new FakeSearch([Candidate(ProductDto(9, "Catalog lamp"))]), provider,
-            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+            new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance, geminiOptions: GenerationEnabledOptions());
 
         var response = await service.ChatAsync(new AssistantChatRequest("lamp"), null);
 
@@ -860,6 +880,8 @@ public sealed class AiRagRemediationTests
     };
 
     private static ProductDto ProductDto(int id, string name) => new(id, name, "Description", 10m, 3, null, 1, "Demo", 2, "Shop", 0, 0);
+
+    private static IOptions<GeminiOptions> GenerationEnabledOptions() => Options.Create(new GeminiOptions { GenerationEnabled = true });
 
     private static AssistantRetrievalCandidate Candidate(ProductDto product) => new(product, .8, .2, .5,
         [new AssistantSourceChunk(product.Id, "Demo", null, "summary", product.Name, "HASH", "fake-v1")]);

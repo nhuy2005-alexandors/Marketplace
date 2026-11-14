@@ -2,6 +2,7 @@ using ECommerce.Application.DTOs.AI;
 using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Text.RegularExpressions;
 
 namespace ECommerce.Infrastructure.AI;
@@ -16,19 +17,22 @@ public sealed class AssistantService : IAssistantService
     private readonly IRecommendationProvider _recommendations;
     private readonly ILogger<AssistantService> _logger;
     private readonly AssistantGenerationCircuitBreaker _generationCircuitBreaker;
+    private readonly GeminiOptions _geminiOptions;
 
     public AssistantService(
         ISemanticSearchService search,
         IAssistantAnswerProvider answers,
         IRecommendationProvider recommendations,
         ILogger<AssistantService> logger,
-        AssistantGenerationCircuitBreaker? generationCircuitBreaker = null)
+        AssistantGenerationCircuitBreaker? generationCircuitBreaker = null,
+        IOptions<GeminiOptions>? geminiOptions = null)
     {
         _search = search;
         _answers = answers;
         _recommendations = recommendations;
         _logger = logger;
-        _generationCircuitBreaker = generationCircuitBreaker ?? new AssistantGenerationCircuitBreaker(new GeminiOptions());
+        _geminiOptions = geminiOptions?.Value ?? new GeminiOptions();
+        _generationCircuitBreaker = generationCircuitBreaker ?? new AssistantGenerationCircuitBreaker(_geminiOptions);
     }
 
     public async Task<AssistantChatResponse> ChatAsync(AssistantChatRequest request, int? customerId, CancellationToken ct = default)
@@ -57,7 +61,7 @@ public sealed class AssistantService : IAssistantService
 
         AssistantGeneratedAnswer? generated = null;
         var halfOpenProbe = false;
-        var generationAllowed = evidenceStrength == "strong" && _generationCircuitBreaker.TryAcquire(out halfOpenProbe);
+        var generationAllowed = evidenceStrength == "strong" && _geminiOptions.GenerationEnabled && _generationCircuitBreaker.TryAcquire(out halfOpenProbe);
         var answerSource = evidenceStrength == "weak" ? "weak-evidence" : "fallback";
         if (generationAllowed)
         {
@@ -82,6 +86,8 @@ public sealed class AssistantService : IAssistantService
                 _logger.LogWarning("Assistant generation failed; returning a grounded local response. Failure type: {FailureType}", ex.GetType().Name);
             }
         }
+        else if (evidenceStrength == "strong" && !_geminiOptions.GenerationEnabled)
+            _logger.LogInformation("Assistant generation is disabled by Gemini:GenerationEnabled; returning a grounded local response.");
         else if (evidenceStrength == "strong")
             _logger.LogInformation("Assistant generation skipped because its in-memory circuit is open.");
 

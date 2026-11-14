@@ -14,12 +14,12 @@ if($baseUri.Scheme -ne 'https' -and -not ($baseUri.Scheme -eq 'http' -and $baseU
 $settings=Get-Content -LiteralPath (Join-Path $RepoRoot 'src/ECommerce.API/appsettings.json') -Raw|ConvertFrom-Json
 $configuredModel=([string]$settings.Gemini.GenerationModel -replace '^models/','')
 if($Model -and $Models){throw 'Use either -Model or -Models, not both.'}
-$selectedModels=if($Model){@($Model)}elseif($Models){@($Models)}else{@($configuredModel)}
+$selectedModels=if($Model){@($Model)}elseif($Models){@($Models|ForEach-Object{([string]$_ -split ',')})}else{@($configuredModel)}
 $selectedModels=@($selectedModels|ForEach-Object{([string]$_).Trim() -replace '^models/',''}|Where-Object{$_})
 if(-not $selectedModels.Count){throw 'At least one model must be selected.'}
 $effectiveThinking=if($PSBoundParameters.ContainsKey('Thinking')){$Thinking}elseif([string]::IsNullOrWhiteSpace([string]$settings.Gemini.GenerationThinkingLevel)){'none'}else{[string]$settings.Gemini.GenerationThinkingLevel}
 if($effectiveThinking -notin @('none','low','medium')){throw 'Configured GenerationThinkingLevel must be none, low, or medium.'}
-if($DryRun){Write-Output ('DryRun=TRUE;ModelsList=planned;Models={0};ConfiguredModel={1};Thinking={2};BetweenGenerationTestsSeconds={3};TimeoutSeconds=25;KeyRead=FALSE;Network=0' -f ($selectedModels -join ','),$configuredModel,$effectiveThinking,$InterRequestDelaySeconds);exit 0}
+if($DryRun){Write-Output ('DryRun=TRUE;ModelsList=planned;Models={0};ModelCount={1};ConfiguredModel={2};Thinking={3};BetweenGenerationTestsSeconds={4};TimeoutSeconds=25;KeyRead=FALSE;Network=0' -f ($selectedModels -join ','),$selectedModels.Count,$configuredModel,$effectiveThinking,$InterRequestDelaySeconds);exit 0}
 
 $apiKey=''
 if($baseUri.Host -notin @('localhost','127.0.0.1','::1')){
