@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-14  
 **Repository:** nhuy2005-alexandors/Marketplace  
-**PR #3 base:** `b9d5ad5d2cdee2da10c9482de22de8aa353dea15`  
+**PR #3 base:** `18d6bb6dcacb409c918e00f9a2ab0ce7793bdb7a`  
 **PR #4 implementation head tested by CI:** `ec8f0dc4781421b821cc7afe27ab94e232c18a85`  
 **Branch:** `codex/marketplace-owner-catalog-integrity-20261114`
 
@@ -59,12 +59,14 @@ Additional regression coverage on the current Owner branch:
 - Client-selected payment return URL not forwarded to the payment provider.
 - Development startup rejects the repository's legacy database target.
 
-PR #3's updated lifecycle branch head `c3b2d24a66549e95ed25ee49cb3a0530c2abec2c` separately passed CI run [43589178284](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43589178284): backend 122 passed, 0 failed, 2 opt-in SQL facts skipped; frontend build and 3 regression tests passed.
+PR #3's USD currency-policy branch head `18d6bb6dcacb409c918e00f9a2ab0ce7793bdb7a` passed CI run [43596917326](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43596917326): backend 125 passed, 0 failed, 2 opt-in SQL facts skipped; frontend type-check/build and 3 regression tests passed.
 
 ## Open boundaries
 
-- Catalog currency remains OPEN. Dataset V2's USD data-generation convention is not an approved production currency.
-- Real MoMo initiation remains fail-closed until Owner explicitly approves CatalogCurrency and CatalogToVndRate. No historical FX conversion is inferred.
+- **USD is the canonical Marketplace catalog currency**, approved by Owner on 2026-11-14. Product, cart/order, fixed coupon, Payment.Amount, Refund.Amount, seller splits and dashboard revenue are USD.
+- MoMo accepts USD catalog orders only. `CatalogCurrency=USD`; `CatalogToVndRate` remains intentionally unset because no FX source/rate has been approved. Real MoMo initiation remains fail-closed; legacy `UsdToVndRate` is ignored.
+- MoMo provider quote/capture and reconciliation amounts remain VND and are frozen separately from USD Payment.Amount. No historical rows are converted.
+- Refund.Amount is the USD full-order obligation. Current manual refund MVP stores only external reference/note and does not persist/verify actual external payout amount/currency; Admin must verify original provider capture evidence before confirming a transfer.
 - One immutable payment attempt per order; automatic multi-attempt retry is not implemented.
 - Reconciliation resolution, COD cash collection and automatic external refund execution remain future work.
 - No external payment charge or external refund was made during acceptance.

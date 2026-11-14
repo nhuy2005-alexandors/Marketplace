@@ -4,6 +4,10 @@
 **Updated:** 2026-11-14  
 **Persistence:** SQL Server / EF Core
 
+## Currency contract
+
+`Product.Price` and all Product API monetary values are denominated in USD, the canonical Marketplace catalog currency. Product prices are stored and returned without FX conversion. The known DbSeeder and synthetic Dataset V2 values are USD. Historical values are not rewritten as part of this policy.
+
 ## 1. Product identity and ownership
 
 A Product contains Name, Sku, optional BrandId, Description, Price, Stock, ImageUrl, CategoryId, and SellerId.
@@ -89,4 +93,4 @@ Only active, filterable AttributeDefinitions participate in filtering. Product s
 
 ## 8. Explicit non-goals
 
-No vector database, recommendation scoring, RAG logic, new database, dataset regeneration, product-image enrichment, currency conversion, or speculative ML infrastructure is part of this contract. Currency remains an explicit Owner decision; synthetic V2 USD values are not sufficient to enable real MoMo payments.
+No vector database, recommendation scoring, RAG logic, new database, dataset regeneration, product-image enrichment, currency conversion, or speculative ML infrastructure is part of this contract. USD is the accepted canonical catalog currency. MoMo FX remains a separate provider-boundary configuration and must be explicitly approved/set before real initiation.

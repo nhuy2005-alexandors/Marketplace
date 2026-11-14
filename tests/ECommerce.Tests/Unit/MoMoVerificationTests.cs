@@ -9,12 +9,45 @@ public class MoMoVerificationTests
 {
     [Theory]
     [InlineData("VND")]
-    [InlineData("vnd")]
-    public void Vnd_catalog_cannot_apply_a_second_exchange_rate(string currency)
+    [InlineData("EUR")]
+    [InlineData("GBP")]
+    public void Non_usd_catalog_currency_is_rejected_even_with_an_fx_rate(string currency)
     {
-        var p=new MoMoProvider(Options.Create(new PaymentOptions { MoMo=new() {
-            PartnerCode="test",AccessKey="test",SecretKey="test",CatalogCurrency=currency,CatalogToVndRate=2 } }));
-        Assert.NotNull(p.Quote(new(1,1000,"","")).Error);
+        var provider = new MoMoProvider(Options.Create(new PaymentOptions { MoMo = new()
+        {
+            PartnerCode = "test", AccessKey = "test", SecretKey = "test",
+            CatalogCurrency = currency, CatalogToVndRate = 25000m
+        } }));
+
+        Assert.NotNull(provider.Quote(new(1, 1m, "", "")).Error);
+    }
+
+    [Fact]
+    public void Usd_catalog_requires_explicit_rate_and_does_not_fall_back_to_legacy_rate()
+    {
+        var provider = new MoMoProvider(Options.Create(new PaymentOptions { MoMo = new()
+        {
+            PartnerCode = "test", AccessKey = "test", SecretKey = "test",
+            CatalogCurrency = "USD", UsdToVndRate = 25000m
+        } }));
+
+        Assert.NotNull(provider.Quote(new(1, 10m, "", "")).Error);
+    }
+
+    [Fact]
+    public void Usd_catalog_quote_uses_explicit_vnd_per_usd_rate_and_rounds_to_whole_vnd()
+    {
+        var provider = new MoMoProvider(Options.Create(new PaymentOptions { MoMo = new()
+        {
+            PartnerCode = "test", AccessKey = "test", SecretKey = "test",
+            CatalogCurrency = "USD", CatalogToVndRate = 25000.5m
+        } }));
+
+        var quote = provider.Quote(new(1, 1.01m, "", ""));
+
+        Assert.Null(quote.Error);
+        Assert.Equal(25251m, quote.Amount);
+        Assert.Equal("VND", quote.Currency);
     }
     [Fact]
     public async Task Disabled_provider_does_not_accept_demo_callbacks()

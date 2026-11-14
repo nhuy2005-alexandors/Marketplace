@@ -2,6 +2,10 @@
 
 > Spec hồi tố từ code hiện có.
 
+## Currency contract
+
+All catalog/order monetary values are USD: Product.Price, CartItem.Subtotal, OrderItem.UnitPrice/Subtotal, Order.Subtotal, DiscountAmount and Total. Cart and checkout do not perform FX conversion. The same USD amount is snapshotted into OrderItem at checkout.
+
 ## Mục tiêu
 Cho phép buyer quản lý giỏ hàng và checkout thành đơn hàng multi-seller (mỗi `OrderItem` snapshot seller/giá tại thời điểm đặt), theo dõi trạng thái đơn qua state machine, hủy đơn có hoàn tồn kho, và chia tiền đơn theo từng seller khi có coupon.
 
