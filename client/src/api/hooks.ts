@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
   AuthResponse, AttributeDefinition, Brand, Cart, Category, Coupon, CouponPreview, Dashboard,
-  Order, Paged, PayResult, OrderSplit, Product, ProductAttributeInput, Refund, Review,
+  Order, Paged, PayResult, OrderSplit, Product, ProductAttributeFilter, ProductAttributeInput, Refund, Review,
   SellerApplication, SellerShop, User, WishlistItem,
 } from "../types";
 import { useAuth } from "../store/auth";
@@ -48,13 +48,28 @@ export interface ProductFilters {
   pageSize?: number;
   brandId?: number;
   inStockOnly?: boolean;
+  attributeFilters?: ProductAttributeFilter[];
 }
 
 export function useProducts(filters: ProductFilters) {
   return useQuery({
     queryKey: ["products", filters],
-    queryFn: () =>
-      api.get<Paged<Product>>("/products", { params: filters }).then((r) => r.data),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (key === "attributeFilters" || value === undefined || value === null) continue;
+        params.set(key, String(value));
+      }
+      filters.attributeFilters?.forEach((filter, index) => {
+        const prefix = "AttributeFilters[" + index + "].";
+        params.set(prefix + "AttributeDefinitionId", String(filter.attributeDefinitionId));
+        if (filter.valueText !== undefined) params.set(prefix + "ValueText", filter.valueText);
+        if (filter.minValue !== undefined) params.set(prefix + "MinValue", String(filter.minValue));
+        if (filter.maxValue !== undefined) params.set(prefix + "MaxValue", String(filter.maxValue));
+        if (filter.valueBoolean !== undefined) params.set(prefix + "ValueBoolean", String(filter.valueBoolean));
+      });
+      return api.get<Paged<Product>>("/products", { params }).then((r) => r.data);
+    },
   });
 }
 

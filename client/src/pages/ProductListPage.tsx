@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { ArrowRight, Search, Ticket } from "lucide-react";
-import { useBrands, useCategories, useProducts, type ProductFilters } from "../api/hooks";
+import { useBrands, useCatalogAttributes, useCategories, useProducts, type ProductFilters } from "../api/hooks";
+import type { ProductAttributeFilter } from "../types";
 import { ProductCard } from "../components/ProductCard";
 import { PageHeader, Input, Select, Button, Spinner, EmptyState } from "../components/ui";
 
@@ -34,8 +35,17 @@ export function ProductListPage() {
     desc: urlDesc,
   });
   const [searchInput, setSearchInput] = useState(urlSearch ?? "");
+  const [attributeDefinitionId, setAttributeDefinitionId] = useState<number | undefined>();
+  const [attributeText, setAttributeText] = useState("");
+  const [attributeMin, setAttributeMin] = useState("");
+  const [attributeMax, setAttributeMax] = useState("");
+  const [attributeBoolean, setAttributeBoolean] = useState("");
+  const [attributeFilterError, setAttributeFilterError] = useState("");
   const { data: categories } = useCategories();
   const { data: brands } = useBrands();
+  const { data: attributeDefinitions } = useCatalogAttributes(filters.categoryId);
+  const filterableAttributes = (attributeDefinitions ?? []).filter((x) => x.isFilterable);
+  const selectedAttribute = filterableAttributes.find((x) => x.id === attributeDefinitionId);
   const { data, isLoading } = useProducts(filters);
 
   // sync when navbar search / category links change the URL
@@ -46,12 +56,70 @@ export function ProductListPage() {
       categoryId: urlCategory ? Number(urlCategory) : undefined,
       sortBy: urlSortBy,
       desc: urlDesc,
+      attributeFilters: undefined,
     }));
     setSearchInput(urlSearch ?? "");
+    setAttributeDefinitionId(undefined);
+    setAttributeText("");
+    setAttributeMin("");
+    setAttributeMax("");
+    setAttributeBoolean("");
+    setAttributeFilterError("");
   }, [urlSearch, urlCategory, urlSortBy, urlDesc]);
 
-  const update = (patch: Partial<ProductFilters>) =>
+  const update = (patch: Partial<ProductFilters>) => {
+    if (Object.prototype.hasOwnProperty.call(patch, "categoryId")) {
+      setAttributeDefinitionId(undefined);
+      setAttributeText("");
+      setAttributeMin("");
+      setAttributeMax("");
+      setAttributeBoolean("");
+      setAttributeFilterError("");
+      setFilters((f) => ({ ...f, ...patch, attributeFilters: undefined, page: patch.page ?? 1 }));
+      return;
+    }
     setFilters((f) => ({ ...f, ...patch, page: patch.page ?? 1 }));
+  };
+
+  const applyAttributeFilter = () => {
+    if (!selectedAttribute) return;
+    const filter: ProductAttributeFilter = { attributeDefinitionId: selectedAttribute.id };
+    if (selectedAttribute.dataType === 0) {
+      if (!attributeText.trim()) {
+        setAttributeFilterError("Nhập giá trị cần lọc.");
+        return;
+      }
+      filter.valueText = attributeText.trim();
+    } else if (selectedAttribute.dataType === 1) {
+      const min = attributeMin.trim() === "" ? undefined : Number(attributeMin);
+      const max = attributeMax.trim() === "" ? undefined : Number(attributeMax);
+      if ((min === undefined && max === undefined) || (min !== undefined && !Number.isFinite(min)) ||
+          (max !== undefined && !Number.isFinite(max)) || (min !== undefined && max !== undefined && min > max)) {
+        setAttributeFilterError("Nhập khoảng số hợp lệ; giá trị nhỏ nhất không được lớn hơn giá trị lớn nhất.");
+        return;
+      }
+      filter.minValue = min;
+      filter.maxValue = max;
+    } else {
+      if (attributeBoolean === "") {
+        setAttributeFilterError("Chọn Có hoặc Không.");
+        return;
+      }
+      filter.valueBoolean = attributeBoolean === "true";
+    }
+    setAttributeFilterError("");
+    update({ attributeFilters: [filter] });
+  };
+
+  const clearAttributeFilter = () => {
+    setAttributeDefinitionId(undefined);
+    setAttributeText("");
+    setAttributeMin("");
+    setAttributeMax("");
+    setAttributeBoolean("");
+    setAttributeFilterError("");
+    update({ attributeFilters: undefined });
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 animate-fade-in">
@@ -115,6 +183,60 @@ export function ProductListPage() {
             <Chip key={c.id} active={filters.categoryId === c.id} onClick={() => update({ categoryId: c.id })}>{c.name}</Chip>
           ))}
         </div>
+        {filters.categoryId && filterableAttributes.length > 0 && (
+          <div className="flex flex-wrap items-end gap-2 border-t border-slate-200 dark:border-slate-800 pt-3">
+            <div className="min-w-[160px] flex-1">
+              <label className="block text-xs muted mb-1">Lọc theo thuộc tính</label>
+              <Select value={attributeDefinitionId ?? ""}
+                onChange={(e) => {
+                  setAttributeDefinitionId(e.target.value ? Number(e.target.value) : undefined);
+                  setAttributeText("");
+                  setAttributeMin("");
+                  setAttributeMax("");
+                  setAttributeBoolean("");
+                  setAttributeFilterError("");
+                  update({ attributeFilters: undefined });
+                }}>
+                <option value="">Chọn thuộc tính</option>
+                {filterableAttributes.map((attribute) => <option key={attribute.id} value={attribute.id}>{attribute.displayName}</option>)}
+              </Select>
+            </div>
+            {selectedAttribute?.dataType === 0 && (
+              <div className="min-w-[150px] flex-1">
+                <label className="block text-xs muted mb-1">Giá trị văn bản</label>
+                <Input value={attributeText} maxLength={2000} placeholder="Nhập chính xác"
+                  onChange={(e) => setAttributeText(e.target.value)} />
+              </div>
+            )}
+            {selectedAttribute?.dataType === 1 && (
+              <>
+                <div className="min-w-[110px]">
+                  <label className="block text-xs muted mb-1">Từ</label>
+                  <Input type="number" step="0.0001" value={attributeMin} placeholder="Min"
+                    onChange={(e) => setAttributeMin(e.target.value)} />
+                </div>
+                <div className="min-w-[110px]">
+                  <label className="block text-xs muted mb-1">Đến</label>
+                  <Input type="number" step="0.0001" value={attributeMax} placeholder="Max"
+                    onChange={(e) => setAttributeMax(e.target.value)} />
+                </div>
+              </>
+            )}
+            {selectedAttribute?.dataType === 2 && (
+              <div className="min-w-[120px]">
+                <label className="block text-xs muted mb-1">Giá trị</label>
+                <Select value={attributeBoolean} onChange={(e) => setAttributeBoolean(e.target.value)}>
+                  <option value="">Chọn</option>
+                  <option value="true">Có</option>
+                  <option value="false">Không</option>
+                </Select>
+              </div>
+            )}
+            <Button type="button" onClick={applyAttributeFilter} disabled={!selectedAttribute}>Áp dụng</Button>
+            <Button type="button" variant="ghost" onClick={clearAttributeFilter}>Xóa lọc</Button>
+            {attributeFilterError && <p className="w-full text-rose-500 text-xs">{attributeFilterError}</p>}
+          </div>
+        )}
       </div>
 
       {isLoading ? (

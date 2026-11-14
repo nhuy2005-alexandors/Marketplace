@@ -44,6 +44,14 @@ export interface ProductAttributeInput {
   valueBoolean?: boolean;
 }
 
+export interface ProductAttributeFilter {
+  attributeDefinitionId: number;
+  valueText?: string;
+  minValue?: number;
+  maxValue?: number;
+  valueBoolean?: boolean;
+}
+
 export interface ProductAttribute {
   attributeDefinitionId: number;
   code: string;
