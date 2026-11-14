@@ -186,6 +186,7 @@ export interface Refund {
   providerAmount?: number | null;
   providerCurrency?: string | null;
   paymentMethod?: string | null;
+  paymentProvider?: string | null;
   paymentTransactionId?: string | null;
 }
 

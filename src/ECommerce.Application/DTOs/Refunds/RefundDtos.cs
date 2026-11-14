@@ -21,4 +21,5 @@ public record RefundDto(
     decimal? ProviderAmount = null,
     string? ProviderCurrency = null,
     string? PaymentMethod = null,
+    string? PaymentProvider = null,
     string? PaymentTransactionId = null);

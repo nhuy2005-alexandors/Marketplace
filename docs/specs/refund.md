@@ -23,7 +23,7 @@ Customer chỉ được tạo yêu cầu khi đồng thời thỏa mãn:
 
 Refund là hoàn tiền **toàn bộ**: `Refund.Amount = Payment.Amount = Order.Total`, tất cả đều là USD canonical. Không cho client tự truyền số tiền.
 
-Với MoMo, `Payment.ProviderAmount`/`ProviderCurrency` giữ nguyên số tiền capture theo provider (VND). Không quy đổi lại theo tỷ giá tại thời điểm refund. Refund API trả về capture gốc, currency, phương thức và payment transaction ID để Admin đối chiếu. Request/complete đều fail-closed nếu thiếu provider capture amount/currency. Refund MVP vẫn chưa lưu hoặc xác minh actual external payout amount/currency; Admin phải đối chiếu capture gốc và chứng từ chuyển tiền bên ngoài trước khi xác nhận.
+Với MoMo, `Payment.ProviderAmount`/`ProviderCurrency` giữ nguyên số tiền capture theo provider (VND). Không quy đổi lại theo tỷ giá tại thời điểm refund. Refund API trả về capture gốc, currency, payment method, provider key và payment transaction ID để Admin đối chiếu. Request/complete đều fail-closed nếu thiếu provider capture amount/currency. Refund MVP vẫn chưa lưu hoặc xác minh actual external payout amount/currency; Admin phải đối chiếu capture gốc và chứng từ chuyển tiền bên ngoài trước khi xác nhận.
 
 COD bị loại khỏi Refund MVP vì hệ thống chưa ghi nhận được sự kiện thu tiền COD thực tế. Đơn COD chưa fulfillment có thể hủy mà không tạo Refund. Hỗ trợ hoàn COD sau thu tiền cần một collection event riêng, ngoài phạm vi này.
 

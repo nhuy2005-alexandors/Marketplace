@@ -121,7 +121,8 @@ public class RefundServiceTests
         result.Value.ProviderAmount.Should().Be(5_000_000m);
         result.Value.ProviderCurrency.Should().Be("VND");
         result.Value.PaymentTransactionId.Should().Be("PAY-ORIGINAL-001");
-        result.Value.PaymentMethod.Should().Be("momo");
+        result.Value.PaymentMethod.Should().Be(nameof(PaymentMethod.EWallet));
+        result.Value.PaymentProvider.Should().Be("momo");
     }
 
     [Fact]

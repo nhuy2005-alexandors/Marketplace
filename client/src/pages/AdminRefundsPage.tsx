@@ -63,6 +63,7 @@ function RefundCard({ refund }: { refund: Refund }) {
           })} {refund.providerCurrency}</div>
         )}
         {refund.paymentMethod && <div><span className="font-medium">Phương thức:</span> {refund.paymentMethod}</div>}
+        {refund.paymentProvider && <div><span className="font-medium">Cổng thanh toán:</span> {refund.paymentProvider}</div>}
         {refund.paymentTransactionId && <div><span className="font-medium">Mã giao dịch thanh toán:</span> {refund.paymentTransactionId}</div>}
         <p className="text-xs muted pt-1">Đối chiếu capture gốc và khoản chuyển tiền trên hệ thống của nhà cung cấp/ngân hàng. Không quy đổi capture lịch sử bằng tỷ giá hiện tại.</p>
       </div>

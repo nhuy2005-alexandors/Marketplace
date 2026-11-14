@@ -302,6 +302,7 @@ public class RefundService : IRefundService
         refund.ProcessedByUser?.FullName,
         refund.Payment?.ProviderAmount,
         refund.Payment?.ProviderCurrency,
-        refund.Payment?.ProviderKey ?? refund.Payment?.Method.ToString(),
+        refund.Payment?.Method.ToString(),
+        refund.Payment?.ProviderKey,
         refund.Payment?.TransactionId);
 }
