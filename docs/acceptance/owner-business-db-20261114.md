@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-14  
 **Repository:** nhuy2005-alexandors/Marketplace  
-**PR #3 base:** `c3b2d24a66549e95ed25ee49cb3a0530c2abec2c`  
+**PR #3 base:** `9300e1e6b843f568738819469390818aea5b9eec`  
 **PR #4 implementation head tested by CI:** `ec8f0dc4781421b821cc7afe27ab94e232c18a85`  
 **Branch:** `codex/marketplace-owner-catalog-integrity-20261114`
 
