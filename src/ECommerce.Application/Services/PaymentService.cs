@@ -25,7 +25,8 @@ public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers)
 
         var provider = providers.Resolve(key);
         var reference = $"{order.Id}-{Guid.NewGuid():N}";
-        var context = new PaymentContext(order.Id, order.Total, request.ReturnUrl ?? "", "0.0.0.0", reference);
+        // The redirect endpoint is server-owned; never forward a client-selected destination.
+        var context = new PaymentContext(order.Id, order.Total, string.Empty, "0.0.0.0", reference);
         var quote = provider.Quote(context);
         if (quote.Error is not null) return Result.Fail<PayResultDto>(quote.Error, ErrorType.Conflict);
         var payment = order.Payment ?? new Payment { OrderId = order.Id };

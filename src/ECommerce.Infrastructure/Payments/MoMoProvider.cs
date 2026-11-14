@@ -52,7 +52,8 @@ public class MoMoProvider : IPaymentProvider
         var requestId = ctx.RequestId ?? $"{ctx.OrderId}-{Guid.NewGuid():N}";
         var momoOrderId = requestId;
         var orderInfo = $"Thanh toan don hang {ctx.OrderId}";
-        var redirectUrl = string.IsNullOrEmpty(ctx.ReturnUrl) ? _opt.RedirectUrl : ctx.ReturnUrl;
+        // The provider return endpoint must come from trusted server configuration.
+        var redirectUrl = _opt.RedirectUrl;
         // payWithMethod: cổng hiện đủ QR ví + thẻ ATM nội địa + thẻ tín dụng.
         const string requestType = "payWithMethod";
         var extraData = "";
