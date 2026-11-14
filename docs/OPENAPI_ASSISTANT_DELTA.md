@@ -64,11 +64,14 @@ The request body limit is 32,768 bytes. The endpoint is rate-limited by the `ai`
   ],
   "retrieval": { "mode": "hybrid", "hasEvidence": true },
   "conversationId": "…",
-  "evidenceStrength": "strong"
+  "evidenceStrength": "strong",
+  "answerSource": "generated"
 }
 ```
 
 `evidenceStrength` is `strong` or `weak`. It is additive; the existing `retrieval`, product and source fields retain their previous meaning and ordering. A weak result is returned from the local Vietnamese response without calling Gemini generation; it keeps the same retrieved products and source IDs in the same order, and explicitly calls them nearest suggestions rather than confirmed matches. A strong result follows the existing generation path (or its existing grounded fallback).
+
+`answerSource` is additive and identifies how `answer` was produced: `generated` for a valid Gemini response, `fallback` for a local recommendation/grounded response after a provider failure, timeout, or open circuit, and `weak-evidence` when retrieval evidence is weak and generation is skipped.
 
 An insufficient-retrieval result is still `200`: `products` and `sources` are empty, `retrieval.hasEvidence` is false, and `evidenceStrength` is normally `weak` (explicit SKU intent remains `strong`). Provider failures normally use a backend-grounded fallback; the response does not expose provider error bodies.
 

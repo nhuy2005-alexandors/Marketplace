@@ -297,6 +297,7 @@ public sealed class AiRagRemediationTests
         Assert.Empty(response.Products);
         Assert.Empty(response.Sources);
         Assert.Equal("weak", response.EvidenceStrength);
+        Assert.Equal("weak-evidence", response.AnswerSource);
     }
 
     [Fact]
@@ -311,6 +312,7 @@ public sealed class AiRagRemediationTests
         Assert.False(response.Retrieval.HasEvidence);
         Assert.Empty(response.Products);
         Assert.Empty(response.Sources);
+        Assert.Equal("fallback", response.AnswerSource);
     }
 
     [Fact]
@@ -340,6 +342,7 @@ public sealed class AiRagRemediationTests
         Assert.Contains("Catalog lamp", response.Answer);
         Assert.Equal(9, Assert.Single(response.Products).Id);
         Assert.True(response.Retrieval.HasEvidence);
+        Assert.Equal("fallback", response.AnswerSource);
     }
 
     [Fact]
@@ -355,6 +358,7 @@ public sealed class AiRagRemediationTests
         var response = await service.ChatAsync(new AssistantChatRequest("zzqv-no-catalog-match"), null);
 
         Assert.Equal("weak", response.EvidenceStrength);
+        Assert.Equal("weak-evidence", response.AnswerSource);
         Assert.Equal(0, answers.CallCount);
         Assert.Equal(31, Assert.Single(response.Products).Id);
         Assert.Contains(response.Sources, source => source.ProductId == 31 && source.ContentHash == "SOURCE-31");
@@ -373,6 +377,7 @@ public sealed class AiRagRemediationTests
 
         Assert.Equal("strong", response.EvidenceStrength);
         Assert.Equal(1, answers.CallCount);
+        Assert.Equal("generated", response.AnswerSource);
     }
 
     [Fact]
@@ -387,6 +392,7 @@ public sealed class AiRagRemediationTests
         Assert.Equal("strong", response.EvidenceStrength);
         Assert.False(response.Retrieval.HasEvidence);
         Assert.Equal(0, answers.CallCount);
+        Assert.Equal("fallback", response.AnswerSource);
     }
 
     [Fact]
@@ -403,6 +409,7 @@ public sealed class AiRagRemediationTests
         Assert.Equal("strong", response.EvidenceStrength);
         Assert.Equal(1, answers.CallCount);
         Assert.Equal([17], response.Products.Select(product => product.Id));
+        Assert.Equal("generated", response.AnswerSource);
     }
 
     [Fact]
@@ -440,6 +447,7 @@ public sealed class AiRagRemediationTests
         await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
         await service.ChatAsync(new AssistantChatRequest("wireless headset"), null);
         Assert.Equal(3, answers.CallCount);
+        Assert.Equal("fallback", (await service.ChatAsync(new AssistantChatRequest("wireless headset"), null)).AnswerSource);
     }
 
     [Fact]
@@ -484,6 +492,7 @@ public sealed class AiRagRemediationTests
         Assert.DoesNotContain("server-key-test", response.Answer, StringComparison.Ordinal);
         Assert.DoesNotContain("system instruction", response.Answer, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("weak", response.EvidenceStrength);
+        Assert.Equal("weak-evidence", response.AnswerSource);
     }
 
     [Fact]
@@ -588,6 +597,7 @@ public sealed class AiRagRemediationTests
         Assert.Contains("Catalog lamp", response.Answer, StringComparison.Ordinal);
         Assert.DoesNotContain("private transport detail", response.Answer, StringComparison.Ordinal);
         Assert.DoesNotContain("server-key-test", response.Answer, StringComparison.Ordinal);
+        Assert.Equal("fallback", response.AnswerSource);
     }
 
     [Fact]
@@ -660,6 +670,7 @@ public sealed class AiRagRemediationTests
         Assert.True(response.Retrieval.HasEvidence);
         Assert.Contains("Catalog lamp", response.Answer, StringComparison.Ordinal);
         Assert.DoesNotContain("not-json", response.Answer, StringComparison.Ordinal);
+        Assert.Equal("fallback", response.AnswerSource);
     }
 
     [Fact]

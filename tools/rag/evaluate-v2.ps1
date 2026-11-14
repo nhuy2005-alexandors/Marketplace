@@ -18,6 +18,7 @@ param(
     [string]$ExplainQuery,
     [switch]$NoEvidenceOnly,
     [switch]$EvidenceStrengthReport,
+    [switch]$EvidenceFeatureReport,
     [switch]$AllowEmbeddingCall,
     [switch]$UseFakeEmbedder,
     [ValidateRange(0,1000000)][int]$ExpectedDocumentChunks = 1395
@@ -29,19 +30,20 @@ Add-Type -AssemblyName System.Data
 . (Join-Path $PSScriptRoot 'EvaluationResilience.ps1')
 . (Join-Path $PSScriptRoot 'EvaluationMetrics.ps1')
 if ($DevelopmentOnly -and $HoldoutFinal) { throw 'Choose either -DevelopmentOnly or -HoldoutFinal.' }
-if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and -not $EvidenceStrengthReport -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
+if (-not $LexicalOnly -and -not $DevelopmentOnly -and -not $HoldoutFinal -and -not $CacheForecastOnly -and -not $DryRunFromCache -and -not $AuthorK05Only -and -not $NoEvidenceOnly -and -not $EvidenceStrengthReport -and -not $EvidenceFeatureReport -and [string]::IsNullOrWhiteSpace($ExplainQuery)) { throw 'Specify an evaluator mode; holdout is never run by default.' }
 if ($AuthorK05Only -and ($LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly)) { throw '-AuthorK05Only must run by itself (it may be combined with -DryRunFromCache).' }
 if($NoEvidenceOnly -and ($AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-NoEvidenceOnly cannot be combined with K-05, diagnostics, development, holdout, or lexical-only modes.'}
 if($EvidenceStrengthReport -and ($AllowEmbeddingCall -or $NoEvidenceOnly -or $AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-EvidenceStrengthReport is cache-only and runs by itself; it never embeds or evaluates holdout metrics.'}
+if($EvidenceFeatureReport -and ($NoEvidenceOnly -or $EvidenceStrengthReport -or $AuthorK05Only -or $Diagnostics -or $DevelopmentOnly -or $HoldoutFinal -or $LexicalOnly)){throw '-EvidenceFeatureReport runs as its own measurement mode; it never evaluates holdout or tunes runtime parameters.'}
 if ($Diagnostics) {
     if (-not $AuthorK05Only -or $LexicalOnly -or $DevelopmentOnly -or $HoldoutFinal -or $CacheForecastOnly) { throw '-Diagnostics must be used with -AuthorK05Only only; it never runs provider or database paths.' }
     if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
     if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw '-Diagnostics requires a local cache-only dry-run fixture at -DryRunDataPath (default: obj/rag-dryrun-data.json).' }
     $DryRunFromCache = $true
 }
-if (($NoEvidenceOnly -or $EvidenceStrengthReport -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and -not $DryRunFromCache) {
+if (($NoEvidenceOnly -or $EvidenceStrengthReport -or $EvidenceFeatureReport -or -not [string]::IsNullOrWhiteSpace($ExplainQuery)) -and -not $DryRunFromCache) {
     if ([string]::IsNullOrWhiteSpace($DryRunDataPath)) { $DryRunDataPath = Join-Path $RepoRoot 'obj/rag-dryrun-data.json' }
-    if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw 'Explain/no-evidence/evidence-strength modes require the local obj/rag-dryrun-data.json fixture.' }
+    if (-not (Test-Path -LiteralPath $DryRunDataPath)) { throw 'Explain/no-evidence/evidence feature modes require the local obj/rag-dryrun-data.json fixture.' }
     $DryRunFromCache = $true
 }
 if($UseFakeEmbedder -and -not $DryRunFromCache){throw '-UseFakeEmbedder is test-only and requires -DryRunFromCache.'}
@@ -129,14 +131,24 @@ if ($DryRunFromCache) {
     $authorK05Fixtures = @($dry.authorK05Fixtures)
     $noEvidencePath = Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_NO_EVIDENCE.jsonl'
     $noEvidenceRows = if($dry.noEvidenceFixtures){@($dry.noEvidenceFixtures)}elseif(Test-Path -LiteralPath $noEvidencePath){@(Get-Content -LiteralPath $noEvidencePath | ForEach-Object { $_ | ConvertFrom-Json })}else{@()}
-    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif($EvidenceStrengthReport){@($development.query)+@($authorK05Fixtures.query)+@($noEvidenceRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
+    $naturalPath=Join-Path $RepoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_NATURAL_QUERIES.jsonl'
+    $naturalRows=if(Test-Path -LiteralPath $naturalPath){@(Get-Content -LiteralPath $naturalPath|ForEach-Object{$_|ConvertFrom-Json})}else{@()}
+    $smokeRows=@(
+        [pscustomobject]@{id='smoke-vi-accent';query='Tìm tai nghe không dây';group='smoke_known'},
+        [pscustomobject]@{id='smoke-vi-plain';query='tim tai nghe khong day';group='smoke_known'},
+        [pscustomobject]@{id='smoke-headphones-seller';query='headphones';group='smoke_known';filters=@{SellerId=2}},
+        [pscustomobject]@{id='smoke-headphones-stock';query='headphones';group='smoke_known';filters=@{InStockOnly=$true}},
+        [pscustomobject]@{id='smoke-headphones-price';query='headphones under $100';group='smoke_known';filters=@{MaxPrice=100}},
+        [pscustomobject]@{id='smoke-wireless-headset';query='wireless headset';group='smoke_known'}
+    )
+    $allQueries = if($AuthorK05Only){@($authorK05Fixtures.query)}elseif($NoEvidenceOnly){@($noEvidenceRows.query)}elseif($EvidenceStrengthReport){@($development.query)+@($authorK05Fixtures.query)+@($noEvidenceRows.query)}elseif($EvidenceFeatureReport){@($development.query)+@($noEvidenceRows.query)+@($naturalRows.query)+@($authorK05Fixtures.query)+@($smokeRows.query)}elseif(-not [string]::IsNullOrWhiteSpace($ExplainQuery)){@($ExplainQuery)}else{@($development.query) + @($authorFixtures.query) + @($authorK05Fixtures.query)}
     $queryCache = Read-QueryVectorCache -Path $dry.queryCachePath -ModelName $dry.modelName -Dimensions ([int]$dry.dimensions)
     $script:TrackRankTiming = [bool]$DryRunTrackRankTiming
     $script:RankTimes = [System.Collections.Generic.List[double]]::new()
     $missingRequested=@($allQueries | Where-Object { -not $queryCache.ContainsKey((Get-QueryVectorCacheKey ([string]$_) $dry.modelName ([int]$dry.dimensions))) } | Sort-Object -Unique)
     $queryBatches=[int][Math]::Ceiling($missingRequested.Count/16.0)
     if($missingRequested.Count -gt 0 -and -not $AllowEmbeddingCall -and -not $Diagnostics){
-        Write-Output ('CACHE_MISS_FORECAST mode={0} queries={1} missing_vectors={2} estimated_batches={3} estimated_api_calls={4} cache_written=FALSE' -f $(if($EvidenceStrengthReport){'EvidenceStrengthReport'}elseif($NoEvidenceOnly){'NoEvidenceOnly'}elseif($ExplainQuery){'ExplainQuery'}elseif($AuthorK05Only){'AuthorK05Only'}else{'DryRunFromCache'}),$allQueries.Count,$missingRequested.Count,$queryBatches,$queryBatches)
+        Write-Output ('CACHE_MISS_FORECAST mode={0} queries={1} missing_vectors={2} estimated_batches={3} estimated_api_calls={4} cache_written=FALSE' -f $(if($EvidenceFeatureReport){'EvidenceFeatureReport'}elseif($EvidenceStrengthReport){'EvidenceStrengthReport'}elseif($NoEvidenceOnly){'NoEvidenceOnly'}elseif($ExplainQuery){'ExplainQuery'}elseif($AuthorK05Only){'AuthorK05Only'}else{'DryRunFromCache'}),$allQueries.Count,$missingRequested.Count,$queryBatches,$queryBatches)
         exit 0
     }
     if($missingRequested.Count -gt 0){
@@ -190,6 +202,53 @@ if ($DryRunFromCache) {
             Write-Output ('EVIDENCE_STRENGTH group={0} weak={1}/{2} weak_rate={3:P2}' -f $set.Name,$weakCount,$set.Rows.Count,$rate)
         }
         Write-Output 'EvidenceStrengthRule=weak_when_no_product_has_lexical_score_gt_0;explicit_SKU_branch_is_strong;thresholds=NONE;cache_only=TRUE;holdout_scored=FALSE;K05_tuning=FALSE'
+        exit 0
+    }
+    if($EvidenceFeatureReport){
+        $selection=Get-Content -LiteralPath $dry.selectionPath -Raw|ConvertFrom-Json
+        $featureStopWords=@('toi','minh','ban','cho','voi','la','co','khong','nao','gi','nhe','nha','va','cua','mot','cac','nhung','hay','duoc','can','muon','tim','mua','loai','san','pham','hang','shop','gia','re','de','duoi','tren','tam','khoang','the','please','find','show','me','some','for','with','under','over')
+        $normalizedChunkTexts=@($chunks|ForEach-Object{[ECommerce.Infrastructure.AI.RetrievalScoring]::Normalize([string]$_.Content)})
+        $groups=@(
+            [pscustomobject]@{Name='development_answered';Rows=@($development|Where-Object{@($_.expected_product_ids).Count -gt 0})},
+            [pscustomobject]@{Name='development_no_result';Rows=@($development|Where-Object{@($_.expected_product_ids).Count -eq 0})},
+            [pscustomobject]@{Name='no_evidence';Rows=$noEvidenceRows},
+            [pscustomobject]@{Name='natural_queries';Rows=$naturalRows},
+            [pscustomobject]@{Name='K05_reporting_only';Rows=$authorK05Fixtures},
+            [pscustomobject]@{Name='smoke_known';Rows=$smokeRows}
+        )
+        $queryVectorByKey=@();$queryVectorByKey=@{}
+        for($i=0;$i -lt $allQueries.Count;$i++){$key=Get-QueryVectorCacheKey ([string]$allQueries[$i]) $dry.modelName ([int]$dry.dimensions);$queryVectorByKey[$key]=[single[]]$queryVectors[$i]}
+        $featureRecords=New-Object 'System.Collections.Generic.List[object]'
+        foreach($groupSet in $groups){
+            foreach($row in $groupSet.Rows){
+                $query=[string]$row.query;$queryKey=Get-QueryVectorCacheKey $query $dry.modelName ([int]$dry.dimensions);$queryVector=[single[]]$queryVectorByKey[$queryKey]
+                $skuToken='';$skuIntent=[ECommerce.Infrastructure.AI.RetrievalScoring]::TryResolveSkuIntent($query,$chunks.ToArray(),[ref]$skuToken)
+                $productScores=New-Object 'System.Collections.Generic.List[object]'
+                foreach($productGroup in ($chunks.ToArray()|Group-Object ProductId)){
+                    $productChunks=[ECommerce.Infrastructure.AI.RetrievalScoringChunk[]]$productGroup.Group
+                    $productScores.Add([ECommerce.Infrastructure.AI.RetrievalScoring]::ScoreProduct($query,$queryVector,$productChunks,$true,[double]$selection.threshold,[double]$selection.semanticWeight,[bool]$skuIntent,[string]$skuToken))
+                }
+                $semantics=[double[]]@($productScores|ForEach-Object{[double]$_.SemanticScore});$sortedSemantic=@($semantics|Sort-Object)
+                $semanticMax=$sortedSemantic[$sortedSemantic.Count-1];$semanticMedian=if($sortedSemantic.Count%2){$sortedSemantic[[int][Math]::Floor($sortedSemantic.Count/2)]}else{($sortedSemantic[$sortedSemantic.Count/2-1]+$sortedSemantic[$sortedSemantic.Count/2])/2.0}
+                $delta=$semanticMax-$semanticMedian;$mean=($semantics|Measure-Object -Average).Average;$variance=0.0;foreach($semantic in $semantics){$variance+=([double]$semantic-[double]$mean)*([double]$semantic-[double]$mean)};$sd=[Math]::Sqrt($variance/$semantics.Count);$z=if($sd -gt 0){($semanticMax-$mean)/$sd}else{0.0}
+                $normalized=[ECommerce.Infrastructure.AI.RetrievalScoring]::Normalize($query);$queryTerms=@($normalized.Split(' ',[StringSplitOptions]::RemoveEmptyEntries)|Where-Object{$_.Length -gt 1 -and $_ -notin $featureStopWords}|Sort-Object -Unique)
+                $matchedTerms=New-Object 'System.Collections.Generic.List[string]';$matchedWordTerms=New-Object 'System.Collections.Generic.List[string]';$matchedNumericTerms=New-Object 'System.Collections.Generic.List[string]'
+                foreach($term in $queryTerms){$found=$false;$pattern='(?<![a-z0-9])'+[regex]::Escape($term)+'(?![a-z0-9])';foreach($chunkText in $normalizedChunkTexts){if($chunkText -match $pattern){$found=$true;break}};if($found){if($term -match '^\d+(?:[.,]\d+)?$'){$matchedNumericTerms.Add($term);$matchedTerms.Add("number:$term")}else{$matchedWordTerms.Add($term);$matchedTerms.Add("word:$term")}}}
+                $lexicalAny=@($productScores|Where-Object{[double]$_.LexicalScore -gt 0}).Count -gt 0
+                $ranked=[ECommerce.Infrastructure.AI.RetrievalScoring]::RankForEvaluation($query,$queryVector,$chunks.ToArray(),$true,[double]$selection.threshold,[double]$selection.semanticWeight,8)
+                $rankGap='n/a';if($ranked.Count -ge 5){$rankGap=[double]$ranked[0].Score-[double]$ranked[4].Score}
+                $record=[pscustomobject]@{Group=$groupSet.Name;Id=[string]$row.id;Query=$query;LexicalAny=$lexicalAny;WordMatch=($matchedWordTerms.Count -gt 0);MatchedTerms=($matchedTerms -join ',');WordTerms=($matchedWordTerms -join ',');NumericTerms=($matchedNumericTerms -join ',');SemanticMax=[double]$semanticMax;SemanticMedian=[double]$semanticMedian;SemanticDelta=[double]$delta;ZScore=[double]$z;RankGap=$rankGap}
+                $featureRecords.Add($record)
+                Write-Output ('EVIDENCE_FEATURE group={0} id={1} lexical_any={2} word_match={3} matched_terms={4} semantic_max={5:F6} semantic_median={6:F6} semantic_delta={7:F6} zscore={8:F4} rank1_combined_minus_rank5_combined={9}' -f $record.Group,$record.Id,$record.LexicalAny,$record.WordMatch,$(if($record.MatchedTerms){$record.MatchedTerms}else{'none'}),$record.SemanticMax,$record.SemanticMedian,$record.SemanticDelta,$record.ZScore,$(if($record.RankGap -is [string]){$record.RankGap}else{'{0:F6}' -f $record.RankGap}))
+            }
+        }
+        function Get-FeatureStatistic([object[]]$Values){$sorted=@($Values|ForEach-Object{[double]$_}|Sort-Object);if($sorted.Count -eq 0){return [pscustomobject]@{Min='n/a';Median='n/a';P90='n/a';Max='n/a'}};$median=if($sorted.Count%2){$sorted[[int][Math]::Floor($sorted.Count/2)]}else{($sorted[$sorted.Count/2-1]+$sorted[$sorted.Count/2])/2.0};$p90Index=[Math]::Max(0,[Math]::Ceiling(.9*$sorted.Count)-1);return [pscustomobject]@{Min=$sorted[0];Median=$median;P90=$sorted[$p90Index];Max=$sorted[$sorted.Count-1]}}
+        foreach($groupSet in $groups){$items=@($featureRecords|Where-Object Group -eq $groupSet.Name);foreach($featureName in @('SemanticMax','SemanticMedian','SemanticDelta','ZScore','RankGap')){$values=@($items|Where-Object{$_.PSObject.Properties[$featureName] -and $_.$featureName -isnot [string]}|ForEach-Object{[double]$_.$featureName});$stats=Get-FeatureStatistic $values;Write-Output ('EVIDENCE_FEATURE_SUMMARY group={0} metric={1} n={2} min={3} median={4} p90={5} max={6}' -f $groupSet.Name,$featureName,$values.Count,$(if($stats.Min -is [string]){$stats.Min}else{'{0:F6}' -f $stats.Min}),$(if($stats.Median -is [string]){$stats.Median}else{'{0:F6}' -f $stats.Median}),$(if($stats.P90 -is [string]){$stats.P90}else{'{0:F6}' -f $stats.P90}),$(if($stats.Max -is [string]){$stats.Max}else{'{0:F6}' -f $stats.Max}))}}
+        $mGrid=@(.02,.05,.10,.15,.20);$kGrid=@(0,.25,.5,.75,1,1.5);$cleanM=$false;$cleanK=$false
+        foreach($m in $mGrid){$rates=@();foreach($groupName in @('development_answered','development_no_result','no_evidence','natural_queries','K05_reporting_only')){$items=@($featureRecords|Where-Object Group -eq $groupName);$weak=@($items|Where-Object{(-not $_.WordMatch) -and $_.SemanticDelta -lt $m}).Count;$rate=if($items.Count){$weak/[double]$items.Count}else{0};$rates+=('{0}={1:P1}' -f $groupName,$rate);if($groupName -eq 'no_evidence'){$noeRate=$rate};if($groupName -eq 'natural_queries'){$naturalRate=$rate}};if($noeRate -eq 1.0 -and $naturalRate -eq 0.0){$cleanM=$true};Write-Output ('EVIDENCE_RULE type=no-word-and-delta-below parameter_M={0:F2} {1}' -f $m,($rates -join ' '))}
+        foreach($k in $kGrid){$rates=@();foreach($groupName in @('development_answered','development_no_result','no_evidence','natural_queries','K05_reporting_only')){$items=@($featureRecords|Where-Object Group -eq $groupName);$weak=@($items|Where-Object{(-not $_.WordMatch) -and $_.ZScore -lt $k}).Count;$rate=if($items.Count){$weak/[double]$items.Count}else{0};$rates+=('{0}={1:P1}' -f $groupName,$rate);if($groupName -eq 'no_evidence'){$noeRate=$rate};if($groupName -eq 'natural_queries'){$naturalRate=$rate}};if($noeRate -eq 1.0 -and $naturalRate -eq 0.0){$cleanK=$true};Write-Output ('EVIDENCE_RULE type=no-word-and-zscore-below parameter_k={0:F2} {1}' -f $k,($rates -join ' '))}
+        $cleanSeparation=$cleanM -or $cleanK;$separationFinding=if($cleanSeparation){'AT_LEAST_ONE_CANDIDATE_RULE_CLEANLY_SEPARATES'}else{'NO_CANDIDATE_RULE_CLEANLY_SEPARATES'}
+        Write-Output ('EVIDENCE_RULE_SEPARATION clean_natural_vs_no_evidence={0};finding={1};parameters_selected=FALSE;runtime_changed=FALSE;holdout_used=FALSE;K05_used_for_selection=FALSE' -f $cleanSeparation,$separationFinding)
         exit 0
     }
     if($NoEvidenceOnly){

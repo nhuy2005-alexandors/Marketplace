@@ -30,7 +30,8 @@ public sealed record AssistantChatResponse(
     IReadOnlyList<ProductSourceDto> Sources,
     RetrievalMetadataDto Retrieval,
     string? ConversationId = null,
-    string EvidenceStrength = "strong");
+    string EvidenceStrength = "strong",
+    string AnswerSource = "generated");
 
 public sealed record ProductSourceDto(string Type, int ProductId, string ChunkType, string ContentHash);
 

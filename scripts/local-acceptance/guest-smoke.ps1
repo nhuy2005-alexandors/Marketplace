@@ -1,7 +1,9 @@
 param(
     [string]$BaseUrl = 'http://localhost:5000',
     [switch]$DryRun,
-    [switch]$ShowAnswer
+    [switch]$ShowAnswer,
+    [string]$Only,
+    [string[]]$Skip = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +30,12 @@ $cases = @(
     [pscustomobject]@{ Name='lexical-positive'; Body=@{ query='wireless headset' }; ExpectedEvidence='strong' },
     [pscustomobject]@{ Name='rate-limit-intentional'; Body=@{ query='headphones'; RateLimitProbe=$true }; ExpectedRateLimit=$true }
 )
+$knownCaseNames=@($cases|ForEach-Object Name)
+if($Only -and $Only -notin $knownCaseNames){throw "Unknown -Only case '$Only'. Valid names: $($knownCaseNames -join ', ')"}
+$unknownSkip=@($Skip|Where-Object{$_ -notin $knownCaseNames});if($unknownSkip.Count){throw "Unknown -Skip case name(s): $($unknownSkip -join ', ')"}
+if($Only){$cases=@($cases|Where-Object Name -eq $Only)}
+if($Skip.Count){$cases=@($cases|Where-Object{$_.Name -notin $Skip})}
+$cases=@($cases|Where-Object{-not $_.ExpectedRateLimit})+@($cases|Where-Object{$_.ExpectedRateLimit})
 
 function Get-FakeResponse([object]$Case) {
     $catalog = @(
@@ -56,8 +64,8 @@ function Get-FakeResponse([object]$Case) {
             products=$products
             sources=@($products | ForEach-Object { [pscustomobject]@{ productId=$_.id; type='product'; reasonCode='summary' } })
             answer='Synthetic answer; test key AQ.ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-            answerSource='fallback'
-            evidenceStrength=$(if($products.Count -gt 0 -and $Case.Name -eq 'lexical-positive'){'strong'}else{'weak'})
+            answerSource=$(if($Case.Name -eq 'lexical-positive'){'generated'}else{'weak-evidence'})
+            evidenceStrength=$(if($Case.Name -eq 'lexical-positive'){'strong'}else{'weak'})
             retrieval=[pscustomobject]@{mode='hybrid';hasEvidence=($products.Count -gt 0)}
         }
     }
@@ -67,11 +75,33 @@ $client = $null
 $script:fakeRateLimitCount=0
 $checks=New-Object 'System.Collections.Generic.List[object]'
 if (-not $DryRun) { Add-Type -AssemblyName System.Net.Http; $handler=[System.Net.Http.HttpClientHandler]::new();$handler.UseProxy=$false;$client = [System.Net.Http.HttpClient]::new($handler); $client.Timeout = [TimeSpan]::FromSeconds(25) }
+function Invoke-HttpGuestCase([object]$Case){
+    $retriedAfter429=$false;$retryWaitSeconds=0.0
+    while($true){
+        $json=ConvertTo-Json -InputObject $Case.Body -Depth 8 -Compress;$content=[System.Net.Http.StringContent]::new($json,[Text.Encoding]::UTF8,'application/json')
+        try{
+            $response=$client.PostAsync(([Uri]::new($baseUri,'/api/assistant/chat')),$content).GetAwaiter().GetResult()
+            try{
+                $responseBody=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult();$parsed=$null;try{$parsed=$responseBody|ConvertFrom-Json -ErrorAction Stop}catch{}
+                if([int]$response.StatusCode -eq 429 -and -not $Case.ExpectedRateLimit -and -not $retriedAfter429){
+                    $waitSeconds=65.0;$retryHeader=$response.Headers.RetryAfter
+                    if($retryHeader -and $retryHeader.Delta){$waitSeconds=[Math]::Max(0,$retryHeader.Delta.TotalSeconds)}
+                    elseif($retryHeader -and $retryHeader.Date){$waitSeconds=[Math]::Max(0,($retryHeader.Date-[DateTimeOffset]::UtcNow).TotalSeconds)}
+                    $waitSeconds=[Math]::Min(65,$waitSeconds);$retryWaitSeconds=$waitSeconds;$response.Dispose();$response=$null
+                    if($waitSeconds -gt 0){Start-Sleep -Milliseconds ([int][Math]::Ceiling($waitSeconds*1000))}
+                    $retriedAfter429=$true;continue
+                }
+                return [pscustomobject]@{StatusCode=[int]$response.StatusCode;Body=$parsed;RawBody=$responseBody;RetriedAfter429=$retriedAfter429;RetryWaitSeconds=$retryWaitSeconds}
+            }finally{if($response){$response.Dispose()}}
+        }finally{$content.Dispose()}
+    }
+}
 try {
     foreach ($case in $cases) {
         $timer=[Diagnostics.Stopwatch]::StartNew()
         if ($DryRun) {
             if($case.ExpectedRateLimit){$rateResponses=0;for($requestIndex=0;$requestIndex -lt 15;$requestIndex++){$fakeRate=Get-FakeResponse $case;if($fakeRate.StatusCode -eq 429){$rateResponses++}};$result=[pscustomobject]@{StatusCode=$(if($rateResponses -gt 0){429}else{200});RateLimitResponses=$rateResponses;Body=[pscustomobject]@{products=@();sources=@();answerSource='fallback';evidenceStrength='weak'}}}
+            elseif($case.Name -eq 'unrelated-english'){$firstFake=[pscustomobject]@{StatusCode=429;Body=$null};$result=Get-FakeResponse $case;$result|Add-Member -NotePropertyName RetriedAfter429 -NotePropertyValue $true;$result|Add-Member -NotePropertyName RetryWaitSeconds -NotePropertyValue 0.0}
             else{$result = Get-FakeResponse $case}
         }
         elseif ($case.ExpectedRateLimit) {
@@ -85,19 +115,7 @@ try {
             $result=[pscustomobject]@{StatusCode=$(if($rateResponses -gt 0){429}else{200});Body=[pscustomobject]@{products=@();sources=@();answerSource='not-provided-by-api';evidenceStrength='weak'};RateLimitResponses=$rateResponses}
         }
         else {
-            $json = ConvertTo-Json -InputObject $case.Body -Depth 8 -Compress
-            $content = [System.Net.Http.StringContent]::new($json,[Text.Encoding]::UTF8,'application/json')
-            try {
-                $response = $client.PostAsync(([Uri]::new($baseUri,'/api/assistant/chat')),$content).GetAwaiter().GetResult()
-                try {
-                    $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                    $parsed = $null
-                    try { $parsed = $responseBody | ConvertFrom-Json -ErrorAction Stop } catch { }
-                    $result = [pscustomobject]@{ StatusCode=[int]$response.StatusCode; Body=$parsed; RawBody=$responseBody }
-                }
-                finally { $response.Dispose() }
-            }
-            finally { $content.Dispose() }
+            $result=Invoke-HttpGuestCase $case
         }
         $timer.Stop()
         $productCount = if ($null -ne $result.Body -and $null -ne $result.Body.products) { @($result.Body.products).Count } else { 0 }
@@ -119,7 +137,12 @@ try {
         }
         if($case.Name -eq 'irrelevant-product-ids' -and @($result.Body.products | Where-Object id -eq 999999).Count){$pass=$false;$reasons.Add('client hint ID became authority')}
         $answerSource=if($result.Body -and $result.Body.answerSource){[string]$result.Body.answerSource}else{'not-provided-by-api'}
-        Write-Output ('Case={0};Result={1};HTTP={2};ProductCount={3};SourceProductIds={4};EvidenceStrength={5};AnswerSource={6};LatencyMs={7}{8}' -f $case.Name,$(if($pass){'PASS'}else{'FAIL'}),$result.StatusCode,$productCount,$sourceIds,$(if($result.Body.evidenceStrength){$result.Body.evidenceStrength}else{'not-provided'}),$answerSource,[int]$timer.Elapsed.TotalMilliseconds,$(if($case.ExpectedRateLimit){";RateLimitResponses=$($result.RateLimitResponses);Intentional=TRUE"}else{''}))
+        if($case.Name -ne 'rate-limit-intentional'){
+            if($answerSource -notin @('generated','fallback','weak-evidence')){$pass=$false;$reasons.Add('missing or invalid answerSource')}
+            elseif($result.Body.evidenceStrength -eq 'weak' -and $answerSource -ne 'weak-evidence'){$pass=$false;$reasons.Add('weak evidence must use answerSource=weak-evidence')}
+            elseif($result.Body.evidenceStrength -eq 'strong' -and $answerSource -notin @('generated','fallback')){$pass=$false;$reasons.Add('strong evidence must use generated or fallback answerSource')}
+        }
+        Write-Output ('Case={0};Result={1};HTTP={2};ProductCount={3};SourceProductIds={4};EvidenceStrength={5};AnswerSource={6};LatencyMs={7}{8}{9}' -f $case.Name,$(if($pass){'PASS'}else{'FAIL'}),$result.StatusCode,$productCount,$sourceIds,$(if($result.Body.evidenceStrength){$result.Body.evidenceStrength}else{'not-provided'}),$answerSource,[int]$timer.Elapsed.TotalMilliseconds,$(if($case.ExpectedRateLimit){";RateLimitResponses=$($result.RateLimitResponses);Intentional=TRUE"}else{''}),$(if($result.RetriedAfter429){';RETRIED_AFTER_429=TRUE;WaitSeconds={0:N1}' -f $result.RetryWaitSeconds}else{''}))
         if($ShowAnswer -and $result.Body.answer){$safe=[string]$result.Body.answer -replace '(?i)(AIza[0-9A-Za-z_-]{20,}|AQ\.[A-Za-z0-9_-]{20,}|(?:api[_ -]?key|key)\s*[:=]\s*\S+)','[REDACTED]';if($safe.Length -gt 200){$safe=$safe.Substring(0,200)};Write-Output ("AnswerPreview[$($case.Name)]=$safe")}
         if(-not $pass){$checks.Add([pscustomobject]@{Name=$case.Name;Pass=$false;Reasons=$reasons -join ';'})}else{$checks.Add([pscustomobject]@{Name=$case.Name;Pass=$true;Reasons=''})}
     }

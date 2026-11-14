@@ -12,3 +12,5 @@
 ## RAG response addition — evidence strength
 
 The RAG lane adds `evidenceStrength: "strong" | "weak"` to `AssistantChatResponse`. This is an additive response field owned by the RAG lane; it does not change the shared `ProductDto`, recommendation service contract, product order, or source IDs. Weak lexical evidence uses a local answer and skips Gemini generation. Recommendation behavior and the Recommendation lane's ranking remain unchanged.
+
+The RAG lane also adds additive `answerSource: "generated" | "fallback" | "weak-evidence"` to identify generated text, the existing local fallback after provider trouble/open circuit, or the fixed answer used when evidence is weak. Khánh's lane should treat it as display/diagnostic metadata and retain unknown-value compatibility.

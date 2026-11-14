@@ -46,17 +46,19 @@ public sealed class AssistantService : IAssistantService
             {
                 var sources = products.Select(product => new ProductSourceDto("recommendation", product.Id, "recommendation", string.Empty)).ToArray();
                 return new AssistantChatResponse("Đây là các sản phẩm được hệ thống gợi ý cho bạn.", products, sources,
-                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong");
+                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong", "fallback");
             }
         }
         var skuBranch = IsExplicitSkuBranch(query, candidates);
         var evidenceStrength = skuBranch || candidates.Any(candidate => candidate.LexicalScore > 0) ? "strong" : "weak";
         if (candidates.Count == 0)
-            return NoEvidence(request.Conversation?.ConversationId, evidenceStrength);
+            return NoEvidence(request.Conversation?.ConversationId, evidenceStrength,
+                skuBranch ? "fallback" : "weak-evidence");
 
         AssistantGeneratedAnswer? generated = null;
         var halfOpenProbe = false;
         var generationAllowed = evidenceStrength == "strong" && _generationCircuitBreaker.TryAcquire(out halfOpenProbe);
+        var answerSource = evidenceStrength == "weak" ? "weak-evidence" : "fallback";
         if (generationAllowed)
         {
             try
@@ -67,6 +69,7 @@ public sealed class AssistantService : IAssistantService
                     .TakeLast(4).Select(turn => turn with { Content = turn.Content.Trim()[..Math.Min(turn.Content.Trim().Length, 500)] }).ToArray();
                 generated = await _answers.GenerateAsync(query, candidates, turns, ct);
                 _generationCircuitBreaker.RecordSuccess();
+                answerSource = "generated";
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -85,8 +88,9 @@ public sealed class AssistantService : IAssistantService
         var allowedIds = candidates.Select(candidate => candidate.Product.Id).ToHashSet();
         var sourceIds = generated?.SourceProductIds.Where(allowedIds.Contains).Distinct().ToHashSet() ?? [];
         if (generated is not null && generated.SourceProductIds.Count == 0)
-            return NoEvidence(request.Conversation?.ConversationId);
+            return NoEvidence(request.Conversation?.ConversationId, evidenceStrength, "fallback");
         var hasValidGeneratedSources = generated is not null && sourceIds.Count > 0 && !string.IsNullOrWhiteSpace(generated.Answer);
+        if (generated is not null && !hasValidGeneratedSources) answerSource = "fallback";
         var selected = hasValidGeneratedSources
             ? candidates.Where(candidate => sourceIds.Contains(candidate.Product.Id)).ToArray()
             : candidates.ToArray();
@@ -95,8 +99,9 @@ public sealed class AssistantService : IAssistantService
         var answer = hasValidGeneratedSources ? generated!.Answer.Trim()
             : evidenceStrength == "weak" ? BuildWeakEvidenceAnswer(selected.Select(candidate => candidate.Product).ToArray())
             : BuildLocalAnswer(query, selected.Select(candidate => candidate.Product).ToArray());
+        if (evidenceStrength == "weak") answerSource = "weak-evidence";
         return new AssistantChatResponse(answer, selected.Select(candidate => candidate.Product).ToArray(), sourcesOut,
-            new RetrievalMetadataDto("hybrid", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength);
+            new RetrievalMetadataDto("hybrid", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource);
     }
 
     private static bool IsRecommendationIntent(string query) =>
@@ -104,9 +109,9 @@ public sealed class AssistantService : IAssistantService
         query.Contains("đề xuất", StringComparison.OrdinalIgnoreCase) ||
         query.Contains("recommend", StringComparison.OrdinalIgnoreCase);
 
-    private static AssistantChatResponse NoEvidence(string? conversationId, string evidenceStrength = "weak") => new(
+    private static AssistantChatResponse NoEvidence(string? conversationId, string evidenceStrength = "weak", string answerSource = "weak-evidence") => new(
         "Mình chưa tìm thấy sản phẩm có đủ thông tin phù hợp trong catalog. Bạn thử đổi từ khóa hoặc bộ lọc nhé.",
-        [], [], new RetrievalMetadataDto("hybrid", false), conversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength);
+        [], [], new RetrievalMetadataDto("hybrid", false), conversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource);
 
     private static bool IsExplicitSkuBranch(string query, IReadOnlyList<AssistantRetrievalCandidate> candidates)
     {

@@ -62,6 +62,9 @@ try {
         $key = Get-QueryVectorCacheKey $row.query $model $dimensions
         @{ cacheKey=$key; contentHash=($key -split ':')[0]; modelName=$model; dimensions=$dimensions; vector=$vector }
     }
+    $naturalFeatureRows=@(Get-Content (Join-Path $repoRoot 'docs/rag-evaluation/RAG_AUTHOR_WRITTEN_NATURAL_QUERIES.jsonl')|ForEach-Object{$_|ConvertFrom-Json})
+    $smokeFeatureQueries=@('Tìm tai nghe không dây','tim tai nghe khong day','headphones','headphones under $100','wireless headset')
+    foreach($query in $naturalFeatureRows.query + $smokeFeatureQueries){$key=Get-QueryVectorCacheKey ([string]$query) $model $dimensions;if(-not @($queryEntries|Where-Object cacheKey -eq $key).Count){$queryEntries+=@{cacheKey=$key;contentHash=($key -split ':')[0];modelName=$model;dimensions=$dimensions;vector=@(.6,.8)}}}
     Write-AtomicCacheFile -Path $queryCachePath -Content (ConvertTo-Json -InputObject @($queryEntries) -Depth 5)
     $fixture = @{
         modelName=$model; dimensions=$dimensions; catalogCachePath=$catalogCachePath; queryCachePath=$queryCachePath
@@ -119,6 +122,20 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Explain-query dry-run failed: $output" }
     Assert-True ($output.Contains('EXPLAIN_SUMMARY') -and $output.Contains('ranking unchanged')) 'Explain-query diagnosis did not report its hypothesis.'
 
+    $featureArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$evaluatorPath,'-RepoRoot',$repoRoot,'-RagInputs',$tempRoot,'-DryRunFromCache','-DryRunDataPath',$fixturePath,'-EvidenceFeatureReport')
+    $output=(& $powershell @featureArgs 2>&1|Out-String)
+    if($LASTEXITCODE -ne 0){throw "Evidence feature report cache-hit E2E failed: $output"}
+    Assert-True ($output.Contains('EVIDENCE_FEATURE group=natural_queries id=natural-01') -and $output.Contains('EVIDENCE_RULE type=no-word-and-delta-below') -and $output.Contains('EVIDENCE_RULE_SEPARATION') -and $output.Contains('runtime_changed=FALSE')) 'Evidence feature report omitted feature rows or candidate-rule grid.'
+    $featureMissingKey=Get-QueryVectorCacheKey $naturalFeatureRows[0].query $model $dimensions
+    $featurePartial=@($queryEntries|Where-Object cacheKey -ne $featureMissingKey);Write-AtomicCacheFile -Path $queryCachePath -Content (ConvertTo-Json -InputObject @($featurePartial) -Depth 5)
+    $featureBefore=[IO.File]::ReadAllText($queryCachePath)
+    $output=(& $powershell @featureArgs 2>&1|Out-String)
+    if($LASTEXITCODE -ne 0 -or -not $output.Contains('CACHE_MISS_FORECAST mode=EvidenceFeatureReport') -or -not $output.Contains('missing_vectors=1') -or -not $output.Contains('estimated_api_calls=1')){throw "Evidence feature missing-cache forecast failed: $output"}
+    if([IO.File]::ReadAllText($queryCachePath) -cne $featureBefore){throw 'Evidence feature report wrote the query cache without -AllowEmbeddingCall.'}
+    $output=(& $powershell @($featureArgs+@('-AllowEmbeddingCall','-UseFakeEmbedder')) 2>&1|Out-String)
+    if($LASTEXITCODE -ne 0 -or -not $output.Contains('EVIDENCE_FEATURE group=natural_queries id=natural-01')){throw "Evidence feature fake-embedder completion failed: $output"}
+    if([IO.File]::ReadAllText($queryCachePath) -ceq $featureBefore){throw 'Evidence feature report did not cache the explicitly permitted fake vector.'}
+
     $modeCases=@(
         @{Name='ExplainQuery';Args=@('-ExplainQuery','red apple');Expected='EXPLAIN_SUMMARY'},
         @{Name='NoEvidenceOnly';Args=@('-NoEvidenceOnly');Expected='NO_EVIDENCE_METRICS'},
@@ -172,7 +189,7 @@ try {
         }
     }
 
-    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Modes=lexical,hybrid,author-k05-only,diagnostics,no-evidence,explain,cache-forecast;CacheStates=full,partial,empty;FakeEmbedder=allowed-only;ExternalCalls=0;Database=0'
+    Write-Output 'EvaluatorDryRunE2E=PASS;PowerShell=5.1;Modes=lexical,hybrid,author-k05-only,diagnostics,no-evidence,evidence-feature,explain,cache-forecast;CacheStates=full,partial,empty;FakeEmbedder=allowed-only;ExternalCalls=0;Database=0'
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }

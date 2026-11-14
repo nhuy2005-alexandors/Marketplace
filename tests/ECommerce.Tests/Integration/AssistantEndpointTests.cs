@@ -26,6 +26,7 @@ public sealed class AssistantEndpointTests
         Assert.Empty(body.RootElement.GetProperty("products").EnumerateArray());
         Assert.Empty(body.RootElement.GetProperty("sources").EnumerateArray());
         Assert.Equal("weak", body.RootElement.GetProperty("evidenceStrength").GetString());
+        Assert.Equal("weak-evidence", body.RootElement.GetProperty("answerSource").GetString());
     }
 
     [Fact]
