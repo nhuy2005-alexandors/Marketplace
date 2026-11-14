@@ -1,3 +1,4 @@
+using System.Globalization;
 using ECommerce.Application.Common;
 using ECommerce.Application.DTOs.Orders;
 using ECommerce.Application.Interfaces;
@@ -98,7 +99,7 @@ public class OrderService : IOrderService
                 await _email.SendAsync(
                     email,
                     $"Xác nhận đơn hàng #{order.Id}",
-                    $"Đơn hàng #{order.Id} của bạn đã được đặt thành công. Tổng tiền: {order.Total:N0}đ.",
+                    $"Đơn hàng #{order.Id} của bạn đã được đặt thành công. Tổng tiền: {order.Total.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}.",
                     ct);
             }
         }

@@ -65,7 +65,7 @@ Example (with the installed SDK/tools on PATH):
 dotnet ef database update --project src/ECommerce.Infrastructure --startup-project src/ECommerce.API -- --connection "Server=(localdb)\MarketplaceRefundDev20261113;Database=ECommerceDb_Dev;Integrated Security=true;TrustServerCertificate=true"
 ```
 
-Real MoMo initiation requires explicit `Payment:MoMo:CatalogCurrency` and `CatalogToVndRate`; VND requires rate 1. The legacy UsdToVndRate setting is ignored. Catalog currency/business reconciliation remains OPEN; no historical conversion was performed and no external money was moved in acceptance.
+USD is the canonical Marketplace catalog currency (Owner decision, 2026-11-14). MoMo accepts USD catalog amounts only and requires an explicit `Payment:MoMo:CatalogToVndRate` in VND per USD. The repository sets `CatalogCurrency=USD` but intentionally leaves the rate unset; the legacy `UsdToVndRate` is ignored. Real MoMo initiation therefore remains fail-closed pending approval of an FX source/rate. No historical conversion was performed and no external money was moved in acceptance.
 
 ## Verification and limits
 
@@ -105,3 +105,17 @@ CI on the updated implementation head: [run 43589178284](https://github.com/nhuy
 This addendum changed runtime configuration/payment redirect handling and tests only; it did not change migration source or the accepted database lifecycle SQL behavior. The Windows LocalDB lifecycle evidence recorded above remains scoped to its original tested migration/source revision. The subsequent Owner catalog CI run separately exercises the populated pre-V2 migration and Owner catalog FK/trigger tests.
 
 No persistent development database was migrated by this addendum. Currency remains OPEN, MoMo remains fail-closed until explicit catalog currency/FX configuration, and no external payment/refund was executed.
+
+## Currency policy addendum — 2026-11-14
+
+Owner approved **USD as the canonical Marketplace catalog currency**.
+
+- Product, cart, order, fixed coupon, Payment.Amount, Refund.Amount and dashboard revenue values are USD.
+- MoMo provider-native quote/capture and reconciliation fields remain VND. The USD order amount is never replaced by the converted VND amount.
+- MoMo accepts USD only and requires an explicit VND-per-USD `CatalogToVndRate`. The old `UsdToVndRate=25000` default/configuration is not used as a fallback. The repository intentionally has no configured FX rate, so real MoMo initiation remains fail-closed.
+- The MoMo quote is rounded to whole VND using AwayFromZero, checked against the provider bounds and frozen before provider I/O. Callback amount/currency must match the frozen quote.
+- No database migration or historical conversion is part of this decision. Known DbSeeder and Dataset V2 values are USD; legacy records with unknown provenance are not silently converted.
+- Refund.Amount is the USD-denominated full-order obligation. The original provider capture remains stored in Payment in VND; current manual refund MVP stores only an external reference/note and does not persist/verify the actual external payout amount/currency. Admin must verify the original capture evidence before confirming an external transfer.
+- UI price/coupon entry points and checkout email now identify/format USD consistently.
+
+This addendum changes no database schema and does not authorize a real payment, external refund, persistent database migration or deployment.

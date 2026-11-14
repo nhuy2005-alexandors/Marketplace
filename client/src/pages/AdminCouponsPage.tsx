@@ -48,10 +48,10 @@ export function AdminCouponsPage() {
             </Select>
           </div>
           <div className="flex gap-2">
-            <Input required type="number" min={0.01} placeholder="Giá trị" value={form.value}
+            <Input required type="number" min={0.01} placeholder={form.type === "Percentage" ? "Giá trị (%)" : "Giá trị (USD)"} value={form.value}
               onChange={(e) => setForm({ ...form, value: Number(e.target.value) })}
               className="flex-1" />
-            <Input type="number" min={0} placeholder="Đơn tối thiểu" value={form.minOrderAmount}
+            <Input type="number" min={0} placeholder="Đơn tối thiểu (USD)" value={form.minOrderAmount}
               onChange={(e) => setForm({ ...form, minOrderAmount: Number(e.target.value) })}
               className="flex-1" />
             <Input type="number" min={1} placeholder="Số lượt tối đa" value={form.maxUses}
@@ -73,7 +73,7 @@ export function AdminCouponsPage() {
             <div>
               <div className="font-medium">{c.code} {!c.isActive && <span className="text-xs text-rose-500">(vô hiệu)</span>}</div>
               <div className="text-xs muted">
-                {c.type === "Percentage" ? `${c.value}%` : `$${c.value}`} · Đơn tối thiểu ${c.minOrderAmount} ·
+                {c.type === "Percentage" ? `${c.value}%` : `${c.value.toFixed(2)}`} · Đơn tối thiểu ${c.minOrderAmount.toFixed(2)} ·
                 {" "}Đã dùng {c.timesUsed}{c.maxUses ? `/${c.maxUses}` : ""}
                 {c.expiresAt && ` · HSD ${new Date(c.expiresAt).toLocaleDateString("vi-VN")}`}
               </div>

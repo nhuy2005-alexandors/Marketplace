@@ -29,12 +29,11 @@ public class MoMoProvider : IPaymentProvider
         if (!_opt.Enabled)
             return new(0, "VND", "MoMo chưa được cấu hình.");
 
-        // Currency semantics must be explicitly reconciled by the owner. Freeze
-        // the provider amount for this attempt; never infer catalog USD/VND.
+        // USD is the canonical catalog currency. MoMo receives a frozen whole-VND quote
+        // using an explicit VND-per-USD rate; the legacy UsdToVndRate is never consulted.
         var catalogCurrency = _opt.CatalogCurrency?.Trim().ToUpperInvariant();
-        if (catalogCurrency?.Length != 3 || catalogCurrency.Any(c => c is < 'A' or > 'Z') ||
-            _opt.CatalogToVndRate is null or <= 0 || (catalogCurrency == "VND" && _opt.CatalogToVndRate != 1))
-            return new(0, "VND", "Explicit catalog currency and VND conversion are required.");
+        if (catalogCurrency != "USD" || _opt.CatalogToVndRate is null or <= 0)
+            return new(0, "VND", "MoMo requires USD catalog currency and an explicit USD-to-VND rate (VND per USD).");
         decimal converted;
         try { converted = decimal.Round(ctx.Amount * _opt.CatalogToVndRate.Value, 0, MidpointRounding.AwayFromZero); }
         catch (OverflowException) { return new(0, "VND", "Provider amount exceeds supported range."); }

@@ -24,6 +24,12 @@ Cho phép áp mã giảm giá (percentage/fixed) vào subtotal trước khi chec
 - `Value`, `MinOrderAmount` lưu `decimal(18,2)` ở DB (src/ECommerce.Infrastructure/Persistence/Configurations/CouponConfiguration.cs:15-16)
 - `/api/coupons/validate` chỉ có `POST`, không có `GET` — route thật là `[HttpPost("validate")]` (src/ECommerce.API/Controllers/CouponsController.cs:15)
 
+## Currency semantics
+
+- `MinOrderAmount` is always USD.
+- `Value` is a percentage for `Percentage`; it is USD for `FixedAmount`.
+- Coupon preview, checkout discount, Order.DiscountAmount and Order.Total all use USD. No FX conversion occurs in coupon evaluation.
+
 ## Quyết định
 - Validate (preview) và checkout dùng chung `IsValidFor`/`CalculateDiscount` trên entity — tránh lặp logic ở 2 tầng, nhưng preview không giữ lock nên vẫn có thể bị race (đã chặn ở bước checkout thật bằng RowVersion).
 - Không có endpoint `Update` coupon (chỉ Create + Delete) — sửa coupon nghĩa là xóa/tạo lại.

@@ -12,6 +12,7 @@ public class Refund : BaseEntity
     public int PaymentId { get; set; }
     public Payment Payment { get; set; } = null!;
 
+    // Full-order refund obligation in the canonical catalog currency (USD).
     public decimal Amount { get; set; }
     public string Reason { get; set; } = null!;
     public RefundStatus Status { get; set; } = RefundStatus.Pending;
