@@ -79,6 +79,7 @@ public class RefundServiceTests
             Method = method,
             Status = PaymentStatus.Completed,
             TransactionId = "PAY-ORIGINAL-001",
+            ProviderKey = providerCurrency == "VND" ? "momo" : null,
             ProviderAmount = providerAmount,
             ProviderCurrency = providerCurrency,
             PaidAt = DateTime.UtcNow
@@ -109,7 +110,7 @@ public class RefundServiceTests
     public async Task Request_ReturnsOriginalProviderCaptureAmountAndCurrency()
     {
         using var db = TestDb.Create();
-        var seed = await SeedPaidOrderAsync(db, PaymentMethod.MoMo,
+        var seed = await SeedPaidOrderAsync(db, PaymentMethod.EWallet,
             providerAmount: 5_000_000m, providerCurrency: "VND");
 
         var result = await new RefundService(db).RequestAsync(
@@ -120,6 +121,7 @@ public class RefundServiceTests
         result.Value.ProviderAmount.Should().Be(5_000_000m);
         result.Value.ProviderCurrency.Should().Be("VND");
         result.Value.PaymentTransactionId.Should().Be("PAY-ORIGINAL-001");
+        result.Value.PaymentMethod.Should().Be("momo");
     }
 
     [Fact]
