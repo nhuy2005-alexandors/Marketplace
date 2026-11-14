@@ -32,7 +32,30 @@ public sealed record AssistantChatResponse(
     string? ConversationId = null,
     string EvidenceStrength = "strong",
     string AnswerSource = "generated",
-    string Intent = "product_search");
+    string Intent = "product_search",
+    string RetrievalMode = "hybrid",
+    IReadOnlyList<AssistantConstraintDto>? Constraints = null,
+    string ContextAction = "none");
+
+public sealed record AssistantConstraintDto(string Field, string Operator, string Value, string? Unit = null);
+
+public sealed record AssistantTypedConstraint(
+    int? AttributeDefinitionId,
+    string Field,
+    int DataType,
+    string Operator,
+    decimal? ValueNumber = null,
+    bool? ValueBoolean = null,
+    string? ValueText = null,
+    string? Unit = null,
+    int? BrandId = null,
+    IReadOnlyList<int>? AttributeDefinitionIds = null);
+
+public sealed record AssistantQueryAnalysis(
+    IReadOnlyList<AssistantTypedConstraint> Constraints,
+    bool HasCatalogTerm,
+    bool HasNewProductTerm,
+    IReadOnlyList<string> UnsupportedConstraints);
 
 public sealed record ProductSourceDto(string Type, int ProductId, string ChunkType, string ContentHash);
 

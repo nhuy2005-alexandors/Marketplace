@@ -1,0 +1,30 @@
+{"id":"CTX-01","prior_user_query":"Tìm laptop RAM 16 GB","query":"Có màu trắng không?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-02","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"Tìm laptop gaming","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-03","prior_user_query":"Tìm laptop RAM 16 GB","query":"Laptop có bảo hành mấy năm?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-04","prior_user_query":"Tìm laptop RAM 16 GB","query":"Còn hàng không?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-05","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"Giờ tìm tai nghe bluetooth","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-06","prior_user_query":"Tìm laptop RAM 16 GB","query":"Điện thoại chống nước không?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-07","prior_user_query":"Tìm laptop RAM 16 GB","query":"Cái thứ hai rẻ hơn?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-08","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"Chuyển sang máy pha cà phê","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-09","prior_user_query":"Tìm laptop RAM 16 GB","query":"Tai nghe xuất xứ ở đâu?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-10","prior_user_query":"Tìm laptop RAM 16 GB","query":"Có loại 1 TB không?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-11","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"Tìm sách học tiếng Anh","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-12","prior_user_query":"Tìm laptop RAM 16 GB","query":"What is the warranty period?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-13","prior_user_query":"Tìm laptop RAM 16 GB","query":"Màu đen thì sao?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-14","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"Tôi cần điện thoại mới","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-15","prior_user_query":"Tìm laptop RAM 16 GB","query":"Màn hình có chống xước không?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-16","prior_user_query":"Tìm laptop RAM 16 GB","query":"Có ANC không?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-17","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"Tìm balo du lịch","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-18","prior_user_query":"Tìm laptop RAM 16 GB","query":"Laptop có bảo hành mấy năm?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-19","prior_user_query":"Tìm laptop RAM 16 GB","query":"Pin dùng được lâu không?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-20","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"cho tôi xem áo khoác","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-21","prior_user_query":"Tìm laptop RAM 16 GB","query":"Điện thoại chống nước không?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-22","prior_user_query":"Tìm laptop RAM 16 GB","query":"Thương hiệu khác được không?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-23","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"cần máy chơi game","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-24","prior_user_query":"Tìm laptop RAM 16 GB","query":"Tai nghe xuất xứ ở đâu?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-25","prior_user_query":"Tìm laptop RAM 16 GB","query":"rẻ hơn một chút?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-26","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"tìm bình nước","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-27","prior_user_query":"Tìm laptop RAM 16 GB","query":"What is the warranty period?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}
+{"id":"CTX-28","prior_user_query":"Tìm laptop RAM 16 GB","query":"What about the white one?","expected_action":"followup","author_status":"author-written-unreviewed"}
+{"id":"CTX-29","prior_user_query":"Tìm tai nghe FictionBrand 07","query":"muốn mua đồng hồ","expected_action":"new_topic","author_status":"author-written-unreviewed"}
+{"id":"CTX-30","prior_user_query":"Tìm laptop RAM 16 GB","query":"Màn hình có chống xước không?","expected_action":"missing_attribute","author_status":"author-written-unreviewed"}

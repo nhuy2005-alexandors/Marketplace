@@ -66,15 +66,26 @@ The request body limit is 32,768 bytes. The endpoint is rate-limited by the `ai`
   "conversationId": "…",
   "evidenceStrength": "strong",
   "answerSource": "generated",
-  "intent": "product_search"
+  "intent": "product_search",
+  "retrievalMode": "hybrid",
+  "constraints": [],
+  "contextAction": "none"
 }
 ```
 
-`evidenceStrength` is `strong` or `weak`. It is additive; the existing `retrieval`, product and source fields retain their previous meaning and ordering. A weak result is returned from the local Vietnamese response without calling Gemini generation; it keeps the same retrieved products and source IDs in the same order and says they are near the request but may not fully match. It avoids claiming that no product was found when suggestions are present. A strong result follows the existing generation path (or its existing grounded fallback).
+`evidenceStrength` is `strong`, `weak`, or `none`. It is additive; the existing `retrieval`, product and source fields retain their previous meaning and ordering. A weak result is returned from the local Vietnamese response without calling Gemini generation; it keeps the same retrieved products and source IDs in the same order and says they are near the request but may not fully match. It avoids claiming that no product was found when suggestions are present. A strict no-evidence result has no product cards or source IDs and uses `evidenceStrength="none"`. A strong result follows the existing generation path (or its existing grounded fallback).
 
-`answerSource` is additive and identifies how `answer` was produced: `generated` for a valid Gemini response, `fallback` for a local recommendation/grounded response after a provider failure, timeout, open circuit, or when generation is disabled, `weak-evidence` when retrieval evidence is weak and generation is skipped, and `scope-guard` for a fixed response to a non-product intent. Server configuration `Gemini:GenerationEnabled` defaults to `false`; with it disabled, strong-evidence requests use the local grounded response from the ranked candidates and set `answerSource="fallback"`. The answer-generation provider is not called. Embedding/retrieval configuration is independent and remains enabled as configured.
+`answerSource` is additive and identifies how `answer` was produced: `generated` for a valid Gemini response, `fallback` for a local recommendation/grounded response after a provider failure, timeout, open circuit, or when generation is disabled, `weak-evidence` when legacy retrieval evidence is weak and generation is skipped, `no-evidence` for a strict empty result, and `scope-guard` for a fixed response to a non-product intent. Server configuration `Gemini:GenerationEnabled` defaults to `false`; with it disabled, strong-evidence requests use the local grounded response from the ranked candidates and set `answerSource="fallback"`. The answer-generation provider is not called. Embedding/retrieval configuration is independent and remains enabled as configured.
 
 `intent` is an additive RAG-lane field with values `product_search`, `greeting`, `account_action`, `out_of_scope`, and `blocked`. It does not change the shared `ProductDto`, product ranking, order, or source selection. Rule-based scope guards return HTTP 200, empty `products` and `sources`, `retrieval.mode="scope-guard"`, `retrieval.hasEvidence=false`, and `answerSource="scope-guard"`; they do not call embedding or answer-generation providers. Out-of-scope classification first checks for lexical catalog evidence in the remainder of the query; when found, the request continues through the existing product-search path with its original query. Questions about subjective impressions remain `product_search`, skip Gemini generation so the answer does not invent subjective experience, and carry a caveat that only store specifications/reviews are available.
+
+The strict evidence and typed-filter work adds only response metadata: `retrievalMode` (`hybrid` or `lexical-warming`), `constraints` (recognized typed and request-filter conditions), and `contextAction` (`followup`, `new_topic`, or `none`). When `Gemini:StrictEvidenceEnabled=true` (default), a typed condition is applied as an SQL hard filter before ranking; semantic score cannot restore products that fail a condition. Unsupported units/explicit unknown brands and conditions with no matching products return HTTP 200 with empty `products`/`sources`, `evidenceStrength="none"`, `answerSource="no-evidence"`, and a Vietnamese no-result answer. A known attribute without structured values uses a no-information response rather than guessing. A query without typed constraints must contain a catalog dictionary match (product/category/brand/SKU/attribute/value), or it returns the same empty no-evidence response. The `constraints` field records what the server understood, including price/stock/category/seller filters. No DB schema or migration is added.
+
+`ContextualizerV2Enabled` limits server-side context to the last 3 turns. A short recognized follow-up may merge with the prior user product query; a new catalog subject clears old context. `EmbeddingWarmupEnabled` starts a hosted background warm-up; while warming, product retrieval reports `retrievalMode="lexical-warming"`. `Gemini:EmbeddingBatchDelaySeconds` controls embedding pacing and `Gemini:EmbeddingCachePath` optionally sets a local cache file path. Cache files must stay ignored by Git. The `/api/assistant/chat` response remains additive; clients should display `answer` and omit product cards when `products` is empty.
+
+## Readiness
+
+`GET /api/assistant/readiness` returns `200` with `{ "hybridReady": false, "retrievalMode": "lexical-warming" }` until background warm-up completes, then `{ "hybridReady": true, "retrievalMode": "hybrid" }`. It does not return cache paths or provider credentials. This endpoint is anonymous and shares the controller's `ai` rate limit.
 
 ### Guard response example
 

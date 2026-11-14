@@ -9,10 +9,13 @@ export interface RagResult {
   similarProducts: Product[];
   recommendedProducts?: Product[];
   confidence: number;
-  evidenceStrength: "strong" | "weak";
+  evidenceStrength: "strong" | "weak" | "none";
   sources: { type: string; productId: number; chunkType: string; contentHash: string }[];
   conversationId?: string;
   intent?: "product_search" | "greeting" | "account_action" | "out_of_scope" | "blocked";
+  retrievalMode?: "hybrid" | "lexical-warming";
+  constraints?: { field: string; operator: string; value: string; unit?: string }[];
+  contextAction?: "followup" | "new_topic" | "none";
 }
 
 interface AssistantResponse {
@@ -20,9 +23,12 @@ interface AssistantResponse {
   products: Product[];
   sources: RagResult["sources"];
   retrieval: { mode: string; hasEvidence: boolean };
-  evidenceStrength?: "strong" | "weak";
+  evidenceStrength?: "strong" | "weak" | "none";
   conversationId?: string;
   intent?: RagResult["intent"];
+  retrievalMode?: RagResult["retrievalMode"];
+  constraints?: RagResult["constraints"];
+  contextAction?: RagResult["contextAction"];
 }
 
 export async function executeRagQuery(
@@ -55,6 +61,9 @@ export async function executeRagQuery(
         sources: data.sources || [],
         conversationId: data.conversationId,
         intent,
+        retrievalMode: data.retrievalMode,
+        constraints: data.constraints,
+        contextAction: data.contextAction,
       };
     }
     const isRecommendation = data.retrieval?.mode === "recommendation";
@@ -71,6 +80,9 @@ export async function executeRagQuery(
       sources: data.sources || [],
       conversationId: data.conversationId,
       intent,
+      retrievalMode: data.retrievalMode,
+      constraints: data.constraints,
+      contextAction: data.contextAction,
     };
   } catch {
     // Fail closed: never fall back to browser-side catalog ranking or synthesize product cards.

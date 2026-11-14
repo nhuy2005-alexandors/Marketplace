@@ -9,9 +9,14 @@ public interface IAssistantService
 
 public interface ISemanticSearchService
 {
+    bool IsHybridReady { get; }
+    Task WarmUpAsync(CancellationToken ct = default);
     Task<bool> HasLexicalEvidenceAsync(string query, AssistantChatFilters? filters, CancellationToken ct = default);
+    Task<AssistantQueryAnalysis> AnalyzeQueryAsync(string query, CancellationToken ct = default);
     Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
         string query, AssistantChatFilters? filters, int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
+        string query, AssistantChatFilters? filters, IReadOnlyList<AssistantTypedConstraint> constraints, int limit, CancellationToken ct = default);
 }
 
 public interface IEmbeddingProvider

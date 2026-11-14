@@ -20,13 +20,17 @@ public static class DependencyInjection
             opt.UseSqlServer(config.GetConnectionString("DefaultConnection")));
 
         services.Configure<GeminiOptions>(config.GetSection(GeminiOptions.SectionName));
+        services.Configure<AssistantDomainOptions>(config.GetSection(AssistantDomainOptions.SectionName));
         services.AddSingleton(sp => new AssistantGenerationCircuitBreaker(sp.GetRequiredService<IOptions<GeminiOptions>>().Value));
-        services.AddSingleton<IEmbeddingCacheStore>(_ => new LocalEmbeddingCacheStore(LocalEmbeddingCacheStore.ResolveDefaultPath()));
+        services.AddSingleton<IEmbeddingCacheStore>(_ => new LocalEmbeddingCacheStore(
+            config[$"{GeminiOptions.SectionName}:EmbeddingCachePath"] is { Length: > 0 } cachePath
+                ? cachePath : LocalEmbeddingCacheStore.ResolveDefaultPath()));
         services.AddScoped<GeminiAssistantProvider>();
         services.AddScoped<IEmbeddingProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
         services.AddScoped<IAssistantAnswerProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
         services.AddScoped<ISemanticSearchService, SemanticSearchService>();
         services.AddScoped<IAssistantService, AssistantService>();
+        services.AddHostedService<EmbeddingWarmupHostedService>();
 
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 

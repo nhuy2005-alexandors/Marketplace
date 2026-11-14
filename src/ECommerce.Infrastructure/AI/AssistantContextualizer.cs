@@ -5,6 +5,7 @@ namespace ECommerce.Infrastructure.AI;
 
 public static class AssistantContextualizer
 {
+    public sealed record ContextualizationResult(string Query, string Action);
     private static readonly Regex FollowUpPronouns = new(
         @"\b(?:no|cai nay|cai do|loai nay|mon nay|san pham nay|thu nay|em nay|con nay|chung|it|this|that|these|those)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -66,5 +67,36 @@ public static class AssistantContextualizer
         strippedQuery = Regex.Replace(strippedQuery, @"\s+", " ").Trim();
 
         return $"{previousSubject} {strippedQuery}".Trim();
+    }
+
+    public static ContextualizationResult ContextualizeQueryV2(string query,
+        IReadOnlyList<AssistantConversationTurn>? recentTurns, bool hasNewProductTerm,
+        bool hasTypedConstraint, IReadOnlyList<string> configuredFollowUpCues)
+    {
+        var turns = recentTurns?.TakeLast(3).ToArray() ?? [];
+        var hasPriorProductTurn = turns.Any(turn => turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+            AssistantIntentClassifier.Classify(turn.Content).Intent == "product_search");
+        if (!hasPriorProductTurn) return new ContextualizationResult(query, "none");
+        if (hasNewProductTerm) return new ContextualizationResult(query, "new_topic");
+
+        var normalized = RetrievalScoring.Normalize(query);
+        var cueMatch = configuredFollowUpCues.Any(cue => ContainsPhrase(normalized, cue));
+        var existingRuleMatch = FollowUpPronouns.IsMatch(normalized) || RefinementPhrases.IsMatch(normalized) ||
+                                EllipticalPrefix.IsMatch(normalized) || SpecificationInquiry.IsMatch(normalized);
+        if (!cueMatch && !existingRuleMatch && !hasTypedConstraint) return new ContextualizationResult(query, "none");
+
+        var priorSubject = turns.Reverse().FirstOrDefault(turn => turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase) &&
+            AssistantIntentClassifier.Classify(turn.Content).Intent == "product_search")?.Content;
+        if (string.IsNullOrWhiteSpace(priorSubject)) return new ContextualizationResult(query, "none");
+        var contextual = ContextualizeQuery(query, turns);
+        if (contextual == query && (hasTypedConstraint || cueMatch)) contextual = $"{priorSubject} {query}".Trim();
+        return new ContextualizationResult(contextual, contextual == query ? "none" : "followup");
+    }
+
+    private static bool ContainsPhrase(string normalized, string phrase)
+    {
+        var token = RetrievalScoring.Normalize(phrase);
+        return token.Length > 0 && Regex.IsMatch(normalized,
+            @"(?<![\p{L}\p{N}])" + Regex.Escape(token) + @"(?![\p{L}\p{N}])");
     }
 }

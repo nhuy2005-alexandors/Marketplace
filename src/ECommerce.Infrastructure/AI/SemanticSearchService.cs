@@ -18,6 +18,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private static readonly ConcurrentDictionary<string, float[]> EmbeddingCache = new(StringComparer.Ordinal);
     private static readonly SemaphoreSlim EmbeddingCachePopulationGate = new(1, 1);
     private static bool EmbeddingCacheLoadedFromFile;
+    private static int WarmupRunning;
+    private static int WarmupScheduled;
+    private static int WarmupCompleted;
+    private static int WarmupEmbeddingFailed;
+    private static readonly AsyncLocal<bool> IsWarmupCall = new();
 
     private readonly IAppDbContext _db;
     private readonly IEmbeddingProvider _embeddings;
@@ -26,13 +31,38 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private readonly int _embeddingBatchDelaySeconds;
     private readonly double _semanticThreshold;
     private readonly double _semanticWeight;
+    private readonly AssistantDomainOptions _domainOptions;
+    private readonly bool _lexicalFallbackWhileWarming;
+
+    public bool IsHybridReady => Volatile.Read(ref WarmupCompleted) != 0;
+
+    public static void MarkWarmupScheduled() => Volatile.Write(ref WarmupScheduled, 1);
+    public static void MarkWarmupDisabled() => Volatile.Write(ref WarmupCompleted, 1);
+
+    public async Task WarmUpAsync(CancellationToken ct = default)
+    {
+        if (Interlocked.CompareExchange(ref WarmupRunning, 1, 0) != 0) return;
+        IsWarmupCall.Value = true;
+        Volatile.Write(ref WarmupEmbeddingFailed, 0);
+        try
+        {
+            await SearchCandidatesAsync("catalog warmup", null, 8, ct);
+            if (Volatile.Read(ref WarmupEmbeddingFailed) == 0) Volatile.Write(ref WarmupCompleted, 1);
+        }
+        finally
+        {
+            IsWarmupCall.Value = false;
+            Volatile.Write(ref WarmupRunning, 0);
+        }
+    }
 
     public SemanticSearchService(
         IAppDbContext db,
         IEmbeddingProvider embeddings,
         ILogger<SemanticSearchService> logger,
         IEmbeddingCacheStore? cacheStore = null,
-        IOptions<GeminiOptions>? geminiOptions = null)
+        IOptions<GeminiOptions>? geminiOptions = null,
+        IOptions<AssistantDomainOptions>? domainOptions = null)
     {
         _db = db;
         _embeddings = embeddings;
@@ -41,6 +71,20 @@ public sealed class SemanticSearchService : ISemanticSearchService
         _embeddingBatchDelaySeconds = Math.Clamp(geminiOptions?.Value.EmbeddingBatchDelaySeconds ?? 3, 0, 60);
         _semanticThreshold = Math.Clamp(geminiOptions?.Value.RetrievalSemanticThreshold ?? 0.38, 0, 1);
         _semanticWeight = Math.Clamp(geminiOptions?.Value.RetrievalSemanticWeight ?? 0.5, 0, 1);
+        _domainOptions = domainOptions?.Value ?? new AssistantDomainOptions();
+        _lexicalFallbackWhileWarming = geminiOptions?.Value.LexicalFallbackWhileWarming ?? true;
+    }
+
+    public async Task<AssistantQueryAnalysis> AnalyzeQueryAsync(string query, CancellationToken ct = default)
+    {
+        var categories = await _db.Categories.AsNoTracking().ToListAsync(ct);
+        var products = await _db.Products.AsNoTracking().ToListAsync(ct);
+        var brands = await _db.Brands.AsNoTracking().ToListAsync(ct);
+        var definitions = await _db.AttributeDefinitions.AsNoTracking().Where(definition => definition.IsActive).ToListAsync(ct);
+        var values = await _db.ProductAttributeValues.AsNoTracking()
+            .Include(value => value.AttributeDefinition)
+            .Where(value => value.AttributeDefinition.IsActive).ToListAsync(ct);
+        return AssistantQueryAnalyzer.Analyze(query, categories, products, brands, definitions, values, _domainOptions);
     }
 
     public async Task<bool> HasLexicalEvidenceAsync(string query, AssistantChatFilters? filters, CancellationToken ct = default)
@@ -74,6 +118,10 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
     public async Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
         string query, AssistantChatFilters? filters, int limit, CancellationToken ct = default)
+        => await SearchCandidatesAsync(query, filters, Array.Empty<AssistantTypedConstraint>(), limit, ct);
+
+    public async Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
+        string query, AssistantChatFilters? filters, IReadOnlyList<AssistantTypedConstraint> constraints, int limit, CancellationToken ct = default)
     {
         var dbQuery = _db.Products.AsNoTracking().Include(p => p.Category).Include(p => p.Brand).Include(p => p.Seller).Include(p => p.Reviews).AsQueryable();
         if (filters?.CategoryId is int categoryId) dbQuery = dbQuery.Where(p => p.CategoryId == categoryId);
@@ -81,6 +129,40 @@ public sealed class SemanticSearchService : ISemanticSearchService
         if (filters?.MinPrice is decimal minPrice) dbQuery = dbQuery.Where(p => p.Price >= minPrice);
         if (filters?.MaxPrice is decimal maxPrice) dbQuery = dbQuery.Where(p => p.Price <= maxPrice);
         if (filters?.InStockOnly == true) dbQuery = dbQuery.Where(p => p.Stock > 0);
+        foreach (var constraint in constraints)
+        {
+            if (constraint.BrandId is int brandId)
+            {
+                if (brandId <= 0) return [];
+                dbQuery = dbQuery.Where(product => product.BrandId == brandId);
+                continue;
+            }
+
+            if (constraint.AttributeDefinitionId is not int definitionId) continue;
+            var definitionIds = constraint.AttributeDefinitionIds ?? [definitionId];
+            var valueQuery = _db.ProductAttributeValues.AsNoTracking()
+                .Where(value => definitionIds.Contains(value.AttributeDefinitionId));
+            if (constraint.DataType == (int)CatalogAttributeType.Number && constraint.ValueNumber is decimal number)
+            {
+                valueQuery = constraint.Operator switch
+                {
+                    "greaterThan" => valueQuery.Where(value => value.ValueNumber > number),
+                    "greaterThanOrEqual" => valueQuery.Where(value => value.ValueNumber >= number),
+                    "lessThan" => valueQuery.Where(value => value.ValueNumber < number),
+                    "lessThanOrEqual" => valueQuery.Where(value => value.ValueNumber <= number),
+                    _ => valueQuery.Where(value => value.ValueNumber == number)
+                };
+            }
+            else if (constraint.DataType == (int)CatalogAttributeType.Boolean && constraint.ValueBoolean is bool boolean)
+                valueQuery = valueQuery.Where(value => value.ValueBoolean == boolean);
+            else if (constraint.DataType == (int)CatalogAttributeType.Text && !string.IsNullOrWhiteSpace(constraint.ValueText))
+                valueQuery = valueQuery.Where(value => value.ValueText == constraint.ValueText);
+            else
+                return [];
+
+            var matchingProductIds = valueQuery.Select(value => value.ProductId);
+            dbQuery = dbQuery.Where(product => matchingProductIds.Contains(product.Id));
+        }
         if (RetrievalScoring.TryFindSkuCandidate(query, out var skuCandidate))
         {
             var hasSkuCue = RetrievalScoring.HasNearbySkuCue(query, skuCandidate);
@@ -107,6 +189,9 @@ public sealed class SemanticSearchService : ISemanticSearchService
         }), out var skuToken);
 
         float[] queryVector = [];
+        if (_lexicalFallbackWhileWarming && Volatile.Read(ref WarmupScheduled) != 0 &&
+            Volatile.Read(ref WarmupCompleted) == 0 && !IsWarmupCall.Value)
+            return BuildLexicalResults(query, products, chunks, limit, explicitSkuQuery, skuToken);
         try
         {
             await EmbeddingCachePopulationGate.WaitAsync(ct);
@@ -161,15 +246,16 @@ public sealed class SemanticSearchService : ISemanticSearchService
             }
             finally { EmbeddingCachePopulationGate.Release(); }
 
-            var queryVectors = await _embeddings.GenerateEmbeddingsAsync([query], isQuery: true, ct);
-            if (queryVectors.Count == 1)
+            if (!IsWarmupCall.Value)
             {
-                queryVector = queryVectors[0];
+                var queryVectors = await _embeddings.GenerateEmbeddingsAsync([query], isQuery: true, ct);
+                if (queryVectors.Count == 1) queryVector = queryVectors[0];
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
+            if (IsWarmupCall.Value) Volatile.Write(ref WarmupEmbeddingFailed, 1);
             _logger.LogWarning("Semantic retrieval unavailable; using lexical retrieval. Failure type: {FailureType}", ex.GetType().Name);
             queryVector = [];
         }
@@ -193,6 +279,28 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 score.CombinedScore, sources));
         }
         return results.OrderByDescending(item => item.CombinedScore).ThenBy(item => item.Product.Id).Take(Math.Clamp(limit, 1, 8)).ToArray();
+    }
+
+    private IReadOnlyList<AssistantRetrievalCandidate> BuildLexicalResults(string query, IReadOnlyList<Product> products,
+        IReadOnlyList<AssistantSourceChunk> chunks, int limit, bool explicitSkuQuery, string skuToken)
+    {
+        var result = new List<AssistantRetrievalCandidate>();
+        foreach (var product in products)
+        {
+            var productChunks = chunks.Where(chunk => chunk.ProductId == product.Id).ToArray();
+            var scoringChunks = productChunks.Select(chunk => new RetrievalScoringChunk
+            {
+                ProductId = chunk.ProductId, Type = chunk.ChunkType, Content = chunk.Content
+            }).ToArray();
+            var scored = RetrievalScoring.ScoreProduct(query, [], scoringChunks, false, _semanticThreshold, 0,
+                explicitSkuQuery, skuToken);
+            if (!scored.Included) continue;
+            var sources = scored.IncludedChunkIndexes.Select(index => productChunks[index]).ToArray();
+            result.Add(new AssistantRetrievalCandidate(ToDto(product), scored.LexicalScore, 0,
+                scored.CombinedScore, sources));
+        }
+        return result.OrderByDescending(item => item.CombinedScore).ThenBy(item => item.Product.Id)
+            .Take(Math.Clamp(limit, 1, 8)).ToArray();
     }
 
     private IEnumerable<AssistantSourceChunk> BuildChunks(Product product, IReadOnlyList<ProductAttributeValue> attributes)

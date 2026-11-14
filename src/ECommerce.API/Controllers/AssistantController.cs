@@ -41,4 +41,10 @@ public sealed class AssistantController : ApiControllerBase
         var response = await _assistant.ChatAsync(request, customerId, ct);
         return Ok(response);
     }
+
+    [AllowAnonymous]
+    [HttpGet("readiness")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<object> Readiness([FromServices] ISemanticSearchService search) =>
+        Ok(new { hybridReady = search.IsHybridReady, retrievalMode = search.IsHybridReady ? "hybrid" : "lexical-warming" });
 }

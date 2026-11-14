@@ -18,6 +18,22 @@ public sealed class GeminiOptions
     public int EmbeddingRetryBaseDelaySeconds { get; set; } = 15;
     public int EmbeddingRetryMaxDelaySeconds { get; set; } = 90;
     public int EmbeddingRetryMaxTotalWaitSeconds { get; set; } = 300;
+    public bool StrictEvidenceEnabled { get; set; } = true;
+    public bool ContextualizerV2Enabled { get; set; } = true;
+    public bool EmbeddingWarmupEnabled { get; set; } = true;
+    public bool LexicalFallbackWhileWarming { get; set; } = true;
+    public string? EmbeddingCachePath { get; set; }
     public double RetrievalSemanticThreshold { get; set; } = 0.38;
     public double RetrievalSemanticWeight { get; set; } = 0.5;
+}
+
+public sealed class AssistantDomainOptions
+{
+    public const string SectionName = "AssistantDomain";
+    public string[] SupportedAttributeCodes { get; set; } = [];
+    public Dictionary<string, string[]> AttributeAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, Dictionary<string, string[]>> ValueAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string[]> UnitAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string[] FollowUpCues { get; set; } = [];
+    public string[] UnknownAttributeAliases { get; set; } = [];
 }
