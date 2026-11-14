@@ -73,7 +73,7 @@ export function AdminCouponsPage() {
             <div>
               <div className="font-medium">{c.code} {!c.isActive && <span className="text-xs text-rose-500">(vô hiệu)</span>}</div>
               <div className="text-xs muted">
-                {c.type === "Percentage" ? `${c.value}%` : `${c.value.toFixed(2)}`} · Đơn tối thiểu ${c.minOrderAmount.toFixed(2)} ·
+                {c.type === "Percentage" ? `${c.value}%` : `$${c.value.toFixed(2)}`} · Đơn tối thiểu ${c.minOrderAmount.toFixed(2)} ·
                 {" "}Đã dùng {c.timesUsed}{c.maxUses ? `/${c.maxUses}` : ""}
                 {c.expiresAt && ` · HSD ${new Date(c.expiresAt).toLocaleDateString("vi-VN")}`}
               </div>
