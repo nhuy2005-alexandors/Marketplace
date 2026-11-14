@@ -105,7 +105,8 @@ public static class AssistantContextualizer
                 : new ContextualizationResult(query, "none");
         }
 
-        var cleanedSubject = ConversationalPrefix.Replace(priorSubject.Trim(), string.Empty).Trim();
+        var normSubject = RetrievalScoring.Normalize(priorSubject);
+        var cleanedSubject = ConversationalPrefix.Replace(normSubject, string.Empty).Trim();
         var strippedQuery = FollowUpPronouns.Replace(normalized, " ").Trim();
         strippedQuery = Regex.Replace(strippedQuery, @"\s+", " ").Trim();
         return new ContextualizationResult($"{cleanedSubject} {strippedQuery}".Trim(), "followup");
