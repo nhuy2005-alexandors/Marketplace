@@ -681,7 +681,7 @@ public sealed class AiRagRemediationTests
         Assert.Empty(response.Sources);
         Assert.Equal("none", response.EvidenceStrength);
         Assert.Equal("no-evidence", response.AnswerSource);
-        Assert.Contains("chưa tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("không tìm thấy", response.Answer, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -753,7 +753,8 @@ public sealed class AiRagRemediationTests
             [new AssistantSourceChunk(31, "Audio", null, "description", "Portable listening accessory", "SOURCE-31", "fake-v1")]);
         var search = new FakeSearch([candidate]);
         var answers = new FakeAnswerProvider(new AssistantGeneratedAnswer("should not be used", [31]));
-        var service = new AssistantService(search, answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance);
+        var service = new AssistantService(search, answers, new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = false, ContextualizerV2Enabled = false }));
 
         var response = await service.ChatAsync(new AssistantChatRequest("zzqv-no-catalog-match"), null);
 
@@ -949,7 +950,6 @@ public sealed class AiRagRemediationTests
     [InlineData("máy pha cà phê")]
     [InlineData("tai nghe chống ồn")]
     [InlineData("sách về vàng")]
-    [InlineData("kem chống nắng")]
     [InlineData("balo đi du lịch")]
     public async Task Assistant_NearMissShoppingQueriesRemainProductSearch(string query)
     {
@@ -961,6 +961,23 @@ public sealed class AiRagRemediationTests
         Assert.Equal("product_search", response.Intent);
         Assert.Equal(1, search.CallCount);
         Assert.Single(response.Products);
+    }
+
+    [Fact]
+    public async Task Assistant_UncataloguedShoppingCategoryReturnsProductSearchNoEvidence()
+    {
+        var search = new FakeSearch([]) { Analysis = new AssistantQueryAnalysis([], false, false, []) };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), new FakeRecommendationProvider(), NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = true }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("kem chống nắng"), null);
+
+        Assert.Equal("product_search", response.Intent);
+        Assert.Equal("none", response.EvidenceStrength);
+        Assert.Equal("no-evidence", response.AnswerSource);
+        Assert.Empty(response.Products);
+        Assert.Empty(response.Sources);
+        Assert.Equal(0, search.CallCount);
     }
 
     [Fact]

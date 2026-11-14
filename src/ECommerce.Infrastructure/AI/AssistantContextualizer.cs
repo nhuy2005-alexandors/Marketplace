@@ -27,7 +27,7 @@ public static class AssistantContextualizer
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex ConversationalPrefix = new(
-        @"^(?:(?:xin chao|chao ban|hello|hi|shop oi|ad oi|ban oi|cho minh hoi|cho toi hoi|minh muon tim|toi muon tim|tim giup|tim cho minh|tim cho toi|tim|mua)\s+)+",
+        @"^(?:(?:xin chao|chào bạn|chao ban|hello|hi|shop oi|ad oi|ban oi|cho minh hoi|cho toi hoi|mình muốn tìm|minh muon tim|tôi muốn tìm|toi muon tim|tìm giúp|tim giup|tìm cho mình|tim cho minh|tìm cho tôi|tim cho toi|tìm|tim|mua)\s+)+",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public static string ContextualizeQuery(string query, IReadOnlyList<AssistantConversationTurn>? recentTurns)
@@ -96,9 +96,16 @@ public static class AssistantContextualizer
             .Where(turn => AssistantIntentClassifier.Classify(turn.Content).Intent == "product_search")
             .FirstOrDefault(turn => !IsFollowUpMessage(turn.Content, configuredFollowUpCues))?.Content;
         if (string.IsNullOrWhiteSpace(priorSubject))
-            return new ContextualizationResult(query, "needs_clarification");
+        {
+            var requiresPriorContext = cueMatch || FollowUpPronouns.IsMatch(normalized) ||
+                                       RefinementPhrases.IsMatch(normalized) || EllipticalPrefix.IsMatch(normalized) ||
+                                       OrdinalReference.IsMatch(normalized);
+            return requiresPriorContext
+                ? new ContextualizationResult(query, "needs_clarification")
+                : new ContextualizationResult(query, "none");
+        }
 
-        var cleanedSubject = ConversationalPrefix.Replace(RetrievalScoring.Normalize(priorSubject), " ").Trim();
+        var cleanedSubject = ConversationalPrefix.Replace(priorSubject.Trim(), string.Empty).Trim();
         var strippedQuery = FollowUpPronouns.Replace(normalized, " ").Trim();
         strippedQuery = Regex.Replace(strippedQuery, @"\s+", " ").Trim();
         return new ContextualizationResult($"{cleanedSubject} {strippedQuery}".Trim(), "followup");
