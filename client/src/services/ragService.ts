@@ -12,6 +12,7 @@ export interface RagResult {
   evidenceStrength: "strong" | "weak";
   sources: { type: string; productId: number; chunkType: string; contentHash: string }[];
   conversationId?: string;
+  intent?: "product_search" | "greeting" | "account_action" | "out_of_scope" | "blocked";
 }
 
 interface AssistantResponse {
@@ -21,6 +22,7 @@ interface AssistantResponse {
   retrieval: { mode: string; hasEvidence: boolean };
   evidenceStrength?: "strong" | "weak";
   conversationId?: string;
+  intent?: RagResult["intent"];
 }
 
 export async function executeRagQuery(
@@ -40,6 +42,21 @@ export async function executeRagQuery(
       },
     });
     const products = data.products || [];
+    const intent = data.intent ?? "product_search";
+    if (intent !== "product_search") {
+      return {
+        type: "general",
+        message: data.answer,
+        matchedProducts: [],
+        similarProducts: [],
+        recommendedProducts: [],
+        confidence: 0,
+        evidenceStrength: data.evidenceStrength ?? "weak",
+        sources: data.sources || [],
+        conversationId: data.conversationId,
+        intent,
+      };
+    }
     const isRecommendation = data.retrieval?.mode === "recommendation";
     const hasEvidence = data.retrieval?.hasEvidence ?? products.length > 0;
     const evidenceStrength = data.evidenceStrength ?? (hasEvidence ? "strong" : "weak");
@@ -53,6 +70,7 @@ export async function executeRagQuery(
       evidenceStrength,
       sources: data.sources || [],
       conversationId: data.conversationId,
+      intent,
     };
   } catch {
     // Fail closed: never fall back to browser-side catalog ranking or synthesize product cards.

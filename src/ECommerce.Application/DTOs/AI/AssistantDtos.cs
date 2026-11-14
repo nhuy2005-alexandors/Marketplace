@@ -31,7 +31,8 @@ public sealed record AssistantChatResponse(
     RetrievalMetadataDto Retrieval,
     string? ConversationId = null,
     string EvidenceStrength = "strong",
-    string AnswerSource = "generated");
+    string AnswerSource = "generated",
+    string Intent = "product_search");
 
 public sealed record ProductSourceDto(string Type, int ProductId, string ChunkType, string ContentHash);
 

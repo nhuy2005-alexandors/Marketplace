@@ -43,6 +43,35 @@ public sealed class SemanticSearchService : ISemanticSearchService
         _semanticWeight = Math.Clamp(geminiOptions?.Value.RetrievalSemanticWeight ?? 0.5, 0, 1);
     }
 
+    public async Task<bool> HasLexicalEvidenceAsync(string query, AssistantChatFilters? filters, CancellationToken ct = default)
+    {
+        var dbQuery = _db.Products.AsNoTracking().Include(p => p.Category).Include(p => p.Brand).Include(p => p.Seller).Include(p => p.Reviews).AsQueryable();
+        if (filters?.CategoryId is int categoryId) dbQuery = dbQuery.Where(p => p.CategoryId == categoryId);
+        if (filters?.SellerId is int sellerId) dbQuery = dbQuery.Where(p => p.SellerId == sellerId);
+        if (filters?.MinPrice is decimal minPrice) dbQuery = dbQuery.Where(p => p.Price >= minPrice);
+        if (filters?.MaxPrice is decimal maxPrice) dbQuery = dbQuery.Where(p => p.Price <= maxPrice);
+        if (filters?.InStockOnly == true) dbQuery = dbQuery.Where(p => p.Stock > 0);
+        if (RetrievalScoring.TryFindSkuCandidate(query, out var skuCandidate))
+        {
+            var hasSkuCue = RetrievalScoring.HasNearbySkuCue(query, skuCandidate);
+            var existsInCatalog = hasSkuCue || await _db.Products.AsNoTracking().AnyAsync(p => p.Sku == skuCandidate, ct);
+            if (existsInCatalog) dbQuery = dbQuery.Where(p => p.Sku == skuCandidate.ToUpperInvariant());
+        }
+
+        var products = await dbQuery.OrderBy(p => p.Id).Take(MaxCatalogCandidates).ToListAsync(ct);
+        if (products.Count == 0) return false;
+        var productIds = products.Select(p => p.Id).ToArray();
+        var attributes = await _db.ProductAttributeValues.AsNoTracking()
+            .Include(value => value.AttributeDefinition)
+            .Where(value => productIds.Contains(value.ProductId) && value.AttributeDefinition.IsActive)
+            .OrderBy(value => value.AttributeDefinition.DisplayName)
+            .ToListAsync(ct);
+        var attributesByProduct = attributes.GroupBy(value => value.ProductId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ProductAttributeValue>)group.ToArray());
+        return products.SelectMany(product => BuildChunks(product, attributesByProduct.GetValueOrDefault(product.Id, [])))
+            .Any(chunk => RetrievalScoring.LexicalScore(query, chunk.Content) > 0);
+    }
+
     public async Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
         string query, AssistantChatFilters? filters, int limit, CancellationToken ct = default)
     {

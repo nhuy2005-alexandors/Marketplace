@@ -9,6 +9,7 @@ public interface IAssistantService
 
 public interface ISemanticSearchService
 {
+    Task<bool> HasLexicalEvidenceAsync(string query, AssistantChatFilters? filters, CancellationToken ct = default);
     Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
         string query, AssistantChatFilters? filters, int limit, CancellationToken ct = default);
 }

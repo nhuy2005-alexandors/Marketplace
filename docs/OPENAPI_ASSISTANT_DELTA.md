@@ -65,13 +65,32 @@ The request body limit is 32,768 bytes. The endpoint is rate-limited by the `ai`
   "retrieval": { "mode": "hybrid", "hasEvidence": true },
   "conversationId": "…",
   "evidenceStrength": "strong",
-  "answerSource": "generated"
+  "answerSource": "generated",
+  "intent": "product_search"
 }
 ```
 
 `evidenceStrength` is `strong` or `weak`. It is additive; the existing `retrieval`, product and source fields retain their previous meaning and ordering. A weak result is returned from the local Vietnamese response without calling Gemini generation; it keeps the same retrieved products and source IDs in the same order and says they are near the request but may not fully match. It avoids claiming that no product was found when suggestions are present. A strong result follows the existing generation path (or its existing grounded fallback).
 
-`answerSource` is additive and identifies how `answer` was produced: `generated` for a valid Gemini response, `fallback` for a local recommendation/grounded response after a provider failure, timeout, open circuit, or when generation is disabled, and `weak-evidence` when retrieval evidence is weak and generation is skipped. Server configuration `Gemini:GenerationEnabled` defaults to `false`; with it disabled, strong-evidence requests use the local grounded response from the ranked candidates and set `answerSource="fallback"`. The answer-generation provider is not called. Embedding/retrieval configuration is independent and remains enabled as configured.
+`answerSource` is additive and identifies how `answer` was produced: `generated` for a valid Gemini response, `fallback` for a local recommendation/grounded response after a provider failure, timeout, open circuit, or when generation is disabled, `weak-evidence` when retrieval evidence is weak and generation is skipped, and `scope-guard` for a fixed response to a non-product intent. Server configuration `Gemini:GenerationEnabled` defaults to `false`; with it disabled, strong-evidence requests use the local grounded response from the ranked candidates and set `answerSource="fallback"`. The answer-generation provider is not called. Embedding/retrieval configuration is independent and remains enabled as configured.
+
+`intent` is an additive RAG-lane field with values `product_search`, `greeting`, `account_action`, `out_of_scope`, and `blocked`. It does not change the shared `ProductDto`, product ranking, order, or source selection. Rule-based scope guards return HTTP 200, empty `products` and `sources`, `retrieval.mode="scope-guard"`, `retrieval.hasEvidence=false`, and `answerSource="scope-guard"`; they do not call embedding or answer-generation providers. Out-of-scope classification first checks for lexical catalog evidence in the remainder of the query; when found, the request continues through the existing product-search path with its original query. Questions about subjective impressions remain `product_search`, skip Gemini generation so the answer does not invent subjective experience, and carry a caveat that only store specifications/reviews are available.
+
+### Guard response example
+
+```json
+{
+  "answer": "Mình chỉ hỗ trợ tìm sản phẩm trong cửa hàng nên chưa trả lời được câu này. Bạn muốn tìm sản phẩm nào không?",
+  "products": [],
+  "sources": [],
+  "retrieval": { "mode": "scope-guard", "hasEvidence": false },
+  "evidenceStrength": "weak",
+  "answerSource": "scope-guard",
+  "intent": "out_of_scope"
+}
+```
+
+Guard wording is currently configurable as constants and the greeting names “MiniShop”; the store name and support channel still require owner confirmation.
 
 An insufficient-retrieval result is still `200`: `products` and `sources` are empty, `retrieval.hasEvidence` is false, and `evidenceStrength` is normally `weak` (explicit SKU intent remains `strong`). Provider failures normally use a backend-grounded fallback; the response does not expose provider error bodies.
 

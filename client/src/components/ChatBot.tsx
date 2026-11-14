@@ -238,7 +238,7 @@ export function ChatBot() {
           {/* Danh sách tin nhắn */}
           <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/50 dark:bg-slate-950/40">
             {messages.map((msg) => {
-              const allItemCards = [
+              const allItemCards = msg.result?.intent && msg.result.intent !== "product_search" ? [] : [
                 ...(msg.result?.matchedProducts || []),
                 ...(msg.result?.similarProducts || []),
                 ...(msg.result?.recommendedProducts || []),

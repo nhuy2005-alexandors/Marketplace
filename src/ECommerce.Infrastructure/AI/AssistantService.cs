@@ -3,15 +3,11 @@ using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Text.RegularExpressions;
 
 namespace ECommerce.Infrastructure.AI;
 
 public sealed class AssistantService : IAssistantService
 {
-    private static readonly Regex PromptExtractionRequest = new(
-        @"(?i)(?:\b(?:reveal|show|print|tell\s+me|repeat|disclose|what\s+is|give\s+me|tiết\s+lộ|cho\s+biết|in\s+ra|đưa\s+tôi)\b.{0,48}\b(?:api[\s-]*key|system[\s-]*(?:prompt|instruction)|secret|bí\s+mật|khóa\s+api)\b|\b(?:api[\s-]*key|system[\s-]*(?:prompt|instruction)|secret|bí\s+mật|khóa\s+api)\b.{0,48}\b(?:reveal|show|print|repeat|disclose|tiết\s+lộ|in\s+ra)\b)",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly ISemanticSearchService _search;
     private readonly IAssistantAnswerProvider _answers;
     private readonly IRecommendationProvider _recommendations;
@@ -38,10 +34,15 @@ public sealed class AssistantService : IAssistantService
     public async Task<AssistantChatResponse> ChatAsync(AssistantChatRequest request, int? customerId, CancellationToken ct = default)
     {
         var query = request.Query!.Trim();
-        if (PromptExtractionRequest.IsMatch(query)) return NoEvidence(request.Conversation?.ConversationId);
+        var intent = AssistantIntentClassifier.Classify(query);
+        var subjectiveQuestion = AssistantIntentClassifier.HasSubjectiveQuestion(query);
+        if (intent.Intent is "blocked" or "account_action" or "greeting")
+            return ScopeGuard(intent.Intent, request.Conversation?.ConversationId);
         var filters = AssistantQueryFilters.Merge(query, request.Filters);
         if (filters.MinPrice.HasValue && filters.MaxPrice.HasValue && filters.MinPrice.Value > filters.MaxPrice.Value)
             return NoEvidence(request.Conversation?.ConversationId);
+        if (intent.Intent == "out_of_scope" && !await _search.HasLexicalEvidenceAsync(intent.LexicalGateQuery, filters, ct))
+            return ScopeGuard("out_of_scope", request.Conversation?.ConversationId);
         var candidates = await _search.SearchCandidatesAsync(query, filters, 4, ct);
         if (candidates.Count == 0 && IsRecommendationIntent(query))
         {
@@ -50,18 +51,21 @@ public sealed class AssistantService : IAssistantService
             {
                 var sources = products.Select(product => new ProductSourceDto("recommendation", product.Id, "recommendation", string.Empty)).ToArray();
                 return new AssistantChatResponse("Đây là các sản phẩm được hệ thống gợi ý cho bạn.", products, sources,
-                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong", "fallback");
+                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong", "fallback", "product_search");
             }
         }
         var skuBranch = IsExplicitSkuBranch(query, candidates);
         var evidenceStrength = skuBranch || candidates.Any(candidate => candidate.LexicalScore > 0) ? "strong" : "weak";
         if (candidates.Count == 0)
-            return NoEvidence(request.Conversation?.ConversationId, evidenceStrength,
+        {
+            var noEvidence = NoEvidence(request.Conversation?.ConversationId, evidenceStrength,
                 skuBranch ? "fallback" : "weak-evidence");
+            return subjectiveQuestion ? noEvidence with { Answer = noEvidence.Answer + "\n\n" + AssistantIntentClassifier.SubjectiveCaveat } : noEvidence;
+        }
 
         AssistantGeneratedAnswer? generated = null;
         var halfOpenProbe = false;
-        var generationAllowed = evidenceStrength == "strong" && _geminiOptions.GenerationEnabled && _generationCircuitBreaker.TryAcquire(out halfOpenProbe);
+        var generationAllowed = evidenceStrength == "strong" && !subjectiveQuestion && _geminiOptions.GenerationEnabled && _generationCircuitBreaker.TryAcquire(out halfOpenProbe);
         var answerSource = evidenceStrength == "weak" ? "weak-evidence" : "fallback";
         if (generationAllowed)
         {
@@ -86,6 +90,8 @@ public sealed class AssistantService : IAssistantService
                 _logger.LogWarning("Assistant generation failed; returning a grounded local response. Failure type: {FailureType}", ex.GetType().Name);
             }
         }
+        else if (evidenceStrength == "strong" && subjectiveQuestion)
+            _logger.LogInformation("Assistant generation skipped for a subjective product-impression question; returning catalog-grounded wording.");
         else if (evidenceStrength == "strong" && !_geminiOptions.GenerationEnabled)
             _logger.LogInformation("Assistant generation is disabled by Gemini:GenerationEnabled; returning a grounded local response.");
         else if (evidenceStrength == "strong")
@@ -105,9 +111,23 @@ public sealed class AssistantService : IAssistantService
         var answer = hasValidGeneratedSources ? generated!.Answer.Trim()
             : evidenceStrength == "weak" ? BuildWeakEvidenceAnswer(selected.Select(candidate => candidate.Product).ToArray())
             : BuildLocalAnswer(query, selected.Select(candidate => candidate.Product).ToArray());
+        if (subjectiveQuestion) answer += "\n\n" + AssistantIntentClassifier.SubjectiveCaveat;
         if (evidenceStrength == "weak") answerSource = "weak-evidence";
         return new AssistantChatResponse(answer, selected.Select(candidate => candidate.Product).ToArray(), sourcesOut,
-            new RetrievalMetadataDto("hybrid", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource);
+            new RetrievalMetadataDto("hybrid", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), evidenceStrength, answerSource, "product_search");
+    }
+
+    private static AssistantChatResponse ScopeGuard(string intent, string? conversationId)
+    {
+        var answer = intent switch
+        {
+            "blocked" => AssistantIntentClassifier.BlockedAnswer,
+            "account_action" => AssistantIntentClassifier.AccountAnswer,
+            "greeting" => AssistantIntentClassifier.GreetingAnswer,
+            _ => AssistantIntentClassifier.OutOfScopeAnswer
+        };
+        return new AssistantChatResponse(answer, [], [], new RetrievalMetadataDto("scope-guard", false),
+            conversationId ?? Guid.NewGuid().ToString("N"), "weak", "scope-guard", intent);
     }
 
     private static bool IsRecommendationIntent(string query) =>
