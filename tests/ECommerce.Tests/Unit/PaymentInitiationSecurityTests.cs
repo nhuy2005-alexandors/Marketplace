@@ -3,6 +3,7 @@ using ECommerce.Application.Interfaces;
 using ECommerce.Application.Services;
 using ECommerce.Domain.Enums;
 using ECommerce.Infrastructure.Payments;
+using Microsoft.EntityFrameworkCore;
 
 namespace ECommerce.Tests.Unit;
 
