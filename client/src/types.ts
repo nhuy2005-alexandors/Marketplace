@@ -183,6 +183,10 @@ export interface Refund {
   externalReference?: string;
   note?: string;
   processedByName?: string;
+  providerAmount?: number;
+  providerCurrency?: string;
+  paymentMethod?: string;
+  paymentTransactionId?: string;
 }
 
 export interface PayResult {

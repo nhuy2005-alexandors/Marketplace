@@ -52,7 +52,19 @@ function RefundCard({ refund }: { refund: Refund }) {
           <div className="font-semibold">Đơn #{refund.orderId} · {refund.customerName}</div>
           <div className="text-xs muted mt-1">Yêu cầu lúc {new Date(refund.requestedAt).toLocaleString("vi-VN")}</div>
         </div>
-        <div className="font-bold text-brand-600 dark:text-brand-400">${refund.amount.toFixed(2)}</div>
+        <div className="font-bold text-brand-600 dark:text-brand-400">{"$" + refund.amount.toFixed(2) + " USD"}</div>
+      </div>
+      <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3 text-sm space-y-1">
+        <div><span className="font-medium">Nghĩa vụ hoàn:</span> {"$" + refund.amount.toFixed(2) + " USD"}</div>
+        {refund.providerAmount !== undefined && refund.providerCurrency && (
+          <div><span className="font-medium">Capture gốc tại cổng:</span> {refund.providerAmount.toLocaleString("en-US", {
+            minimumFractionDigits: refund.providerCurrency === "VND" ? 0 : 2,
+            maximumFractionDigits: refund.providerCurrency === "VND" ? 0 : 2,
+          })} {refund.providerCurrency}</div>
+        )}
+        {refund.paymentMethod && <div><span className="font-medium">Phương thức:</span> {refund.paymentMethod}</div>}
+        {refund.paymentTransactionId && <div><span className="font-medium">Mã giao dịch thanh toán:</span> {refund.paymentTransactionId}</div>}
+        <p className="text-xs muted pt-1">Đối chiếu capture gốc và khoản chuyển tiền trên hệ thống của nhà cung cấp/ngân hàng. Không quy đổi capture lịch sử bằng tỷ giá hiện tại.</p>
       </div>
       <div className="text-sm"><span className="font-medium">Lý do:</span> {refund.reason}</div>
       {refund.status !== "Pending" && (
