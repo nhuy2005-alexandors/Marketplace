@@ -88,8 +88,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not start LocalDB instance $instance." }
           }
 
-          "MARKETPLACE_MIGRATION_TEST_CONNECTION=Server=(localdb)\MarketplaceSafetyTestMigration;Database=ECommerceDb_Dev;Integrated Security=true;TrustServerCertificate=true" >> $env:GITHUB_ENV
-          "MARKETPLACE_OWNER_CATALOG_TEST_CONNECTION=Server=(localdb)\MarketplaceSafetyTestOwnerCatalog;Database=ECommerceDb_Dev;Integrated Security=true;TrustServerCertificate=true" >> $env:GITHUB_ENV
+          "MARKETPLACE_MIGRATION_TEST_CONNECTION=Server=(localdb)\MarketplaceSafetyTestMigration;AttachDbFilename=$env:RUNNER_TEMP\MarketplaceMigrationTest.mdf;Initial Catalog=ECommerceDb_Dev;Integrated Security=true;TrustServerCertificate=true" >> $env:GITHUB_ENV
+          "MARKETPLACE_OWNER_CATALOG_TEST_CONNECTION=Server=(localdb)\MarketplaceSafetyTestOwnerCatalog;AttachDbFilename=$env:RUNNER_TEMP\MarketplaceOwnerCatalogTest.mdf;Initial Catalog=ECommerceDb_Dev;Integrated Security=true;TrustServerCertificate=true" >> $env:GITHUB_ENV
 
       - name: Restore
         run: dotnet restore ECommerce.sln
