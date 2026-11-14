@@ -53,7 +53,7 @@ The database enforces typed-value exclusivity and category/type matching through
 - every active required definition is supplied when creating a product or explicitly replacing its attribute set;
 - at most 100 attributes per product request.
 
-On Product update, omitted Attributes means preserve the current set; an empty list means remove all optional attributes. Existing attribute rows are updated in place where possible to avoid unique-key delete/insert races.
+On Product update, omitted Attributes means preserve the current set. A supplied list replaces the active attribute set while retaining values tied to inactive definitions; those values remain hidden until the definition is reactivated. An empty list removes all active optional attributes. Existing attribute rows are updated in place where possible to avoid unique-key delete/insert races.
 
 ## 5. Product API contract
 
@@ -96,8 +96,8 @@ Only active, filterable AttributeDefinitions participate in filtering. Product s
 - Admin product form supports SKU, optional Brand and category-defined typed attributes.
 - Seller product form supports SKU, optional Brand and typed attributes for its selected category; sellers cannot manage Brand or AttributeDefinition definitions.
 - Admin catalog settings supports Brand create/update/delete and AttributeDefinition create/update/deactivate/delete. Deletion is rejected when referenced; deactivation is the safe path for definitions already used by products.
-- Public product cards/details show Brand/SKU/typed attributes, and product list supports server-side Brand filtering.
-- Product category is read-only while editing because it participates in the typed attribute composite key. Required attribute definitions are enforced by the backend; the UI marks them explicitly.
+- Public product cards/details show Brand/SKU/typed attributes; product list supports server-side Brand filtering and category-scoped typed attribute filters (exact text, numeric range, and boolean).
+- Product category is read-only while editing because it participates in the typed attribute composite key. Required attribute definitions are enforced by the backend; the UI marks them explicitly. Inactive definition values are preserved during product edits and become visible again if the definition is reactivated.
 
 ## 9. Explicit non-goals
 

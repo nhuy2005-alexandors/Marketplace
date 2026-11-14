@@ -79,3 +79,41 @@ The current PR #3 base head `4c7c3d8bf977f2b1ca7eec869c57950ec222c963` is includ
 - PR #3 remains open and Ready for Review.
 - PR #4 remains open and Draft; it is synchronized on PR #3's latest head and is not behind.
 - Neither PR was merged. No merge or deployment is authorized by this receipt.
+
+
+## Owner UI and refund-auditability addendum — 2026-11-14
+
+**Implementation head tested:** 941c70df9ad00c4e82e7219c44436511b3919b3a  
+**CI:** [run 43602730935](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43602730935) — completed successfully.
+
+### Completed vertical slices
+
+- Admin and Seller product forms now expose SKU, optional Brand and category-defined typed attributes. Product category remains immutable during edits.
+- Admin catalog settings supports Brand create/update/delete and AttributeDefinition create/update/deactivate/delete. Referenced definitions cannot be deleted; deactivation preserves existing product values.
+- Public product cards/details expose Brand, SKU and typed attributes. Product listing supports server-side Brand and category-scoped typed attribute filters: exact text, numeric range and boolean.
+- Product updates replace the active attribute set but preserve values associated with inactive definitions. Reactivating a definition makes its prior values visible again.
+- Fixed coupon value/minimum labels consistently identify USD; Seller Dashboard customer metric label no longer claims a platform-wide count when the value is seller-scoped.
+- Refund API now exposes the frozen provider capture amount/currency, payment method, provider key and payment transaction ID. Admin Refund UI displays the USD refund obligation separately from provider-native capture evidence.
+- Refund request and completion fail closed if original provider capture amount/currency is unavailable. Actual external payout amount/currency remains outside the current MVP and must be verified by Admin against the external transfer evidence.
+
+### Final CI evidence for the implementation head
+
+| Instrument | Result |
+|---|---:|
+| Backend build | PASS |
+| Backend tests | 150 passed, 0 failed, 3 opt-in SQL facts skipped |
+| Frontend type-check + build | PASS |
+| Frontend regression tests | 3/3 PASS |
+| Windows disposable LocalDB migration/trigger tests | 2/2 PASS |
+
+The two Windows tests exercised the populated pre-V2 SKU upgrade and Owner catalog FK/checkout-snapshot trigger. The separately scoped SQL lifecycle concurrency fact remains opt-in and is not included in this run.
+
+### Boundaries retained
+
+- USD remains the canonical catalog/order/payment/refund currency. MoMo provider-native quote/capture remains VND.
+- MoMo FX rate is intentionally unset. Real MoMo initiation remains fail-closed until an FX source/rate is approved.
+- No historical monetary rows were converted.
+- No actual external payment charge or refund transfer was made.
+- No persistent ECommerceDb_Dev or original database was migrated; LocalDB acceptance ran on disposable CI instances only.
+- COD collection, reconciliation resolution, automatic provider refunds and multi-attempt retry remain outside this MVP.
+- PR #4 remains stacked on PR #3. No AI lane branches were modified, merged or synchronized. Neither PR was merged into main.
