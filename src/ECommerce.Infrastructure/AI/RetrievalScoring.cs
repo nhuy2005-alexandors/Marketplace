@@ -56,6 +56,10 @@ namespace ECommerce.Infrastructure.AI
                 if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark)
                     builder.Append(ch == 'đ' ? 'd' : ch);
             var normalized = Regex.Replace(Regex.Replace(builder.ToString(), @"[^\p{L}\p{N}]", " "), @"\s+", " ").Trim();
+            normalized = Regex.Replace(normalized, @"\btainghe\b", "tai nghe");
+            normalized = Regex.Replace(normalized, @"\bbanphim\b", "ban phim");
+            normalized = Regex.Replace(normalized, @"\bdongho\b", "dong ho");
+            normalized = Regex.Replace(normalized, @"\bmaytinh\b", "may tinh");
             return normalized;
         }
 

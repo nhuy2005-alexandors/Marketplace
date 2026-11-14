@@ -47,7 +47,7 @@ function Invoke-ProbeRequest([string]$Name,[string]$Method,[string]$Path,[object
         $request=[System.Net.Http.HttpRequestMessage]::new($httpMethod,[Uri]::new($baseUri,$Path))
         if($null -ne $Payload){$json=ConvertTo-Json -InputObject $Payload -Depth 8 -Compress;$request.Content=[System.Net.Http.StringContent]::new($json,[Text.Encoding]::UTF8,'application/json')}
         $response=$client.SendAsync($request,[Net.Http.HttpCompletionOption]::ResponseHeadersRead,$cts.Token).GetAwaiter().GetResult();$status=[int]$response.StatusCode
-        $stream=$response.Content.ReadAsStreamAsync($cts.Token).GetAwaiter().GetResult();$buffer=New-Object byte[] 4096;$memory=[IO.MemoryStream]::new();$read=$stream.ReadAsync($buffer,0,$buffer.Length,$cts.Token).GetAwaiter().GetResult();$timer.Stop();if($read -gt 0){$firstByteMs=[int]$timer.Elapsed.TotalMilliseconds;$memory.Write($buffer,0,$read)}
+        $stream=$response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();$buffer=New-Object byte[] 4096;$memory=[IO.MemoryStream]::new();$read=$stream.ReadAsync($buffer,0,$buffer.Length,$cts.Token).GetAwaiter().GetResult();$timer.Stop();if($read -gt 0){$firstByteMs=[int]$timer.Elapsed.TotalMilliseconds;$memory.Write($buffer,0,$read)}
         while($read -gt 0){$read=$stream.ReadAsync($buffer,0,$buffer.Length,$cts.Token).GetAwaiter().GetResult();if($read -gt 0){$memory.Write($buffer,0,$read)}}
         $body=[Text.Encoding]::UTF8.GetString($memory.ToArray());$memory.Dispose();$stream.Dispose();if(-not $response.IsSuccessStatusCode){$errorType='http-'+$status}
     }catch{$timer.Stop();$errorType=$_.Exception.GetBaseException().GetType().Name}

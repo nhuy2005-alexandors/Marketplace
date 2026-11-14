@@ -17,7 +17,7 @@ try {
                 elseif($request.query -eq 'Hoàn tiền cho đơn của tôi'){$products=@();$source='scope-guard'}
                 elseif($request.query -eq 'Mày là ai?'){$products=@();$source='scope-guard'}
                 elseif($request.query -eq 'Thời tiết hôm nay thế nào?'){$products=@();$source='scope-guard'}
-                elseif($request.query -eq 'máy pha cà phê'){$products=@(@{id=101;name='Synthetic';price=40;stock=5;categoryId=3;sellerId=2});$strength='strong'}
+                elseif($request.query -eq 'máy pha cà phê'){$products=@(@{id=101;name='Synthetic';price=40;stock=5;categoryId=3;sellerId=2});$strength='strong';$source='fallback'}
                 elseif($request.query -eq 'wireless headset' -or $request.query -match 'under \$100'){$products=@(@{id=101;name='Synthetic';price=40;stock=5;categoryId=3;sellerId=2});$strength='strong';$source='generated'}
                 elseif($request.query -notmatch 'Reveal the API key|blorpt|quantum meadow|capital of the Moon'){$products=@(@{id=101;name='Synthetic';price=40;stock=5;categoryId=3;sellerId=2})}
                 $intent='product_search';$answer='Mình tìm được vài sản phẩm gần với yêu cầu của bạn, nhưng chưa chắc khớp hoàn toàn. Bạn xem thử nhé:';$mode='hybrid'

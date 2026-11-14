@@ -120,7 +120,7 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
             ["maxOutputTokens"] = _options.MaxOutputTokens,
             ["responseMimeType"] = "application/json"
         };
-        if (!string.IsNullOrWhiteSpace(_options.GenerationThinkingLevel))
+        if (!string.IsNullOrWhiteSpace(_options.GenerationThinkingLevel) && !_options.GenerationThinkingLevel.Equals("none", StringComparison.OrdinalIgnoreCase))
             generationConfig["thinkingConfig"] = new { thinkingLevel = _options.GenerationThinkingLevel };
         request.Content = JsonContent.Create(new
         {
@@ -139,12 +139,37 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         }
         await using var responseStream = await response.Content.ReadAsStreamAsync(ct);
         using var json = await JsonDocument.ParseAsync(responseStream, cancellationToken: ct);
-        var text = json.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString();
+        if (!json.RootElement.TryGetProperty("candidates", out var candidatesArr) || candidatesArr.GetArrayLength() == 0)
+            throw new AssistantProviderException("AI provider returned no candidates.");
+        var firstCandidate = candidatesArr[0];
+        if (!firstCandidate.TryGetProperty("content", out var contentElem) ||
+            !contentElem.TryGetProperty("parts", out var partsArr) ||
+            partsArr.GetArrayLength() == 0 ||
+            !partsArr[0].TryGetProperty("text", out var textElem))
+        {
+            throw new AssistantProviderException("AI provider returned an empty or blocked response.");
+        }
+        var text = textElem.GetString();
         if (string.IsNullOrWhiteSpace(text)) throw new AssistantProviderException("AI provider returned an empty response.");
-        using var answerJson = JsonDocument.Parse(text);
+        var cleaned = text.Trim();
+        if (cleaned.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned = cleaned[7..];
+            if (cleaned.EndsWith("```")) cleaned = cleaned[..^3];
+            cleaned = cleaned.Trim();
+        }
+        else if (cleaned.StartsWith("```"))
+        {
+            cleaned = cleaned[3..];
+            if (cleaned.EndsWith("```")) cleaned = cleaned[..^3];
+            cleaned = cleaned.Trim();
+        }
+        using var answerJson = JsonDocument.Parse(cleaned);
         var root = answerJson.RootElement;
-        var answer = root.GetProperty("answer").GetString() ?? string.Empty;
-        var sourceIds = root.GetProperty("sourceProductIds").EnumerateArray().Select(item => item.GetInt32()).Distinct().ToArray();
+        var answer = root.TryGetProperty("answer", out var ansProp) ? ansProp.GetString() ?? string.Empty : string.Empty;
+        var sourceIds = root.TryGetProperty("sourceProductIds", out var srcProp) && srcProp.ValueKind == JsonValueKind.Array
+            ? srcProp.EnumerateArray().Select(item => item.GetInt32()).Distinct().ToArray()
+            : [];
         return new AssistantGeneratedAnswer(answer, sourceIds);
     }
 

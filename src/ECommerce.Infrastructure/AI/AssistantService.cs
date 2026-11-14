@@ -43,7 +43,15 @@ public sealed class AssistantService : IAssistantService
             return NoEvidence(request.Conversation?.ConversationId);
         if (intent.Intent == "out_of_scope" && !await _search.HasLexicalEvidenceAsync(intent.LexicalGateQuery, filters, ct))
             return ScopeGuard("out_of_scope", request.Conversation?.ConversationId);
-        var candidates = await _search.SearchCandidatesAsync(query, filters, 4, ct);
+
+        var contextualQuery = AssistantContextualizer.ContextualizeQuery(query, request.Conversation?.RecentTurns);
+        var searchFilters = contextualQuery != query ? AssistantQueryFilters.Merge(contextualQuery, filters) : filters;
+        var candidates = await _search.SearchCandidatesAsync(contextualQuery, searchFilters, 4, ct);
+        if (candidates.Count == 0 && contextualQuery != query)
+        {
+            candidates = await _search.SearchCandidatesAsync(query, filters, 4, ct);
+        }
+
         if (candidates.Count == 0 && IsRecommendationIntent(query))
         {
             var products = await _recommendations.GetProductsAsync(customerId, 4, ct);
@@ -54,7 +62,7 @@ public sealed class AssistantService : IAssistantService
                     new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong", "fallback", "product_search");
             }
         }
-        var skuBranch = IsExplicitSkuBranch(query, candidates);
+        var skuBranch = IsExplicitSkuBranch(query, candidates) || (contextualQuery != query && IsExplicitSkuBranch(contextualQuery, candidates));
         var evidenceStrength = skuBranch || candidates.Any(candidate => candidate.LexicalScore > 0) ? "strong" : "weak";
         if (candidates.Count == 0)
         {
