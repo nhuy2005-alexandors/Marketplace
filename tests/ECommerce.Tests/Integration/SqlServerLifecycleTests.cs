@@ -97,7 +97,7 @@ public class SqlServerLifecycleTests
         var snapshotItem = snapshotOrder.Items.Single();
         var originalSnapshotName = snapshotItem.ProductName;
         await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync(
-            "UPDATE dbo.OrderItems SET ProductName = N'Tampered snapshot' WHERE Id = {0}", snapshotItem.Id));
+            "UPDATE dbo.OrderItems SET ProductName = N'fixture product' WHERE Id = {0}", snapshotItem.Id));
         db.ChangeTracker.Clear();
         var storedSnapshotName = await db.OrderItems.AsNoTracking()
             .Where(i => i.Id == snapshotItem.Id).Select(i => i.ProductName).SingleAsync();

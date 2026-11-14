@@ -87,7 +87,7 @@ public partial class OwnerCatalogIntegrity : Migration
                     INNER JOIN dbo.Products p ON p.Id = i.ProductId
                     WHERE d.Id IS NULL
                       AND (i.SellerId <> p.SellerId
-                           OR i.ProductName <> p.Name
+                           OR CONVERT(varbinary(400), i.ProductName) <> CONVERT(varbinary(400), p.Name)
                            OR i.UnitPrice <> p.Price)
                 )
                     THROW 51006, 'Order item checkout snapshot must match the product at insertion.', 1;
@@ -99,7 +99,7 @@ public partial class OwnerCatalogIntegrity : Migration
                     WHERE i.OrderId <> d.OrderId
                        OR i.ProductId <> d.ProductId
                        OR i.SellerId <> d.SellerId
-                       OR i.ProductName <> d.ProductName
+                       OR CONVERT(varbinary(400), i.ProductName) <> CONVERT(varbinary(400), d.ProductName)
                        OR i.UnitPrice <> d.UnitPrice
                        OR i.Quantity <> d.Quantity
                 )
