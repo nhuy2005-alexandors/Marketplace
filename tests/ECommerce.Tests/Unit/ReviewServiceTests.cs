@@ -16,11 +16,19 @@ public class ReviewServiceTests
     private static async Task<(int userId, int productId)> SeedAsync(Infrastructure.Persistence.AppDbContext db)
     {
         var user = new User { Email = "u@x.com", PasswordHash = "h", FullName = "Buyer", Role = UserRole.Customer };
+        var seller = new User
+        {
+            Email = "s@x.com", PasswordHash = "h", FullName = "Seller",
+            Role = UserRole.Seller, SellerStatus = SellerStatus.Approved
+        };
         var category = new Category { Name = "Cat" };
-        db.Users.Add(user);
+        db.Users.AddRange(user, seller);
         db.Categories.Add(category);
         await db.SaveChangesAsync();
-        var product = new Product { Name = "P", Price = 50m, Stock = 10, CategoryId = category.Id };
+        var product = new Product
+        {
+            Name = "P", Price = 50m, Stock = 10, CategoryId = category.Id, SellerId = seller.Id
+        };
         db.Products.Add(product);
         await db.SaveChangesAsync();
         return (user.Id, product.Id);
