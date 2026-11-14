@@ -69,6 +69,9 @@ public class FulfillmentTests
         forbidden.Success.Should().BeFalse();
         forbidden.ErrorType.Should().Be(ErrorType.Forbidden);
 
+        (await seller.UpdateFulfillmentAsync(sa, itemA.Id, new("Shipped"))).Success.Should().BeFalse("unpaid orders cannot ship");
+        (await new PaymentService(db, TestDb.PaymentFactory()).InitiateAsync(cust, order.Id, new("mock", null))).Success.Should().BeTrue();
+
         // sellerA ship item của mình -> OK
         var ok = await seller.UpdateFulfillmentAsync(sa, itemA.Id, new UpdateFulfillmentStatusRequest("Shipped"));
         ok.Success.Should().BeTrue();
@@ -112,7 +115,13 @@ public class FulfillmentTests
         await cart.AddItemAsync(cust, new AddCartItemRequest(pa, 1));
         await cart.AddItemAsync(cust, new AddCartItemRequest(pb, 1));
         var order = (await new OrderService(db).CheckoutAsync(cust, new CheckoutRequest("addr", "SAVE20"))).Value!;
-        await new PaymentService(db, TestDb.PaymentFactory()).InitiateAsync(cust, order.Id, new PayOrderRequest("mock", null));
+        // Synthetic captured-payment fixture: aggregation must measure collected
+        // money, while the separate demo test verifies mock revenue is excluded.
+        var captured = await db.Orders.SingleAsync(o => o.Id == order.Id);
+        captured.ChangeStatus(OrderStatus.Paid);
+        db.Payments.Add(new Payment { OrderId = order.Id, Amount = 80m, Method = PaymentMethod.CreditCard,
+            Status = PaymentStatus.Completed, TransactionId = "FIXTURE-CAPTURE", PaidAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
 
         var dash = new DashboardService(db);
         var system = await dash.GetAsync(null);

@@ -1,3 +1,4 @@
+using System.Globalization;
 using ECommerce.Application.Common;
 using ECommerce.Application.DTOs.Orders;
 using ECommerce.Application.Interfaces;
@@ -98,7 +99,7 @@ public class OrderService : IOrderService
                 await _email.SendAsync(
                     email,
                     $"Xác nhận đơn hàng #{order.Id}",
-                    $"Đơn hàng #{order.Id} của bạn đã được đặt thành công. Tổng tiền: {order.Total:N0}đ.",
+                    $"Đơn hàng #{order.Id} của bạn đã được đặt thành công. Tổng tiền: {order.Total.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}.",
                     ct);
             }
         }
@@ -154,15 +155,50 @@ public class OrderService : IOrderService
         if (order is null)
             return Result.Fail<OrderDto>("Order not found.", ErrorType.NotFound);
 
+        if (order.RefundPending)
+            return Result.Fail<OrderDto>("Order is held for refund.", ErrorType.Conflict);
+
+        if (newStatus == OrderStatus.Cancelled)
+        {
+            var cancellation = await CancelUnfulfilledOrderAsync(order, ct);
+            if (!cancellation.Success)
+                return Result.Fail<OrderDto>(cancellation.Error!, cancellation.ErrorType);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Result.Fail<OrderDto>("The order or inventory changed concurrently. Reload and retry.", ErrorType.Conflict);
+            }
+            return Result.Ok(order.ToDto());
+        }
+
         try
         {
+            if (newStatus is not (OrderStatus.Shipped or OrderStatus.Delivered) || !OrderLifecycle.CanFulfill(order))
+                return Result.Fail<OrderDto>("Payment acceptance must use the payment workflow; order cannot be fulfilled.", ErrorType.Conflict);
+            var itemStatus = newStatus == OrderStatus.Shipped ? FulfillmentStatus.Shipped : FulfillmentStatus.Delivered;
+            if (order.Items.Count == 0)
+                return Result.Fail<OrderDto>("Order has no items.", ErrorType.Conflict);
+            // Validate all transitions before changing any tracked state.
+            if (order.Items.Any(i => itemStatus == FulfillmentStatus.Shipped
+                ? i.Status is not (FulfillmentStatus.Pending or FulfillmentStatus.Shipped)
+                : i.Status is not (FulfillmentStatus.Shipped or FulfillmentStatus.Delivered)))
+                return Result.Fail<OrderDto>("Item fulfillment state does not permit this transition.", ErrorType.Conflict);
             order.ChangeStatus(newStatus);
+            foreach (var item in order.Items) item.ChangeStatus(itemStatus);
+            OrderLifecycle.Touch(_db, order);
         }
         catch (InvalidOrderTransitionException ex)
         {
             return Result.Fail<OrderDto>(ex.Message, ErrorType.Conflict);
         }
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Result.Fail<OrderDto>("Order changed concurrently. Reload and retry.", ErrorType.Conflict);
+        }
         return Result.Ok(order.ToDto());
     }
 
@@ -173,30 +209,66 @@ public class OrderService : IOrderService
             return Result.Fail<OrderDto>("Order not found.", ErrorType.NotFound);
         if (order.UserId != userId)
             return Result.Fail<OrderDto>("Access denied.", ErrorType.Forbidden);
-        if (!order.CanCancel())
-            return Result.Fail<OrderDto>($"Cannot cancel an order in {order.Status} state.", ErrorType.Conflict);
+        var cancellation = await CancelUnfulfilledOrderAsync(order, ct);
+        if (!cancellation.Success)
+            return Result.Fail<OrderDto>(cancellation.Error!, cancellation.ErrorType);
 
-        var productIds = order.Items.Select(i => i.ProductId).ToList();
-        var products = await _db.Products.Where(p => productIds.Contains(p.Id)).ToListAsync(ct);
-        var byId = products.ToDictionary(p => p.Id);
-        foreach (var item in order.Items)
-        {
-            if (byId.TryGetValue(item.ProductId, out var product))
-                product.Stock += item.Quantity;
-            if (item.Status == Domain.Enums.FulfillmentStatus.Pending)
-                item.Status = Domain.Enums.FulfillmentStatus.Cancelled;
-        }
-        order.ChangeStatus(OrderStatus.Cancelled);
         try
         {
             await _db.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
         {
-            // Cancel song song / tồn kho vừa đổi (Product RowVersion): trả Conflict thay vì 500.
-            return Result.Fail<OrderDto>("Đơn hàng vừa được cập nhật, vui lòng thử lại.", ErrorType.Conflict);
+            return Result.Fail<OrderDto>("The order or inventory changed concurrently. Reload and retry.", ErrorType.Conflict);
         }
         return Result.Ok(order.ToDto());
+    }
+
+    private async Task<Result> CancelUnfulfilledOrderAsync(Order order, CancellationToken ct)
+    {
+        if (order.RefundPending)
+            return Result.Fail("Order is held for refund.", ErrorType.Conflict);
+        if (!order.CanCancel())
+            return Result.Fail($"Cannot cancel an order in {order.Status} state.", ErrorType.Conflict);
+
+        // A captured online payment must go through the refund workflow.
+        // COD is treated as uncollected in this MVP and can be cancelled without a refund.
+        if (order.Payment?.Status is PaymentStatus.Completed or PaymentStatus.Refunded ||
+            order.Payment?.RequiresReconciliation == true)
+            return Result.Fail("Paid online orders must use the refund request workflow.", ErrorType.Conflict);
+
+        if (order.Items.Count == 0 || order.Items.Any(i => i.Status != FulfillmentStatus.Pending))
+            return Result.Fail("An order can only be cancelled before fulfillment starts.", ErrorType.Conflict);
+
+        var productIds = order.Items.Select(i => i.ProductId).Distinct().ToList();
+        var products = await _db.Products.Where(p => productIds.Contains(p.Id)).ToListAsync(ct);
+        if (products.Count != productIds.Count)
+            return Result.Fail("One or more order products are missing; inventory was not changed.", ErrorType.Conflict);
+
+        var byId = products.ToDictionary(p => p.Id);
+        foreach (var item in order.Items)
+        {
+            byId[item.ProductId].Stock += item.Quantity;
+            item.ChangeStatus(FulfillmentStatus.Cancelled);
+        }
+
+        if (order.Payment?.Method == PaymentMethod.CashOnDelivery)
+        {
+            order.Payment.Status = PaymentStatus.Cancelled;
+            order.Payment.PaidAt = null;
+        }
+
+        try
+        {
+            order.ChangeStatus(OrderStatus.Cancelled);
+            OrderLifecycle.Touch(_db, order);
+        }
+        catch (InvalidOrderTransitionException ex)
+        {
+            return Result.Fail(ex.Message, ErrorType.Conflict);
+        }
+
+        return Result.Ok();
     }
 
     public async Task<Result<OrderSplitDto>> GetSplitAsync(int userId, bool isAdmin, int orderId, CancellationToken ct = default)

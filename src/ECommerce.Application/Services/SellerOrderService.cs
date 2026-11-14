@@ -55,7 +55,7 @@ public class SellerOrderService : ISellerOrderService
                 sellerTotal,
                 o.CreatedAt,
                 sellerItems.Select(i => i.ToDto()).ToList(),
-                o.Payment?.ToDto());
+                o.Payment?.ToDto(), o.RefundPending);
         }).ToList();
 
         return new PagedResult<OrderDto>
@@ -69,24 +69,44 @@ public class SellerOrderService : ISellerOrderService
 
     public async Task<Result<OrderItemDto>> UpdateFulfillmentAsync(int sellerId, int orderItemId, UpdateFulfillmentStatusRequest r, CancellationToken ct = default)
     {
-        if (!Enum.TryParse<FulfillmentStatus>(r.Status, true, out var newStatus))
+        if (!Enum.TryParse<FulfillmentStatus>(r.Status, true, out var newStatus) ||
+            newStatus is not (FulfillmentStatus.Shipped or FulfillmentStatus.Delivered))
             return Result.Fail<OrderItemDto>("Invalid fulfillment status.", ErrorType.Validation);
 
-        var item = await _db.OrderItems.FirstOrDefaultAsync(i => i.Id == orderItemId, ct);
+        var item = await _db.OrderItems.Include(i => i.Order).ThenInclude(o => o.Items)
+            .Include(i => i.Order).ThenInclude(o => o.Payment)
+            .FirstOrDefaultAsync(i => i.Id == orderItemId, ct);
         if (item is null)
             return Result.Fail<OrderItemDto>("Order item not found.", ErrorType.NotFound);
         if (item.SellerId != sellerId)
             return Result.Fail<OrderItemDto>("You can only fulfill your own items.", ErrorType.Forbidden);
+        if (!OrderLifecycle.CanFulfill(item.Order))
+            return Result.Fail<OrderItemDto>("Order is unpaid, cancelled or held for refund.", ErrorType.Conflict);
 
         try
         {
             item.ChangeStatus(newStatus);
+            if (item.Order.Items.All(i => i.Status == FulfillmentStatus.Delivered))
+            {
+                if (item.Order.Status != OrderStatus.Shipped) item.Order.ChangeStatus(OrderStatus.Shipped);
+                item.Order.ChangeStatus(OrderStatus.Delivered);
+            }
+            else if (item.Order.Items.All(i => i.Status is FulfillmentStatus.Shipped or FulfillmentStatus.Delivered))
+                item.Order.ChangeStatus(OrderStatus.Shipped);
+            OrderLifecycle.Touch(_db, item.Order);
         }
         catch (InvalidOrderTransitionException ex)
         {
             return Result.Fail<OrderItemDto>(ex.Message, ErrorType.Conflict);
         }
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Result.Fail<OrderItemDto>("The order item changed concurrently. Reload and retry.", ErrorType.Conflict);
+        }
         return Result.Ok(item.ToDto());
     }
 }

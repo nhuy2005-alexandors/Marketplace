@@ -2,6 +2,10 @@
 
 > Spec hồi tố từ code hiện có.
 
+## Currency contract
+
+`Product.Price` is denominated in USD, the canonical Marketplace catalog currency. Product API monetary values are USD; no per-product currency selector exists. Product prices are stored and returned without FX conversion. The known DbSeeder and synthetic Dataset V2 product values are USD. Historical values are not rewritten as part of this policy.
+
 ## Mục tiêu
 Cho phép buyer tìm/lọc/sắp xếp sản phẩm có phân trang; Seller/Admin quản lý CRUD sản phẩm và Admin quản lý category, kèm upload ảnh an toàn và chống oversell bằng optimistic concurrency.
 

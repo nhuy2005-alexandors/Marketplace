@@ -9,3 +9,8 @@ public class InvalidOrderTransitionException : DomainException
 {
     public InvalidOrderTransitionException(string message) : base(message) { }
 }
+
+public class InvalidRefundTransitionException : DomainException
+{
+    public InvalidRefundTransitionException(string message) : base(message) { }
+}

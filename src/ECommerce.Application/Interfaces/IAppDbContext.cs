@@ -9,11 +9,15 @@ public interface IAppDbContext
     DbSet<User> Users { get; }
     DbSet<Category> Categories { get; }
     DbSet<Product> Products { get; }
+    DbSet<Brand> Brands { get; }
+    DbSet<AttributeDefinition> AttributeDefinitions { get; }
+    DbSet<ProductAttributeValue> ProductAttributeValues { get; }
     DbSet<Cart> Carts { get; }
     DbSet<CartItem> CartItems { get; }
     DbSet<Order> Orders { get; }
     DbSet<OrderItem> OrderItems { get; }
     DbSet<Payment> Payments { get; }
+    DbSet<Refund> Refunds { get; }
     DbSet<Review> Reviews { get; }
     DbSet<WishlistItem> WishlistItems { get; }
     DbSet<Coupon> Coupons { get; }

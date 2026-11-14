@@ -30,12 +30,13 @@ internal static class MappingExtensions
         new(i.Id, i.ProductId, i.ProductName, i.UnitPrice, i.Quantity, i.Subtotal, i.Status.ToString());
 
     public static PaymentDto ToDto(this Payment p) =>
-        new(p.Amount, p.Method.ToString(), p.Status.ToString(), p.TransactionId, p.PaidAt);
+        new(p.Amount, p.Method.ToString(), p.Status.ToString(), p.TransactionId, p.PaidAt, p.RequiresReconciliation, p.IsDemo,
+            p.ReconciliationAmount, p.ReconciliationCurrency, p.ReconciliationReference);
 
     public static OrderDto ToDto(this Order o) =>
         new(o.Id, o.Status.ToString(), o.ShippingAddress, o.Subtotal, o.DiscountAmount,
             o.CouponCode, o.Total, o.CreatedAt,
-            o.Items.Select(i => i.ToDto()).ToList(), o.Payment?.ToDto());
+            o.Items.Select(i => i.ToDto()).ToList(), o.Payment?.ToDto(), o.RefundPending);
 
     public static ReviewDto ToDto(this Review r) =>
         new(r.Id, r.UserId, r.User?.FullName ?? string.Empty, r.Rating, r.Comment, r.CreatedAt);

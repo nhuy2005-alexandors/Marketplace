@@ -40,6 +40,7 @@ export function Navbar() {
       { to: "/admin/products", label: "SP/Danh mục" },
       { to: "/admin/coupons", label: "Mã giảm giá" },
       { to: "/admin/sellers", label: "Duyệt seller" },
+      { to: "/admin/refunds", label: "Hoàn tiền" },
     ];
     if (user?.role === "Seller") return [
       { to: "/seller", label: "Dashboard", end: true },

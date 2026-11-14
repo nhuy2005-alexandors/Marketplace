@@ -2,6 +2,10 @@
 
 > Spec hồi tố từ code hiện có.
 
+## Currency contract
+
+All catalog/order monetary values are USD: Product.Price, CartItem.Subtotal, OrderItem.UnitPrice/Subtotal, Order.Subtotal, DiscountAmount and Total. Cart and checkout do not perform FX conversion. The same USD amount is snapshotted into OrderItem at checkout.
+
 ## Mục tiêu
 Cho phép buyer quản lý giỏ hàng và checkout thành đơn hàng multi-seller (mỗi `OrderItem` snapshot seller/giá tại thời điểm đặt), theo dõi trạng thái đơn qua state machine, hủy đơn có hoàn tồn kho, và chia tiền đơn theo từng seller khi có coupon.
 
@@ -34,11 +38,13 @@ Cho phép buyer quản lý giỏ hàng và checkout thành đơn hàng multi-sel
 - [x] `PUT /api/orders/{id}/status` chỉ Role `Admin`, parse string status bằng `Enum.TryParse` (case-insensitive), sai tên → 400; đơn không tồn tại → 404; transition không hợp lệ → bắt exception trả 409 (`src/ECommerce.API/Controllers/OrdersController.cs:74-83`, `OrderService.cs:148-167`)
 
 ### Cancel
-- [x] `POST /api/orders/{id}/cancel` — chỉ owner của đơn (không có admin bypass ở endpoint này) (`OrdersController.cs:56-63`, `OrderService.cs:174-175`)
-- [x] `Order.CanCancel()` chỉ đúng khi trạng thái hiện tại cho phép chuyển sang `Cancelled` — tức chỉ `Pending` hoặc `Paid`; sai → 409 `"Cannot cancel an order in {Status} state."` (`Order.cs:44-45`, `OrderService.cs:176-177`)
-- [x] Hoàn tồn kho: cộng lại `Quantity` vào `Product.Stock` cho từng item (`OrderService.cs:179-185`)
-- [x] Chỉ `OrderItem` đang `FulfillmentStatus.Pending` được chuyển sang `Cancelled`; item đã `Shipped`/`Delivered` không bị đổi (`OrderService.cs:186-187`)
-- [x] `Order.ChangeStatus(Cancelled)` rồi save; concurrency conflict trên `Product.RowVersion` khi hoàn kho song song → 409 `"Đơn hàng vừa được cập nhật, vui lòng thử lại."` (`OrderService.cs:189-197`)
+- [x] `POST /api/orders/{id}/cancel` — chỉ owner của đơn; không có Admin bypass ở endpoint Customer.
+- [x] Customer được tự hủy đơn `Pending`; đơn `Paid` thanh toán online phải đi qua Refund workflow, không được hủy trực tiếp.
+- [x] COD chưa thu tiền được hủy trước khi fulfillment bắt đầu; không tạo Refund. Khi hủy, Payment được đánh dấu `Cancelled`.
+- [x] Chỉ hủy khi tất cả OrderItem còn `FulfillmentStatus.Pending`; nếu đã có item Shipped/Delivered thì trả 409.
+- [x] Hoàn tồn kho đúng một lần cho các item Pending, chuyển item sang Cancelled và chuyển Order sang Cancelled trong cùng lần save.
+- [x] Admin không thể dùng `PUT /api/orders/{id}/status` để bỏ qua Refund workflow đối với đơn Paid online.
+- [x] RowVersion trên Order, OrderItem và Product phát hiện thay đổi đồng thời; conflict trả 409.
 
 ### Pagination
 - [x] `GET /api/orders`: Admin thấy toàn bộ (`GetAllAsync`), user thường chỉ thấy đơn của mình (`GetForUserAsync`) (`OrdersController.cs:29-35`, `OrderService.cs:113-117`)
@@ -57,7 +63,7 @@ Cho phép buyer quản lý giỏ hàng và checkout thành đơn hàng multi-sel
 - Cart không giữ/khóa tồn kho — chỉ kiểm tra tại thời điểm add/update; giữa lúc thêm vào cart và lúc checkout, sản phẩm có thể hết hàng do người khác mua trước (`CartService.cs:32-33` vs `OrderService.cs:49`)
 - Có 2 lớp lỗi tồn kho khác nhau ở checkout: hết hàng phát hiện trước save → 400 Validation (`OrderService.cs:60-63`); hết hàng do ghi đè đồng thời phát hiện lúc save (RowVersion) → 409 Conflict (`OrderService.cs:84-88`)
 - Giá trong `CartItem` là giá sống (`Product.Price`), giá trong `OrderItem` là giá đã đóng băng lúc checkout — hai model giá khác nhau, không đồng bộ ngược (`CartItem.cs:15` vs `OrderItem.cs:18, 54-55`)
-- `CanCancel()` chỉ cho phép hủy ở `Pending`/`Paid`; đơn đã `Shipped` không thể tự hủy qua endpoint này (`Order.cs:44-45`)
+- Customer cancel được `Pending`; `Paid` online phải qua Refund. COD chưa thu tiền có thể hủy nếu tất cả item còn Pending.
 - `PUT /status` không có validation nghiệp vụ ngoài state machine (ví dụ set `Paid` thủ công không kiểm tra đã thanh toán thật hay chưa) — do Admin toàn quyền
 - Split không có validation `DiscountAmount` khớp coupon gốc — tin dữ liệu đã lưu trên `Order`
 
@@ -66,7 +72,7 @@ Cho phép buyer quản lý giỏ hàng và checkout thành đơn hàng multi-sel
 - Snapshot `ProductName`/`UnitPrice`/`SellerId` vào `OrderItem` ngay lúc checkout để đơn hàng không đổi khi seller sửa giá/tên sản phẩm sau này — lịch sử đơn hàng bất biến.
 - Không tách sub-order theo seller ở tầng dữ liệu — một `Order` vẫn là entity gốc, việc "chia" seller chỉ là view tính toán qua endpoint `/split`, không có bảng riêng.
 - Rounding remainder của discount pro-rate luôn dồn cho seller cuối (theo thứ tự `SellerId` tăng) — cách đơn giản để tổng khớp chính xác `DiscountAmount`, đổi lại seller cuối luôn là người "chịu" sai số làm tròn (thường ±0.01).
-- Cancel chỉ set `FulfillmentStatus.Cancelled` cho item đang `Pending`, bỏ qua item đã `Shipped` — tránh đảo trạng thái giao hàng đã xảy ra thật ngoài đời khi hủy đơn ở tầng `Order`.
+- Cancel/refund chỉ thực hiện khi mọi item còn Pending; không đảo trạng thái giao hàng đã bắt đầu. Refund completion đồng thời cập nhật Payment/Order/OrderItem và tồn kho.
 
 ## Ngoài phạm vi
 - `OrderItem.Status` (`FulfillmentStatus`: Pending/Shipped/Delivered/Cancelled) — state machine riêng do seller cập nhật từng phần đơn (`OrderItem.cs:21-42`, `FulfillmentStatus.cs`), thuộc spec Fulfillment riêng

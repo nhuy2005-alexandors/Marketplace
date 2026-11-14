@@ -17,7 +17,8 @@ public class DashboardService : IDashboardService
 
         // Nạp đơn đã thanh toán kèm item để tính doanh thu SAU giảm giá coupon.
         var paidOrders = await _db.Orders
-            .Where(o => paidStatuses.Contains(o.Status))
+            .Where(o => paidStatuses.Contains(o.Status) && o.Payment != null &&
+                o.Payment.Status == PaymentStatus.Completed && !o.Payment.RequiresReconciliation && !o.Payment.IsDemo)
             .Include(o => o.Items)
             .ToListAsync(ct);
 

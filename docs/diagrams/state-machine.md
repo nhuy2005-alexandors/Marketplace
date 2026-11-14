@@ -12,7 +12,7 @@ stateDiagram-v2
     Pending --> Cancelled: Khách hủy
 
     Paid --> Shipped: Admin xác nhận giao
-    Paid --> Cancelled: Khách hủy (hoàn kho)
+    Paid --> Cancelled: Admin hoàn tất Refund / COD chưa thu tiền hủy trước fulfillment
 
     Shipped --> Delivered: Giao thành công
 
@@ -54,7 +54,9 @@ stateDiagram-v2
     Pending --> Failed: CreatePaymentAsync trả lỗi, hoặc VerifyAsync thất bại (sai chữ ký/cổng từ chối)
 
     Failed --> Completed: Thử lại thành công (InitiateAsync lại)
-    Completed --> Refunded: Hoàn tiền (tương lai)
+    Completed --> Refunded: Admin xác nhận đã chuyển tiền (Refund Completed)
+    Completed --> Cancelled: Hủy COD chưa thu tiền trước fulfillment
+    Pending --> Cancelled: Hủy đơn trước thanh toán
 
     Completed --> [*]
     Refunded --> [*]
@@ -69,9 +71,28 @@ stateDiagram-v2
     end note
 ```
 
-> `Refunded` được mô hình hóa trong enum cho khả năng mở rộng; luồng hoàn tiền chưa nằm trong phạm vi hiện tại.
+`Refunded` được set khi Admin ghi nhận đã chuyển tiền và cung cấp ExternalReference. `Cancelled` dùng cho COD bị hủy trước khi thu tiền; COD không đủ điều kiện Refund trong MVP.
 
-## 3. Vòng đời Giao hàng theo Item (OrderItem Fulfillment)
+## 3. Vòng đời Refund
+
+Refund chỉ áp dụng cho đơn thanh toán online đã Completed, trước khi bất kỳ OrderItem nào bắt đầu fulfillment. MVP chỉ hỗ trợ hoàn toàn bộ đơn.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: Customer gửi yêu cầu hợp lệ
+    Pending --> Completed: Admin xác nhận đã chuyển tiền + mã chứng từ
+    Pending --> Rejected: Admin từ chối + lý do
+    Completed --> [*]
+    Rejected --> [*]
+```
+
+- Mỗi Order/Payment chỉ có một Refund trong MVP.
+- Reject không thay đổi Order, Payment hoặc tồn kho.
+- Complete cập nhật Refund, Payment, Order, OrderItems và Product.Stock trong một lần SaveChanges.
+- Refund, Order, OrderItem và Product dùng RowVersion để phát hiện xử lý đồng thời.
+- COD, partial refund và đơn đã bắt đầu giao không thuộc phạm vi.
+
+## 4. Vòng đời Giao hàng theo Item (OrderItem Fulfillment)
 
 Quy tắc cài đặt trong `OrderItem.ChangeStatus()` (Domain layer) — **độc lập** với máy trạng thái Order ở mục 1. `Order.Status` vẫn chỉ do Admin đổi (vòng đời thanh toán/vận đơn toàn đơn: Pending→Paid→Shipped→Delivered→Cancelled). `FulfillmentStatus` là trạng thái giao hàng **của từng dòng sản phẩm**, do **Seller sở hữu item đó** tự cập nhật qua `PUT /api/seller/orders/items/{itemId}/status` — mỗi seller ship phần của mình trong một đơn trộn nhiều seller mà không phụ thuộc seller khác hay Admin. Chuyển sai cạnh bị từ chối (`InvalidOrderTransitionException` → HTTP 409); item không thuộc seller gọi request → HTTP 403.
 
