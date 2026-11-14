@@ -68,7 +68,7 @@ export function ProductDetailPage() {
                     ? attribute.valueText
                     : attribute.dataType === 1
                       ? String(attribute.valueNumber ?? "") + (attribute.unit ? " " + attribute.unit : "")
-                      : attribute.valueBoolean ? "Có" : "Không";
+                      : attribute.valueBoolean === true ? "Có" : attribute.valueBoolean === false ? "Không" : "—";
                   return (
                     <div key={attribute.attributeDefinitionId} className="min-w-0">
                       <dt className="muted text-xs">{attribute.displayName}</dt>

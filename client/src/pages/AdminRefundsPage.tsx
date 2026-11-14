@@ -56,7 +56,7 @@ function RefundCard({ refund }: { refund: Refund }) {
       </div>
       <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3 text-sm space-y-1">
         <div><span className="font-medium">Nghĩa vụ hoàn:</span> {"$" + refund.amount.toFixed(2) + " USD"}</div>
-        {refund.providerAmount !== undefined && refund.providerCurrency && (
+        {refund.providerAmount != null && refund.providerCurrency && (
           <div><span className="font-medium">Capture gốc tại cổng:</span> {refund.providerAmount.toLocaleString("en-US", {
             minimumFractionDigits: refund.providerCurrency === "VND" ? 0 : 2,
             maximumFractionDigits: refund.providerCurrency === "VND" ? 0 : 2,
