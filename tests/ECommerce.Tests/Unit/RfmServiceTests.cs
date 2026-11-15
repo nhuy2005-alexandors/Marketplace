@@ -48,6 +48,10 @@ public sealed class RfmServiceTests
         db.Orders.Add(Order(108, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
             asOf.AddDays(-3), 900m, false, false, true,
             Item(109, product, seller.Id, FulfillmentStatus.Delivered)));
+        var paidAfterCutoff = Order(109, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            asOf.AddDays(-1), 500m, Item(110, product, seller.Id, FulfillmentStatus.Delivered));
+        paidAfterCutoff.Payment!.PaidAt = asOf.AddDays(1);
+        db.Orders.Add(paidAfterCutoff);
         await db.SaveChangesAsync();
 
         var result = await new RfmService(db).GetCustomersAsync(1, 25, asOf);
@@ -126,7 +130,7 @@ public sealed class RfmServiceTests
         order.Payment = new Payment
         {
             Id = id, OrderId = id, Order = order, Amount = amount,
-            Method = PaymentMethod.CreditCard, Status = paymentStatus, CreatedAt = createdAt,
+            Method = PaymentMethod.CreditCard, Status = paymentStatus, CreatedAt = createdAt, PaidAt = createdAt,
             IsDemo = isDemo, RequiresReconciliation = requiresReconciliation
         };
         return order;

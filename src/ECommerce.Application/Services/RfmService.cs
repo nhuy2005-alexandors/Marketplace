@@ -39,6 +39,7 @@ public sealed class RfmService : IRfmService
                             !order.RefundPending &&
                             order.CreatedAt < asOf &&
                             order.Payment.CreatedAt < asOf &&
+                            (order.Payment.PaidAt ?? order.Payment.CreatedAt) < asOf &&
                             order.Items.Any(item => item.Status != FulfillmentStatus.Cancelled))
             .Select(order => new EligibleOrderRow(
                 order.Id,
