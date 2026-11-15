@@ -1,5 +1,6 @@
 using ECommerce.Infrastructure.Persistence;
 using ECommerce.Infrastructure.Auth;
+using ECommerce.Infrastructure.AI;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -8,6 +9,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ECommerce.Tests.Integration;
 
@@ -67,9 +69,18 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             foreach (var descriptor in toRemove)
                 services.Remove(descriptor);
 
+            services.RemoveAll<IEmbeddingCacheStore>();
+
             services.AddDbContext<AppDbContext>(opt =>
                 opt.UseSqlite(_connection)
                    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
+
+            // Tests must not discover a developer's repo-root .env or call Gemini.
+            services.PostConfigure<GeminiOptions>(options =>
+            {
+                options.ApiKey = string.Empty;
+                options.EmbeddingWarmupEnabled = false;
+            });
             services.PostConfigure<ECommerce.Infrastructure.Payments.PaymentOptions>(o => o.AllowDemo = true);
         });
     }
