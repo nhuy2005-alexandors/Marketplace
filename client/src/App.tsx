@@ -19,6 +19,8 @@ import { AdminRefundsPage } from "./pages/AdminRefundsPage";
 import { SellerDashboardPage } from "./pages/SellerDashboardPage";
 import { SellerProductsPage } from "./pages/SellerProductsPage";
 import { SellerOrdersPage } from "./pages/SellerOrdersPage";
+import { ChatBot } from "./components/ChatBot";
+import { AdminCustomerSegmentsPage } from "./pages/AdminCustomerSegmentsPage";
 
 export default function App() {
   return (
@@ -44,6 +46,7 @@ export default function App() {
           <Route path="/admin/coupons" element={<AdminCouponsPage />} />
           <Route path="/admin/sellers" element={<AdminSellersPage />} />
           <Route path="/admin/refunds" element={<AdminRefundsPage />} />
+          <Route path="/admin/customers/segments" element={<AdminCustomerSegmentsPage />} />
         </Route>
         <Route element={<ProtectedRoute roles={["Seller"]} />}>
           <Route path="/seller" element={<SellerDashboardPage />} />
@@ -53,6 +56,7 @@ export default function App() {
       </Routes>
       </main>
       <Footer />
+      <ChatBot />
       </div>
     </BrowserRouter>
   );
