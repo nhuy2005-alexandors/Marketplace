@@ -297,6 +297,10 @@ public sealed class RecommendationServiceTests
         var registration = services.Single(descriptor => descriptor.ServiceType == typeof(IRecommendationService));
         registration.Lifetime.Should().Be(ServiceLifetime.Scoped);
         registration.ImplementationType.Should().Be(typeof(RecommendationService));
+
+        var rfmRegistration = services.Single(descriptor => descriptor.ServiceType == typeof(IRfmService));
+        rfmRegistration.Lifetime.Should().Be(ServiceLifetime.Scoped);
+        rfmRegistration.ImplementationType.Should().Be(typeof(RfmService));
     }
 
     private static RecommendationService Service(

@@ -25,6 +25,7 @@ public static class DependencyInjection
         services.AddScoped<ISellerAdminService, SellerAdminService>();
         services.AddOptions<RecommendationOptions>();
         services.AddScoped<IRecommendationService, RecommendationService>();
+        services.AddScoped<IRfmService, RfmService>();
 
         services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
         return services;

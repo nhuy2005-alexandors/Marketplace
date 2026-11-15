@@ -48,6 +48,17 @@ migration files were changed here.
   top-rated fallback is based on reviews before the cutoff. Empty catalog and no
   available evidence return no cards rather than an invented popularity label.
 
+## Current API boundary
+
+- `GET /api/recommendations/personalized` derives the user only from
+  `ICurrentUser`/JWT; it has no client `userId` parameter and supports guest
+  fallback.
+- `GET /api/recommendations/similar-products/{productId}?limit=...` clamps limit
+  to 1..20 (default 8).
+- Neither endpoint exposes `asOfUtc` or `cutoffExclusiveUtc` query parameters.
+- Read-only RFM lives at `GET /api/admin/customers/rfm`; its separate eligibility,
+  quintile and segment contract is documented in `rfm.md`.
+
 ## Proposed defaults
 
 | Option | Default | Meaning |
