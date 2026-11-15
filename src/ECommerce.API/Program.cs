@@ -78,6 +78,7 @@ builder.Services.AddCors(options =>
 
 // Rate limiting: global per-IP fixed window + policy "auth" chặt cho login/register (chống brute-force).
 const string AuthPolicy = "auth";
+const string AiPolicy = "ai";
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -89,6 +90,17 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+    // Public AI chat has provider-cost exposure; keep a separate, tighter per-IP budget.
+    options.AddPolicy(AiPolicy, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
 });
 
 builder.Services.AddEndpointsApiExplorer();

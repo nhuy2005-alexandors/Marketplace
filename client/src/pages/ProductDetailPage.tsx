@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import {
-  useAddToCart, useCreateReview, useProduct, useProductReviews, useToggleWishlist,
+  useAddToCart, useCreateReview, useProduct, useProductReviews, useSimilarProducts, useToggleWishlist,
 } from "../api/hooks";
 import { useAuth } from "../store/auth";
 import { apiError } from "../api/client";
 import { Heart } from "lucide-react";
 import { Button, Card, Input, Select, Spinner, Stars, Textarea } from "../components/ui";
+import { RecommendationSection } from "../components/RecommendationSection";
 
 export function ProductDetailPage() {
   const { id } = useParams();
   const productId = Number(id);
   const { data: product, isLoading } = useProduct(productId);
   const { data: reviews } = useProductReviews(productId);
+  const { data: similarProducts } = useSimilarProducts(productId, 8);
   const addToCart = useAddToCart();
   const toggleWishlist = useToggleWishlist();
   const createReview = useCreateReview(productId);
@@ -99,6 +101,8 @@ export function ProductDetailPage() {
           )}
         </div>
       </Card>
+
+      {similarProducts && <RecommendationSection data={similarProducts} title="Sản phẩm tương tự" />}
 
       <Card className="mt-8 p-6">
         <h2 className="text-lg font-semibold mb-4">Đánh giá</h2>
