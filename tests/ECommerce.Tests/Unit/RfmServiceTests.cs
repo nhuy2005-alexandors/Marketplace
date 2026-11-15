@@ -61,7 +61,7 @@ public sealed class RfmServiceTests
     }
 
     [Fact]
-    public async Task GetCustomersAsync_UsesUserIdAsStableTieBreakForEachPurchaserQuintile()
+    public async Task GetCustomersAsync_DoesNotSplitEqualMetricsAcrossQuintiles()
     {
         using var db = CreateDb();
         db.Users.AddRange(Enumerable.Range(10, 5).Select(Customer));
@@ -71,16 +71,11 @@ public sealed class RfmServiceTests
 
         var page = await new RfmService(db).GetCustomersAsync(1, 25, AsOfUtc);
 
-        page.Items.OrderBy(row => row.UserId)
-            .Select(row => new { row.RQuintile, row.FQuintile, row.MQuintile })
-            .Should().BeEquivalentTo(new[]
-            {
-                new { RQuintile = (int?)5, FQuintile = (int?)5, MQuintile = (int?)5 },
-                new { RQuintile = (int?)4, FQuintile = (int?)4, MQuintile = (int?)4 },
-                new { RQuintile = (int?)3, FQuintile = (int?)3, MQuintile = (int?)3 },
-                new { RQuintile = (int?)2, FQuintile = (int?)2, MQuintile = (int?)2 },
-                new { RQuintile = (int?)1, FQuintile = (int?)1, MQuintile = (int?)1 }
-            }, options => options.WithStrictOrdering());
+        page.Items.Should().HaveCount(5);
+        page.Items.Select(row => row.RQuintile).Distinct().Should().ContainSingle();
+        page.Items.Select(row => row.FQuintile).Distinct().Should().ContainSingle();
+        page.Items.Select(row => row.MQuintile).Distinct().Should().ContainSingle();
+        page.Items.Select(row => row.SegmentCode).Distinct().Should().ContainSingle();
     }
 
     [Fact]
