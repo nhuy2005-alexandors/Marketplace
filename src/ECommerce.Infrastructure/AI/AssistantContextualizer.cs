@@ -81,13 +81,20 @@ public static class AssistantContextualizer
         var userTurns = turns.Where(turn => turn.Role.Equals("user", StringComparison.OrdinalIgnoreCase)).ToArray();
         var hasPriorProductTurn = userTurns.Any(turn =>
             AssistantIntentClassifier.Classify(turn.Content).Intent == "product_search");
-        if (hasNewProductTerm)
-            return new ContextualizationResult(query, hasPriorProductTurn ? "new_topic" : "none");
         var normalized = RetrievalScoring.Normalize(query);
         var cueMatch = configuredFollowUpCues.Any(cue => ContainsPhrase(normalized, cue));
-        var existingRuleMatch = FollowUpPronouns.IsMatch(normalized) || RefinementPhrases.IsMatch(normalized) ||
-                                EllipticalPrefix.IsMatch(normalized) || SpecificationInquiry.IsMatch(normalized);
-        var isFollowUp = cueMatch || existingRuleMatch || hasTypedConstraint || OrdinalReference.IsMatch(normalized);
+        var explicitFollowUpCue = cueMatch || FollowUpPronouns.IsMatch(normalized) ||
+                                  RefinementPhrases.IsMatch(normalized) || EllipticalPrefix.IsMatch(normalized) ||
+                                  OrdinalReference.IsMatch(normalized);
+
+        // A refinement such as "màu trắng không?" may contain a catalog product term
+        // itself. Explicit follow-up cues take precedence; otherwise a new product
+        // term starts a new topic even when it also contains typed constraints.
+        if (hasNewProductTerm && !explicitFollowUpCue)
+            return new ContextualizationResult(query, hasPriorProductTurn ? "new_topic" : "none");
+
+        var existingRuleMatch = explicitFollowUpCue || SpecificationInquiry.IsMatch(normalized);
+        var isFollowUp = existingRuleMatch || hasTypedConstraint;
         if (!isFollowUp) return new ContextualizationResult(query, "none");
         if (OrdinalReference.IsMatch(normalized))
             return new ContextualizationResult(query, "needs_clarification");
