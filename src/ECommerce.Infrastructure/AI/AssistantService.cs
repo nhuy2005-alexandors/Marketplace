@@ -71,11 +71,17 @@ public sealed class AssistantService : IAssistantService
         if (_geminiOptions.StrictEvidenceEnabled && unsupportedConstraint)
             return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
 
+        var genericRecommendation = IsGenericRecommendationRequest(query);
+        if (_geminiOptions.StrictEvidenceEnabled && constraints.Count == 0 &&
+            !analysis.HasNewProductTerm && !explicitSkuQuery && !HasExplicitSearchFilters(filters) &&
+            analysis.UnsupportedConstraints.Count == 0 && !genericRecommendation)
+            return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
+
         if (intent.Intent == "product_search" && (IsRecommendationIntent(query) || IsSimilarRecommendationIntent(query)))
         {
             IReadOnlyList<ProductDto> recommendationProducts = [];
             var isSimilarRequest = IsSimilarRecommendationIntent(query);
-            var shouldConstrainRecommendation = analysis.HasCatalogTerm || hasTypedIntent || HasExplicitSearchFilters(filters);
+            var shouldConstrainRecommendation = analysis.HasNewProductTerm || hasTypedIntent || HasExplicitSearchFilters(filters);
             if (isSimilarRequest)
             {
                 if (shouldConstrainRecommendation)
@@ -118,9 +124,6 @@ public sealed class AssistantService : IAssistantService
                     "strong", "fallback", "product_search", "recommendation", ToConstraintDtos(constraints, filters), context.Action);
             }
         }
-
-        if (_geminiOptions.StrictEvidenceEnabled && constraints.Count == 0 && !analysis.HasCatalogTerm && !explicitSkuQuery)
-            return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
 
         var searchFilters = contextualQuery != query ? AssistantQueryFilters.Merge(contextualQuery, filters) : filters;
         var candidates = await _search.SearchCandidatesAsync(contextualQuery, searchFilters, constraints, 4, ct);
@@ -228,6 +231,14 @@ public sealed class AssistantService : IAssistantService
     private static bool IsRecommendationIntent(string query) =>
         new[] { "goi y", "de xuat", "tu van", "recommend", "suggest", "what should i buy", "nen mua gi" }
             .Any(phrase => ContainsNormalizedPhrase(query, phrase));
+
+    private static bool IsGenericRecommendationRequest(string query) =>
+        new[]
+        {
+            "recommend something", "suggest something", "recommend for me", "suggest for me",
+            "what should i buy", "nen mua gi", "goi y mon phu hop", "goi y mon phu hop theo so thich",
+            "goi y san pham", "goi y cho toi"
+        }.Any(phrase => ContainsNormalizedPhrase(query, phrase));
 
     private static bool IsSimilarRecommendationIntent(string query) =>
         new[] { "similar", "tuong tu", "giong san pham", "san pham giong", "loai giong" }
