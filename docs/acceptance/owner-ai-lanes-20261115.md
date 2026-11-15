@@ -4,9 +4,9 @@
 **Repository:** `nhuy2005-alexandors/Marketplace`  
 **Branch:** `codex/marketplace-owner-ai-lanes-20261115`  
 **Base:** `540d296836be789a58ede9db1039447d95a3c9cc`  
-**Verified code head:** `ad0c32d9bb02b9f3cdedbf41f7edb0078ed0bbc3`  
+**Verified code head:** `341314747489abe27caa1df0e398644916c809fd`  
 **PR:** #7 — Draft, open, mergeable; not merged  
-**CI run:** [43724023005](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43724023005)
+**CI run:** [43730424084](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43730424084)
 
 ## Scope and ownership
 
@@ -50,7 +50,7 @@ RAG may call the shared Recommendation application service for generic recommend
 - Generation uses stable model ID `gemini-3.8-flash` with a structured JSON response schema.
 - Generated source product IDs are validated against backend retrieval candidates. If citations are missing or contain any unknown product ID, generated prose is discarded and backend-grounded fallback is returned.
 - If retrieval yields no candidates, the assistant abstains and does not call the generation provider.
-- Recent conversation context is bounded to six turns; each turn is bounded to 500 characters.
+- Recent conversation context is bounded to six turns; each turn is bounded to 500 characters. Contextualized retrieval queries are capped at 1,000 characters while preserving the current user query.
 - Public assistant chat has a separate 20-requests/minute/IP rate limit.
 
 ## API surface
@@ -73,14 +73,22 @@ No API key or credential is committed. No live Gemini API call was made during a
 
 The embedding cache is process-local and is rebuilt after API restart. No vector database, Redis, external vector service, schema, or migration was added.
 
+## Frontend integration
+
+- Public route `/assistant` calls `POST /api/assistant/chat`, sends at most six recent turns (500 characters each), and renders the grounded answer, answer/retrieval metadata, and backend-returned product cards.
+- Home page consumes `GET /api/recommendations`; the query cache is keyed by authenticated Customer ID so a guest response is not reused as a personalized response after login.
+- Product Detail consumes `GET /api/recommendations/products/{productId}/similar` and reuses the same recommendation card section.
+- Admin-only route `/admin/rfm` consumes `GET /api/rfm/customers`; it displays segment counts, paged R/F/M metrics, and canonical USD monetary values without customer names or emails.
+- The integration reuses the existing Axios client/interceptor, React Query, Zustand auth store, ProductCard, and UI components. No frontend dependency or database/schema change was added.
+
 ## Verification evidence
 
-CI run [43724023005](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43724023005) completed successfully at verified code head `ad0c32d9bb02b9f3cdedbf41f7edb0078ed0bbc3`.
+CI run [43730424084](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43730424084) completed successfully at verified code head `ad0c32d9bb02b9f3cdedbf41f7edb0078ed0bbc3`.
 
 | Check | Result |
 |---|---:|
 | Backend build | PASS — 0 warnings, 0 errors |
-| Backend unit + integration tests | 182 passed, 0 failed, 3 opt-in skips |
+| Backend unit + integration tests | 184 passed, 0 failed, 3 opt-in skips |
 | Frontend TypeScript/Vite build | PASS |
 | Frontend regression tests | 3/3 PASS |
 | Windows disposable SQL Server LocalDB migration/trigger tests | 2/2 PASS |
@@ -96,7 +104,7 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 - No live Gemini API execution or API-key validation.
 - No human-reviewed RAG evaluation set, retrieval benchmark, or calibrated ranking weights. Hybrid score weights and thresholds remain deterministic heuristics, not measured quality claims.
 - Catalog retrieval is capped at 500 products; embedding cache is in-memory and resets on process restart.
-- No frontend UI integration for Assistant, Recommendations, or RFM is included in this backend lane.
+- Frontend UI integration is implemented and build-verified. The current frontend regression suite contains three existing tests unrelated to the new AI screens; no browser E2E or local UI runtime smoke has been run.
 - No schema/migration, database reset, seeding, import, persistent development database mutation, deployment, or external payment action was performed.
 
 ## GitHub and integration state
@@ -106,4 +114,4 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 - `main` remains at `540d296836be789a58ede9db1039447d95a3c9cc`.
 - Khang/Khánh branches were not modified, merged, rebased, or synchronized.
 
-**Acceptance boundary:** CI PASS for this scoped backend implementation. Live Gemini behavior, RAG relevance/quality, production runtime health, and frontend product acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
+**Acceptance boundary:** CI PASS for the backend and frontend build/integration contracts. The targeted long-context regression was first run test-only at `4e91c014` and failed at the expected 1,000-character bound (183 passed, 3 skipped); the fix is included in verified code head `341314747489abe27caa1df0e398644916c809fd`, whose CI run passes. Live Gemini behavior, RAG relevance/quality, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
