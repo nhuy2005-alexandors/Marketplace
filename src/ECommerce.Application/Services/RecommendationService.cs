@@ -36,7 +36,7 @@ public sealed class RecommendationService : IRecommendationService
         var catalog = await LoadCatalogAsync(cutoff, categoryIds, cancellationToken);
         if (catalog.Count == 0)
             return Response("empty_catalog", asOf, []);
-        var features = await LoadFeaturesAsync(catalog, cancellationToken);
+        var features = await LoadFeaturesAsync(catalog, cutoff, cancellationToken);
 
         List<Order> eligibleOrders = userId is null
             ? []
@@ -89,7 +89,7 @@ public sealed class RecommendationService : IRecommendationService
         var target = catalog.FirstOrDefault(product => product.Id == targetProductId);
         if (target is null)
             return Response("similar_no_match", asOf, []);
-        var features = await LoadFeaturesAsync(catalog, cancellationToken);
+        var features = await LoadFeaturesAsync(catalog, cutoff, cancellationToken);
 
         var ranked = catalog
             .Where(candidate => candidate.Id != target.Id && candidate.Stock > 0)
@@ -116,6 +116,8 @@ public sealed class RecommendationService : IRecommendationService
                 .Where(item => item.Status != FulfillmentStatus.Cancelled)
                 .Select(item => new PurchaseSignal(item, order.Id)))
             .ToList();
+        var contributingOrderIds = eligibleItems.Select(signal => signal.OrderId).ToHashSet();
+        var contributingOrders = distinctOrders.Where(order => contributingOrderIds.Contains(order.Id)).ToArray();
 
         // Each order contributes to a category at most once. This makes category
         // frequency a distinct-order signal rather than an item-line count.
@@ -140,8 +142,8 @@ public sealed class RecommendationService : IRecommendationService
             .ToArray();
 
         return new PurchaseProfile(
-            distinctOrders.Count,
-            distinctOrders.Sum(order => order.Payment?.Amount ?? 0m),
+            contributingOrders.Length,
+            contributingOrders.Sum(order => order.Payment?.Amount ?? 0m),
             categoryOrderCounts,
             eligibleItems.GroupBy(signal => signal.Item.ProductId)
                 .ToDictionary(group => group.Key, group => group.Sum(x => x.Item.Quantity)),
@@ -159,19 +161,25 @@ public sealed class RecommendationService : IRecommendationService
     private async Task<List<Product>> LoadCatalogAsync(DateTime cutoff, IReadOnlyCollection<int> categoryIds, CancellationToken ct) =>
         await _db.Products
             .AsNoTracking()
-            .Where(product => product.CreatedAt < cutoff && categoryIds.Contains(product.CategoryId))
+            .Where(product => product.CreatedAt < cutoff
+                            && categoryIds.Contains(product.CategoryId)
+                            && product.Seller != null
+                            && (product.Seller.Role != UserRole.Seller || product.Seller.SellerStatus == SellerStatus.Approved))
             .Include(product => product.Category)
             .Include(product => product.Seller)
             .Include(product => product.Reviews.Where(review => review.CreatedAt < cutoff))
             .ToListAsync(ct);
 
     private async Task<IReadOnlyDictionary<int, ProductFeatures>> LoadFeaturesAsync(
-        IReadOnlyCollection<Product> products, CancellationToken ct)
+        IReadOnlyCollection<Product> products, DateTime cutoff, CancellationToken ct)
     {
         var productIds = products.Select(product => product.Id).ToArray();
         var values = await _db.ProductAttributeValues.AsNoTracking()
             .Include(value => value.AttributeDefinition)
-            .Where(value => productIds.Contains(value.ProductId) && value.AttributeDefinition.IsActive)
+            .Where(value => productIds.Contains(value.ProductId)
+                            && value.CreatedAt < cutoff
+                            && value.AttributeDefinition.IsActive
+                            && value.AttributeDefinition.CreatedAt < cutoff)
             .ToListAsync(ct);
         var attributesByProduct = values.GroupBy(value => value.ProductId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<ProductFeature>)group.Select(value => new ProductFeature(
