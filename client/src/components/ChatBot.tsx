@@ -27,7 +27,6 @@ interface ChatMessage {
 
 const QUICK_PROMPTS = [
   "✨ Gợi ý món phù hợp theo sở thích",
-  "🎯 Mấy món đang gợi ý trên màn hình có gì hay?",
   "🎧 Tìm tai nghe chống ồn",
   "⌨️ Có bàn phím cơ không?",
   "📚 Gợi ý sách lập trình",
