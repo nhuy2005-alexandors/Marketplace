@@ -20,6 +20,32 @@ builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, relo
 // Keep runtime and design-time precedence identical: explicit environment wins.
 builder.Configuration.AddEnvironmentVariables();
 
+// Read only the Gemini key from a developer .env file when no explicit config is present.
+if (string.IsNullOrWhiteSpace(builder.Configuration["Gemini:ApiKey"]))
+{
+    for (DirectoryInfo? directory = new(builder.Environment.ContentRootPath); directory is not null; directory = directory.Parent)
+    {
+        var envPath = Path.Combine(directory.FullName, ".env");
+        if (!File.Exists(envPath)) continue;
+
+        var apiKeyLine = File.ReadLines(envPath)
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => line.StartsWith("GEMINI_API_KEY=", StringComparison.OrdinalIgnoreCase));
+        if (apiKeyLine is not null)
+        {
+            var apiKey = apiKeyLine[(apiKeyLine.IndexOf('=') + 1)..].Trim().Trim('"', '\'');
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Gemini:ApiKey"] = apiKey
+                });
+            }
+        }
+        break;
+    }
+}
+
 // Development must never fall back to the repository's legacy MSSQLLocalDB/ECommerceDb target.
 if (builder.Environment.IsDevelopment())
     DatabaseTargetGuard.ValidateIsolatedDevelopmentTarget(builder.Configuration.GetConnectionString("DefaultConnection"));
@@ -32,6 +58,12 @@ builder.Services.PostConfigure<ECommerce.Infrastructure.Payments.PaymentOptions>
     o.AllowDemo = builder.Environment.IsDevelopment());
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient(string.Empty, client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient("GeminiClient", client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
 builder.Services.AddControllers();
@@ -78,6 +110,7 @@ builder.Services.AddCors(options =>
 
 // Rate limiting: global per-IP fixed window + policy "auth" chặt cho login/register (chống brute-force).
 const string AuthPolicy = "auth";
+const string AiPolicy = "ai";
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -89,6 +122,10 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+    options.AddPolicy(AiPolicy, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 12, Window = TimeSpan.FromMinutes(1) }));
 });
 
 builder.Services.AddEndpointsApiExplorer();
