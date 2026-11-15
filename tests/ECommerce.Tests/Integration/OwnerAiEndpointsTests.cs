@@ -21,7 +21,7 @@ public sealed class OwnerAiEndpointsTests : IClassFixture<CustomWebApplicationFa
         var productsResponse = await _client.GetAsync("/api/products");
         productsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var catalog = await productsResponse.Content.ReadFromJsonAsync<ECommerce.Application.Common.PagedResult<ProductDto>>();
-        var product = catalog!.Items.First();
+        var product = catalog!.Items.First(item => item.Stock > 0);
 
         var response = await _client.PostAsJsonAsync(
             "/api/assistant/chat",
