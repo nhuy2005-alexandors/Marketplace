@@ -26,6 +26,18 @@ public sealed class RecommendationProviderAdapterTests
     }
 
     [Fact]
+    public async Task Adapter_AllowsRecommendationEngineCandidateSetUpToOneHundred()
+    {
+        var service = new FakeRecommendationService();
+        var adapter = new RecommendationProviderAdapter(service);
+
+        await adapter.GetProductsAsync(42, 100);
+
+        Assert.Equal(42, service.LastUserId);
+        Assert.Equal(100, service.LastTake);
+    }
+
+    [Fact]
     public async Task Adapter_DelegatesSimilarProductsAndClampsLimit()
     {
         var service = new FakeRecommendationService();
