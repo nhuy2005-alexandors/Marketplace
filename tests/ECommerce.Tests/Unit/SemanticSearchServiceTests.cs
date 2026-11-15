@@ -11,6 +11,20 @@ namespace ECommerce.Tests.Unit;
 public sealed class SemanticSearchServiceTests
 {
     [Fact]
+    public void EmbeddingCacheStore_EvictsOldestEntriesWhenCapacityIsExceeded()
+    {
+        var cache = new EmbeddingCacheStore();
+
+        for (var index = 0; index <= 1000; index++)
+            cache.Set($"hash-{index}", [index]);
+
+        Assert.Equal(1000, cache.Count);
+        Assert.False(cache.TryGet("hash-0", out _));
+        Assert.True(cache.TryGet("hash-1000", out var newest));
+        Assert.Equal(1000f, newest[0]);
+    }
+
+    [Fact]
     public async Task SearchCandidatesAsync_UsesLexicalFallbackAndExcludesUnapprovedSellers()
     {
         using var db = TestDb.Create();
