@@ -28,6 +28,7 @@ public interface IEmbeddingProvider
 {
     Task<IReadOnlyList<float[]>?> EmbedAsync(
         IReadOnlyList<string> texts,
+        string taskType,
         CancellationToken cancellationToken = default);
 }
 
