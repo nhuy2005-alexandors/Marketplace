@@ -92,9 +92,9 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
                 _logger.LogWarning("Gemini embedding request failed: {FailureType}.", exception.GetType().Name);
                 return null;
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException or OverflowException)
             {
-                _logger.LogWarning("Gemini embedding response was not valid JSON.");
+                _logger.LogWarning("Gemini embedding response was malformed ({FailureType}).", exception.GetType().Name);
                 return null;
             }
         }
@@ -167,7 +167,6 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
                 generationConfig = new
                 {
                     responseMimeType = "application/json",
-                    temperature = 0.2,
                     maxOutputTokens = Math.Clamp(_options.MaxOutputTokens, 128, 1200)
                 }
             });
@@ -237,6 +236,11 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
         catch (IndexOutOfRangeException)
         {
             _logger.LogWarning("Gemini answer generation response did not contain a candidate.");
+            return null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or FormatException or OverflowException)
+        {
+            _logger.LogWarning("Gemini answer generation response was malformed ({FailureType}).", exception.GetType().Name);
             return null;
         }
     }
