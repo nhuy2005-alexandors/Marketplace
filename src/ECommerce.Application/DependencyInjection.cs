@@ -1,4 +1,5 @@
 using ECommerce.Application.Interfaces;
+using ECommerce.Application.Options;
 using ECommerce.Application.Services;
 using ECommerce.Application.Validators;
 using FluentValidation;
@@ -22,6 +23,8 @@ public static class DependencyInjection
         services.AddScoped<ICouponService, CouponService>();
         services.AddScoped<ISellerOrderService, SellerOrderService>();
         services.AddScoped<ISellerAdminService, SellerAdminService>();
+        services.AddOptions<RecommendationOptions>();
+        services.AddScoped<IRecommendationService, RecommendationService>();
 
         services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
         return services;
