@@ -3,7 +3,7 @@ import { api } from "./client";
 import type {
   AuthResponse, AttributeDefinition, Brand, Cart, Category, Coupon, CouponPreview, Dashboard,
   Order, Paged, PayResult, OrderSplit, Product, ProductAttributeFilter, ProductAttributeInput, Refund, Review,
-  SellerApplication, SellerShop, User, WishlistItem,
+  SellerApplication, SellerShop, User, WishlistItem, RecommendationResponse, RfmCustomerPage,
 } from "../types";
 import { useAuth } from "../store/auth";
 
@@ -327,6 +327,8 @@ export function useCheckout() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cart"] });
       qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["recommendations", "personalized"] });
+      qc.invalidateQueries({ queryKey: ["admin", "customers", "rfm"] });
     },
   });
 }
@@ -337,7 +339,11 @@ export function usePayOrder() {
   return useMutation({
     mutationFn: ({ id, method, returnUrl }: { id: number; method: string; returnUrl?: string }) =>
       api.post<PayResult>(`/orders/${id}/pay`, { method, returnUrl }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["recommendations", "personalized"] });
+      qc.invalidateQueries({ queryKey: ["admin", "customers", "rfm"] });
+    },
   });
 }
 
@@ -545,5 +551,32 @@ export function useMe() {
       return user;
     },
     enabled: !!token,
+  });
+}
+
+
+// ---- AI recommendations and customer classification ----
+export function usePersonalizedRecommendations(limit = 8) {
+  const userId = useAuth((state) => state.user?.id ?? null);
+  return useQuery({
+    queryKey: ["recommendations", "personalized", userId, limit],
+    queryFn: () => api.get<RecommendationResponse>("/recommendations/personalized", { params: { limit } }).then((r) => r.data),
+    staleTime: 60_000,
+  });
+}
+
+export function useSimilarProducts(productId: number, limit = 4) {
+  return useQuery({
+    queryKey: ["recommendations", "similar", productId, limit],
+    queryFn: () => api.get<RecommendationResponse>(`/recommendations/similar-products/${productId}`, { params: { limit } }).then((r) => r.data),
+    enabled: productId > 0,
+    staleTime: 60_000,
+  });
+}
+
+export function useRfmCustomers(page = 1, pageSize = 25) {
+  return useQuery({
+    queryKey: ["admin", "customers", "rfm", page, pageSize],
+    queryFn: () => api.get<RfmCustomerPage>("/admin/customers/rfm", { params: { page, pageSize } }).then((r) => r.data),
   });
 }
