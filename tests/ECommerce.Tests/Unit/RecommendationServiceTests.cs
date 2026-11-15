@@ -158,6 +158,81 @@ public sealed class RecommendationServiceTests
     }
 
     [Fact]
+    public async Task GetForUserAsync_UsesBrandAndStructuredAttributePurchaseSignals()
+    {
+        using var db = TestDb.Create();
+        var purchased = Product(58, categoryId: 1);
+        purchased.BrandId = 1;
+        var matching = Product(59, categoryId: 1);
+        matching.BrandId = 1;
+        var weaker = Product(581, categoryId: 1);
+        weaker.BrandId = 2;
+        await SeedProductsAsync(db, purchased, matching, weaker);
+        db.Brands.AddRange(
+            new Brand { Id = 1, Name = "Brand One", Slug = "brand-one" },
+            new Brand { Id = 2, Name = "Brand Two", Slug = "brand-two" });
+        db.AttributeDefinitions.Add(new AttributeDefinition
+        {
+            Id = 1, CategoryId = 1, Code = "ram", DisplayName = "RAM", DataType = CatalogAttributeType.Number,
+            Unit = "GB", IsActive = true, IsComparable = true, IsFilterable = true
+        });
+        db.ProductAttributeValues.AddRange(
+            new ProductAttributeValue { Id = 1, ProductId = purchased.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
+            new ProductAttributeValue { Id = 2, ProductId = matching.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
+            new ProductAttributeValue { Id = 3, ProductId = weaker.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 12 });
+        db.Orders.Add(Order(58, 15, OrderStatus.Delivered, PaymentStatus.Completed, [Item(58, purchased)]));
+        await db.SaveChangesAsync();
+
+        var result = await Service(db, new RecommendationOptions
+        {
+            CategoryWeight = 0, PriceWeight = 0, BrandWeight = 0.4, AttributeWeight = 0.6,
+            CharacteristicWeight = 0, RepeatPurchaseWeight = 0, PersonalizedMinimumScore = 0.01,
+            AllowRePurchase = false, MaximumProductsPerCategory = 3
+        }).GetForUserAsync(15, asOfUtc: Cutoff, cutoffExclusiveUtc: Cutoff);
+
+        result.Strategy.Should().Be("personalized");
+        result.Items.Select(item => item.Product.Id).Should().ContainInOrder(matching.Id, weaker.Id);
+        result.Items.First().Reasons.Select(reason => reason.Code).Should()
+            .Contain(new[] { "same_brand", "matching_attributes" });
+    }
+
+    [Fact]
+    public async Task GetSimilarAsync_UsesBrandAndStructuredAttributes()
+    {
+        using var db = TestDb.Create();
+        var target = Product(582, categoryId: 1);
+        target.BrandId = 1;
+        var matching = Product(583, categoryId: 1);
+        matching.BrandId = 1;
+        var weaker = Product(584, categoryId: 1);
+        weaker.BrandId = 2;
+        await SeedProductsAsync(db, target, matching, weaker);
+        db.Brands.AddRange(
+            new Brand { Id = 1, Name = "Brand One", Slug = "brand-one" },
+            new Brand { Id = 2, Name = "Brand Two", Slug = "brand-two" });
+        db.AttributeDefinitions.Add(new AttributeDefinition
+        {
+            Id = 1, CategoryId = 1, Code = "ram", DisplayName = "RAM", DataType = CatalogAttributeType.Number,
+            Unit = "GB", IsActive = true, IsComparable = true, IsFilterable = true
+        });
+        db.ProductAttributeValues.AddRange(
+            new ProductAttributeValue { Id = 1, ProductId = target.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
+            new ProductAttributeValue { Id = 2, ProductId = matching.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
+            new ProductAttributeValue { Id = 3, ProductId = weaker.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 12 });
+        await db.SaveChangesAsync();
+
+        var result = await Service(db, new RecommendationOptions
+        {
+            SimilarCategoryWeight = 0, SimilarPriceWeight = 0, SimilarBrandWeight = 0.4,
+            SimilarAttributeWeight = 0.6, SimilarCharacteristicWeight = 0, SimilarMinimumScore = 0.01
+        }).GetSimilarAsync(target.Id, asOfUtc: Cutoff, cutoffExclusiveUtc: Cutoff);
+
+        result.Items.Select(item => item.Product.Id).Should().Equal(matching.Id, weaker.Id);
+        result.Items.First().Reasons.Select(reason => reason.Code).Should()
+            .Contain(new[] { "same_brand", "similar_attributes" });
+    }
+
+    [Fact]
     public async Task GetForUserAsync_AllowsRepurchaseOnlyWhenPolicyEnablesItAndLabelsContribution()
     {
         using var db = TestDb.Create();

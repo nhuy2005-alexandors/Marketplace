@@ -169,6 +169,69 @@ public sealed class AiRagRemediationTests
     }
 
     [Fact]
+    public async Task Assistant_ProductAdviceUsesRecommendationProviderWithCustomerIdentity()
+    {
+        var recommended = ProductDto(88, "Recommended product");
+        var recommendationProvider = new FakeRecommendationProvider { PersonalizedProducts = [recommended] };
+        var search = new FakeSearch([]) { Analysis = new AssistantQueryAnalysis([], false, false, []) };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), recommendationProvider,
+            NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("recommend something for me"), 321);
+
+        Assert.Equal("recommendation", response.RetrievalMode);
+        Assert.Equal("product_search", response.Intent);
+        Assert.Equal([recommended.Id], response.Products.Select(product => product.Id));
+        Assert.Equal(321, recommendationProvider.LastCustomerId);
+        Assert.Equal(1, recommendationProvider.PersonalizedCallCount);
+    }
+
+    [Fact]
+    public async Task Assistant_SimilarProductAdviceUsesSharedSimilarRecommendationProvider()
+    {
+        var target = Candidate(ProductDto(70, "Known target headphones"));
+        var relatedCatalogCandidate = Candidate(ProductDto(71, "Known related headphones"));
+        var similarProduct = ProductDto(71, "Known related headphones");
+        var recommendationProvider = new FakeRecommendationProvider { SimilarProducts = [similarProduct] };
+        var search = new FakeSearch([target, relatedCatalogCandidate])
+        {
+            Analysis = new AssistantQueryAnalysis([], true, false, [])
+        };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), recommendationProvider,
+            NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("show similar headphones"), null);
+
+        Assert.Equal(70, recommendationProvider.LastSimilarTargetId);
+        Assert.Equal("recommendation", response.RetrievalMode);
+        Assert.Equal([71], response.Products.Select(product => product.Id));
+    }
+
+    [Fact]
+    public async Task Assistant_RecommendationKeepsTypedCatalogConstraintsWhenUsingSharedEngine()
+    {
+        var product = ProductDto(89, "Known 16 GB laptop");
+        var search = new FakeSearch([Candidate(product)])
+        {
+            Analysis = new AssistantQueryAnalysis(
+                [new AssistantTypedConstraint(1, "RAM", (int)CatalogAttributeType.Number, "equals", ValueNumber: 16m, Unit: "GB")],
+                true, false, [])
+        };
+        var provider = new FakeRecommendationProvider { PersonalizedProducts = [product] };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), provider, NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true, ContextualizerV2Enabled = false }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("recommend a laptop with 16 GB RAM"), 222);
+
+        Assert.Equal("recommendation", response.RetrievalMode);
+        Assert.Equal([89], response.Products.Select(item => item.Id));
+        Assert.Equal("RAM", Assert.Single(search.LastConstraints).Field);
+        Assert.Equal(222, provider.LastCustomerId);
+    }
+
+    [Fact]
     public async Task Assistant_StrictEvidenceDisabledPreservesLegacyProductSearchPath()
     {
         var candidate = Candidate(ProductDto(23, "Golden legacy result"));
@@ -1672,7 +1735,21 @@ public sealed class AiRagRemediationTests
 
     private sealed class FakeRecommendationProvider : IRecommendationProvider
     {
+        public IReadOnlyList<ProductDto> PersonalizedProducts { get; init; } = [];
+        public IReadOnlyList<ProductDto> SimilarProducts { get; init; } = [];
+        public int? LastCustomerId { get; private set; }
+        public int PersonalizedCallCount { get; private set; }
+        public int? LastSimilarTargetId { get; private set; }
         public Task<IReadOnlyList<ProductDto>> GetProductsAsync(int? customerId, int limit, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<ProductDto>>([]);
+            ReturnPersonalized(customerId);
+
+        public Task<IReadOnlyList<ProductDto>> GetSimilarProductsAsync(int targetProductId, int limit, CancellationToken ct = default) =>
+            ReturnSimilar(targetProductId);
+
+        private Task<IReadOnlyList<ProductDto>> ReturnPersonalized(int? customerId)
+        { LastCustomerId = customerId; PersonalizedCallCount++; return Task.FromResult(PersonalizedProducts); }
+
+        private Task<IReadOnlyList<ProductDto>> ReturnSimilar(int targetProductId)
+        { LastSimilarTargetId = targetProductId; return Task.FromResult(SimilarProducts); }
     }
 }

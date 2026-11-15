@@ -70,6 +70,55 @@ public sealed class AssistantService : IAssistantService
             return ScopeGuard("out_of_scope", request.Conversation?.ConversationId);
         if (_geminiOptions.StrictEvidenceEnabled && unsupportedConstraint)
             return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
+
+        if (intent.Intent == "product_search" && (IsRecommendationIntent(query) || IsSimilarRecommendationIntent(query)))
+        {
+            IReadOnlyList<ProductDto> recommendationProducts = [];
+            var isSimilarRequest = IsSimilarRecommendationIntent(query);
+            var shouldConstrainRecommendation = analysis.HasCatalogTerm || hasTypedIntent || HasExplicitSearchFilters(filters);
+            if (isSimilarRequest)
+            {
+                if (shouldConstrainRecommendation)
+                {
+                    var targetCandidates = await _search.SearchCandidatesAsync(contextualQuery, filters, constraints, 1, ct);
+                    if (targetCandidates.Count > 0)
+                        recommendationProducts = await _recommendations.GetSimilarProductsAsync(targetCandidates[0].Product.Id, 4, ct);
+                    if (recommendationProducts.Count > 0)
+                    {
+                        var matchingCandidates = await _search.SearchCandidatesAsync(contextualQuery, filters, constraints, 8, ct);
+                        var matchingIds = matchingCandidates.Select(candidate => candidate.Product.Id).ToHashSet();
+                        recommendationProducts = recommendationProducts.Where(product => matchingIds.Contains(product.Id)).Take(4).ToArray();
+                    }
+                }
+            }
+            else
+            {
+                recommendationProducts = await _recommendations.GetProductsAsync(customerId, 100, ct);
+                if (shouldConstrainRecommendation)
+                {
+                    var matchingCandidates = await _search.SearchCandidatesAsync(contextualQuery, filters, constraints, 8, ct);
+                    var matchingIds = matchingCandidates.Select(candidate => candidate.Product.Id).ToHashSet();
+                    recommendationProducts = recommendationProducts.Where(product => matchingIds.Contains(product.Id)).Take(4).ToArray();
+                }
+                else
+                {
+                    recommendationProducts = recommendationProducts.Take(4).ToArray();
+                }
+            }
+
+            if (recommendationProducts.Count > 0)
+            {
+                var recommendationSources = recommendationProducts.Select(product =>
+                    new ProductSourceDto("recommendation", product.Id, "recommendation", string.Empty)).ToArray();
+                var recommendationAnswer = isSimilarRequest
+                    ? "Đây là một số sản phẩm tương tự được hệ thống đề xuất."
+                    : "Đây là một số sản phẩm được Recommendation Engine đề xuất.";
+                return new AssistantChatResponse(recommendationAnswer, recommendationProducts, recommendationSources,
+                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"),
+                    "strong", "fallback", "product_search", "recommendation", ToConstraintDtos(constraints, filters), context.Action);
+            }
+        }
+
         if (_geminiOptions.StrictEvidenceEnabled && constraints.Count == 0 && !analysis.HasCatalogTerm && !explicitSkuQuery)
             return NoEvidence(request.Conversation?.ConversationId, constraints, context.Action, filters);
 
@@ -93,16 +142,6 @@ public sealed class AssistantService : IAssistantService
                 "fallback", "product_search", _search.RetrievalMode, ToConstraintDtos(constraints, filters), context.Action);
         }
 
-        if (candidates.Count == 0 && !_geminiOptions.StrictEvidenceEnabled && IsRecommendationIntent(query))
-        {
-            var products = await _recommendations.GetProductsAsync(customerId, 4, ct);
-            if (products.Count > 0)
-            {
-                var sources = products.Select(product => new ProductSourceDto("recommendation", product.Id, "recommendation", string.Empty)).ToArray();
-                return new AssistantChatResponse("Đây là các sản phẩm được hệ thống gợi ý cho bạn.", products, sources,
-                    new RetrievalMetadataDto("recommendation", true), request.Conversation?.ConversationId ?? Guid.NewGuid().ToString("N"), "strong", "fallback", "product_search");
-            }
-        }
         var skuBranch = explicitSkuQuery || IsExplicitSkuBranch(query, candidates) || (contextualQuery != query && IsExplicitSkuBranch(contextualQuery, candidates));
         var evidenceStrength = skuBranch || candidates.Any(candidate => candidate.LexicalScore > 0) ? "strong" : "weak";
         if (candidates.Count == 0)
@@ -187,9 +226,23 @@ public sealed class AssistantService : IAssistantService
     }
 
     private static bool IsRecommendationIntent(string query) =>
-        query.Contains("gợi ý", StringComparison.OrdinalIgnoreCase) ||
-        query.Contains("đề xuất", StringComparison.OrdinalIgnoreCase) ||
-        query.Contains("recommend", StringComparison.OrdinalIgnoreCase);
+        new[] { "goi y", "de xuat", "tu van", "recommend", "suggest", "what should i buy", "nen mua gi" }
+            .Any(phrase => ContainsNormalizedPhrase(query, phrase));
+
+    private static bool IsSimilarRecommendationIntent(string query) =>
+        new[] { "similar", "tuong tu", "giong san pham", "san pham giong", "loai giong" }
+            .Any(phrase => ContainsNormalizedPhrase(query, phrase));
+
+    private static bool ContainsNormalizedPhrase(string query, string phrase)
+    {
+        var normalizedQuery = RetrievalScoring.Normalize(query);
+        var normalizedPhrase = RetrievalScoring.Normalize(phrase);
+        return normalizedQuery.Contains(normalizedPhrase, StringComparison.Ordinal);
+    }
+
+    private static bool HasExplicitSearchFilters(AssistantChatFilters filters) =>
+        filters.CategoryId is not null || filters.SellerId is not null || filters.MinPrice is not null ||
+        filters.MaxPrice is not null || filters.InStockOnly;
 
     private AssistantChatResponse NoEvidence(string? conversationId, IReadOnlyList<AssistantTypedConstraint>? constraints = null,
         string contextAction = "none", AssistantChatFilters? filters = null) => new(

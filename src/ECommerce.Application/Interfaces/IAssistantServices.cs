@@ -41,4 +41,7 @@ public interface IRecommendationProvider
 {
     Task<IReadOnlyList<ECommerce.Application.DTOs.Catalog.ProductDto>> GetProductsAsync(
         int? customerId, int limit, CancellationToken ct = default);
+
+    Task<IReadOnlyList<ECommerce.Application.DTOs.Catalog.ProductDto>> GetSimilarProductsAsync(
+        int targetProductId, int limit, CancellationToken ct = default);
 }

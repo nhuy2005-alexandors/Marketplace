@@ -36,18 +36,19 @@ public sealed class RecommendationService : IRecommendationService
         var catalog = await LoadCatalogAsync(cutoff, categoryIds, cancellationToken);
         if (catalog.Count == 0)
             return Response("empty_catalog", asOf, []);
+        var features = await LoadFeaturesAsync(catalog, cancellationToken);
 
         List<Order> eligibleOrders = userId is null
             ? []
             : await LoadEligibleOrdersAsync(userId.Value, cutoff, categoryIds, cancellationToken);
 
-        var profile = BuildPurchaseProfile(eligibleOrders);
+        var profile = BuildPurchaseProfile(eligibleOrders, features);
         HashSet<int>? excludedPurchasedIds = !_options.AllowRePurchase && profile.Frequency > 0
             ? profile.ProductQuantities.Keys.ToHashSet()
             : null;
         if (profile.Frequency > 0)
         {
-            var ranked = RankPersonalized(catalog, profile)
+            var ranked = RankPersonalized(catalog, profile, features)
                 .Where(candidate => candidate.Score > 0 && candidate.Score >= _options.PersonalizedMinimumScore)
                 .ToList();
             var selected = ApplyDiversity(ranked, resultCount);
@@ -88,10 +89,11 @@ public sealed class RecommendationService : IRecommendationService
         var target = catalog.FirstOrDefault(product => product.Id == targetProductId);
         if (target is null)
             return Response("similar_no_match", asOf, []);
+        var features = await LoadFeaturesAsync(catalog, cancellationToken);
 
         var ranked = catalog
             .Where(candidate => candidate.Id != target.Id && candidate.Stock > 0)
-            .Select(candidate => ScoreSimilar(target, candidate))
+            .Select(candidate => ScoreSimilar(target, candidate, features))
             .Where(candidate => candidate.Score > 0 && candidate.Score >= _options.SimilarMinimumScore)
             .OrderByDescending(candidate => candidate.Score)
             .ThenBy(candidate => candidate.Product.Id)
@@ -101,7 +103,8 @@ public sealed class RecommendationService : IRecommendationService
         return Response(selected.Count > 0 ? "similar" : "similar_no_match", asOf, selected);
     }
 
-    internal static PurchaseProfile BuildPurchaseProfile(IReadOnlyCollection<Order> orders)
+    internal static PurchaseProfile BuildPurchaseProfile(IReadOnlyCollection<Order> orders,
+        IReadOnlyDictionary<int, ProductFeatures>? featuresByProduct = null)
     {
         var distinctOrders = orders
             .GroupBy(order => order.Id)
@@ -119,6 +122,22 @@ public sealed class RecommendationService : IRecommendationService
         var categoryOrderCounts = eligibleItems
             .GroupBy(signal => signal.Item.Product.CategoryId)
             .ToDictionary(group => group.Key, group => group.Select(x => x.OrderId).Distinct().Count());
+        var brandOrderCounts = eligibleItems
+            .Where(signal => featuresByProduct?.GetValueOrDefault(signal.Item.ProductId)?.BrandId is not null)
+            .GroupBy(signal => featuresByProduct![signal.Item.ProductId].BrandId!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(signal => signal.OrderId).Distinct().Count());
+        var purchasedFeatures = eligibleItems
+            .Where(signal => featuresByProduct?.ContainsKey(signal.Item.ProductId) == true)
+            .SelectMany(signal => featuresByProduct![signal.Item.ProductId].Attributes
+                .Select(feature => new PurchasedAttributeSignal(feature, signal.Item.Quantity)))
+            .ToArray();
+        var characteristicSignals = eligibleItems
+            .Where(signal => featuresByProduct?.ContainsKey(signal.Item.ProductId) == true)
+            .Select(signal => new PurchasedCharacteristicSignal(
+                featuresByProduct![signal.Item.ProductId].CategoryId,
+                featuresByProduct[signal.Item.ProductId].Name,
+                featuresByProduct[signal.Item.ProductId].Description))
+            .ToArray();
 
         return new PurchaseProfile(
             distinctOrders.Count,
@@ -126,7 +145,8 @@ public sealed class RecommendationService : IRecommendationService
             categoryOrderCounts,
             eligibleItems.GroupBy(signal => signal.Item.ProductId)
                 .ToDictionary(group => group.Key, group => group.Sum(x => x.Item.Quantity)),
-            eligibleItems.Select(signal => signal.Item.UnitPrice).Where(price => price > 0).ToArray());
+            eligibleItems.Select(signal => signal.Item.UnitPrice).Where(price => price > 0).ToArray(),
+            brandOrderCounts, purchasedFeatures, characteristicSignals);
     }
 
     private async Task<List<int>> LoadCategoryIdsAsync(DateTime cutoff, CancellationToken ct) =>
@@ -144,6 +164,32 @@ public sealed class RecommendationService : IRecommendationService
             .Include(product => product.Seller)
             .Include(product => product.Reviews.Where(review => review.CreatedAt < cutoff))
             .ToListAsync(ct);
+
+    private async Task<IReadOnlyDictionary<int, ProductFeatures>> LoadFeaturesAsync(
+        IReadOnlyCollection<Product> products, CancellationToken ct)
+    {
+        var productIds = products.Select(product => product.Id).ToArray();
+        var values = await _db.ProductAttributeValues.AsNoTracking()
+            .Include(value => value.AttributeDefinition)
+            .Where(value => productIds.Contains(value.ProductId) && value.AttributeDefinition.IsActive)
+            .ToListAsync(ct);
+        var attributesByProduct = values.GroupBy(value => value.ProductId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ProductFeature>)group.Select(value => new ProductFeature(
+                value.CategoryId,
+                value.AttributeDefinition.Code,
+                value.AttributeDefinition.Unit,
+                value.DataType,
+                value.ValueText,
+                value.ValueNumber,
+                value.ValueBoolean)).ToArray());
+
+        return products.ToDictionary(product => product.Id, product => new ProductFeatures(
+            product.CategoryId,
+            product.BrandId,
+            product.Name,
+            product.Description,
+            attributesByProduct.GetValueOrDefault(product.Id, [])));
+    }
 
     private async Task<List<Order>> LoadEligibleOrdersAsync(
         int userId,
@@ -189,7 +235,8 @@ public sealed class RecommendationService : IRecommendationService
             .ToDictionary(group => group.Key, group => group.Sum(item => item.Quantity));
     }
 
-    private List<ScoredProduct> RankPersonalized(IReadOnlyList<Product> catalog, PurchaseProfile profile)
+    private List<ScoredProduct> RankPersonalized(IReadOnlyList<Product> catalog, PurchaseProfile profile,
+        IReadOnlyDictionary<int, ProductFeatures> featuresByProduct)
     {
         var denominator = Math.Max(1, profile.Frequency);
         var meanHistoricalPrice = profile.HistoricalPrices.Length == 0
@@ -211,6 +258,39 @@ public sealed class RecommendationService : IRecommendationService
                     {
                         score += contribution;
                         reasons.Add(new("same_category", "Cùng danh mục bạn đã mua"));
+                    }
+                }
+
+                if (featuresByProduct.TryGetValue(product.Id, out var candidateFeatures) &&
+                    candidateFeatures.BrandId is int candidateBrandId &&
+                    profile.BrandOrderCounts.TryGetValue(candidateBrandId, out var brandOrders))
+                {
+                    var contribution = _options.BrandWeight * brandOrders / denominator;
+                    if (contribution > 0)
+                    {
+                        score += contribution;
+                        reasons.Add(new("same_brand", "Cùng thương hiệu bạn đã mua"));
+                    }
+                }
+
+                if (featuresByProduct.TryGetValue(product.Id, out candidateFeatures))
+                {
+                    var attributeAffinity = ScoreAttributeAffinity(profile.PurchasedAttributeSignals,
+                        candidateFeatures.Attributes);
+                    var attributeContribution = _options.AttributeWeight * attributeAffinity;
+                    if (attributeContribution > 0)
+                    {
+                        score += attributeContribution;
+                        reasons.Add(new("matching_attributes", "Có thuộc tính gần với sản phẩm bạn đã mua"));
+                    }
+
+                    var characteristicAffinity = ScoreCharacteristicAffinity(profile.CharacteristicSignals,
+                        candidateFeatures);
+                    var characteristicContribution = _options.CharacteristicWeight * characteristicAffinity;
+                    if (characteristicContribution > 0)
+                    {
+                        score += characteristicContribution;
+                        reasons.Add(new("similar_characteristics", "Đặc điểm sản phẩm gần với lịch sử mua hàng"));
                     }
                 }
 
@@ -244,7 +324,8 @@ public sealed class RecommendationService : IRecommendationService
             .ToList();
     }
 
-    private ScoredProduct ScoreSimilar(Product target, Product candidate)
+    private ScoredProduct ScoreSimilar(Product target, Product candidate,
+        IReadOnlyDictionary<int, ProductFeatures> featuresByProduct)
     {
         var reasons = new List<RecommendationReasonDto>();
         var score = 0d;
@@ -252,6 +333,35 @@ public sealed class RecommendationService : IRecommendationService
         {
             score += _options.SimilarCategoryWeight;
             reasons.Add(new("same_category", "Cùng danh mục"));
+        }
+
+        if (featuresByProduct.TryGetValue(target.Id, out var targetFeatures) &&
+            featuresByProduct.TryGetValue(candidate.Id, out var candidateFeatures))
+        {
+            if (targetFeatures.BrandId is not null && targetFeatures.BrandId == candidateFeatures.BrandId &&
+                _options.SimilarBrandWeight > 0)
+            {
+                score += _options.SimilarBrandWeight;
+                reasons.Add(new("same_brand", "Cùng thương hiệu"));
+            }
+
+            var attributeSimilarity = ScoreAttributeSimilarity(targetFeatures.Attributes, candidateFeatures.Attributes);
+            var attributeContribution = _options.SimilarAttributeWeight * attributeSimilarity;
+            if (attributeContribution > 0)
+            {
+                score += attributeContribution;
+                reasons.Add(new("similar_attributes", "Có thuộc tính có cấu trúc tương đồng"));
+            }
+
+            var characteristicSimilarity = TextSimilarity(
+                $"{targetFeatures.Name} {targetFeatures.Description}",
+                $"{candidateFeatures.Name} {candidateFeatures.Description}");
+            var characteristicContribution = _options.SimilarCharacteristicWeight * characteristicSimilarity;
+            if (characteristicContribution > 0)
+            {
+                score += characteristicContribution;
+                reasons.Add(new("similar_characteristics", "Tên hoặc mô tả sản phẩm có đặc điểm tương đồng"));
+            }
         }
 
         if (target.Price > 0)
@@ -270,6 +380,94 @@ public sealed class RecommendationService : IRecommendationService
         }
 
         return new ScoredProduct(candidate, score, reasons);
+    }
+
+    private double ScoreAttributeAffinity(IReadOnlyList<PurchasedAttributeSignal> preferences,
+        IReadOnlyList<ProductFeature> candidateAttributes)
+    {
+        if (preferences.Count == 0 || candidateAttributes.Count == 0) return 0;
+        double weightedScore = 0;
+        double totalWeight = 0;
+        foreach (var preference in preferences)
+        {
+            var best = candidateAttributes
+                .Where(candidate => SameAttributeDefinition(preference.Feature, candidate))
+                .Select(candidate => AttributeValueSimilarity(preference.Feature, candidate))
+                .DefaultIfEmpty(0)
+                .Max();
+            var weight = Math.Max(1, preference.Quantity);
+            weightedScore += best * weight;
+            totalWeight += weight;
+        }
+        return totalWeight <= 0 ? 0 : weightedScore / totalWeight;
+    }
+
+    private double ScoreAttributeSimilarity(IReadOnlyList<ProductFeature> left, IReadOnlyList<ProductFeature> right)
+    {
+        if (left.Count == 0 || right.Count == 0) return 0;
+        var matches = left.Select(feature => right
+            .Where(candidate => SameAttributeDefinition(feature, candidate))
+            .Select(candidate => AttributeValueSimilarity(feature, candidate))
+            .DefaultIfEmpty(0).Max()).ToArray();
+        return matches.Length == 0 ? 0 : matches.Average();
+    }
+
+    private double AttributeValueSimilarity(ProductFeature left, ProductFeature right)
+    {
+        if (left.DataType != right.DataType) return 0;
+        if (left.DataType == CatalogAttributeType.Text)
+            return NormalizeFeatureText(left.ValueText) == NormalizeFeatureText(right.ValueText) ? 1 : 0;
+        if (left.DataType == CatalogAttributeType.Boolean)
+            return left.ValueBoolean == right.ValueBoolean ? 1 : 0;
+        if (left.ValueNumber is not decimal leftNumber || right.ValueNumber is not decimal rightNumber) return 0;
+        var relativeDifference = Math.Abs(leftNumber - rightNumber) / Math.Max(1m, Math.Max(Math.Abs(leftNumber), Math.Abs(rightNumber)));
+        var maximumDifference = Math.Max(0.01m, _options.MaximumAttributeRelativeDifference);
+        return relativeDifference > maximumDifference
+            ? 0
+            : (double)Math.Max(0m, 1m - relativeDifference / maximumDifference);
+    }
+
+    private static bool SameAttributeDefinition(ProductFeature left, ProductFeature right) =>
+        left.CategoryId == right.CategoryId && left.DataType == right.DataType &&
+        StringComparer.OrdinalIgnoreCase.Equals(left.Code, right.Code) &&
+        StringComparer.OrdinalIgnoreCase.Equals(left.Unit ?? string.Empty, right.Unit ?? string.Empty);
+
+    private static double ScoreCharacteristicAffinity(IReadOnlyList<PurchasedCharacteristicSignal> preferences,
+        ProductFeatures candidate)
+    {
+        if (preferences.Count == 0) return 0;
+        return preferences.Where(preference => preference.CategoryId == candidate.CategoryId)
+            .Select(preference => TextSimilarity($"{preference.Name} {preference.Description}",
+                $"{candidate.Name} {candidate.Description}"))
+            .DefaultIfEmpty(0).Max();
+    }
+
+    private static double TextSimilarity(string? left, string? right)
+    {
+        var leftTokens = FeatureTokens(left);
+        var rightTokens = FeatureTokens(right);
+        if (leftTokens.Count == 0 || rightTokens.Count == 0) return 0;
+        var intersection = leftTokens.Count(token => rightTokens.Contains(token));
+        var union = leftTokens.Union(rightTokens, StringComparer.Ordinal).Count();
+        return union == 0 ? 0 : (double)intersection / union;
+    }
+
+    private static HashSet<string> FeatureTokens(string? value) =>
+        NormalizeFeatureText(value).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => token.Length >= 3).ToHashSet(StringComparer.Ordinal);
+
+    private static string NormalizeFeatureText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var decomposed = value.ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormD);
+        var builder = new System.Text.StringBuilder(decomposed.Length);
+        foreach (var character in decomposed)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character) == System.Globalization.UnicodeCategory.NonSpacingMark)
+                continue;
+            builder.Append(character == 'đ' ? 'd' : character);
+        }
+        return System.Text.RegularExpressions.Regex.Replace(builder.ToString(), @"[^\p{L}\p{N}]+", " ").Trim();
     }
 
     private List<ScoredProduct> RankPopular(
@@ -340,8 +538,21 @@ public sealed class RecommendationService : IRecommendationService
         decimal Monetary,
         IReadOnlyDictionary<int, int> CategoryOrderCounts,
         IReadOnlyDictionary<int, int> ProductQuantities,
-        decimal[] HistoricalPrices);
+        decimal[] HistoricalPrices,
+        IReadOnlyDictionary<int, int> BrandOrderCounts,
+        IReadOnlyList<PurchasedAttributeSignal> PurchasedAttributeSignals,
+        IReadOnlyList<PurchasedCharacteristicSignal> CharacteristicSignals);
 
+    internal sealed record ProductFeatures(
+        int CategoryId,
+        int? BrandId,
+        string Name,
+        string? Description,
+        IReadOnlyList<ProductFeature> Attributes);
+    internal sealed record ProductFeature(int CategoryId, string Code, string? Unit, CatalogAttributeType DataType,
+        string? ValueText, decimal? ValueNumber, bool? ValueBoolean);
+    internal sealed record PurchasedAttributeSignal(ProductFeature Feature, int Quantity);
+    internal sealed record PurchasedCharacteristicSignal(int CategoryId, string Name, string? Description);
     private sealed record PurchaseSignal(OrderItem Item, int OrderId);
     private sealed record ScoredProduct(Product Product, double Score, IReadOnlyList<RecommendationReasonDto> Reasons);
 }

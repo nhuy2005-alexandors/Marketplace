@@ -13,7 +13,7 @@
 | Localhost | **PASS một phần** | Owner-reported guest smoke at `eb05190`: PASS=16, FAIL=0, KNOWN_LIMITATION=1; intentional rate-limit 429s and HTTP 413 behaved as expected. Authenticated login/account-switching has not been tested. |
 | Database safety | **PASS (owner-reported)** | Counts unchanged across repeated API runs, with SELECT-only logs and zero INSERT/UPDATE/DELETE. Owner supplied the counts below. No DB was accessed for this documentation change. |
 | Manual UI | **Owner-reported PASS** | Owner reports the UI was tried and looked good. No screenshots were supplied; account login/switching was not tried. See [MANUAL_FRONTEND_TEST_CHECKLIST.md](MANUAL_FRONTEND_TEST_CHECKLIST.md) for remaining reproducible evidence. |
-| Integrated AI | **CHƯA PASS** | Requires Khánh to merge the shared Recommendation contract and the owner to complete integrated acceptance. |
+| Integrated AI | **CHƯA PASS** | Recommendation code is now present in the local integration worktree; Khang/Khánh review on the same commit and owner live acceptance remain pending. |
 
 Guest smoke run history (all owner-reported):
 
@@ -64,7 +64,7 @@ Owner-reported database snapshot (unchanged over multiple API runs): `Database=E
 2. Verify `ECommerceDb_Dev` identity and record read-only before/after counts and migration history. Start the API only after confirming its migration behavior is safe; verify API logs remain SELECT-only for the smoke scenarios.
 3. Preserve the owner-reported `eb05190` final summary (PASS=16 / FAIL=0 / KNOWN_LIMITATION=1). The per-case transcript was not supplied; attach it if reproducible case-by-case provenance is needed. The 413 case passed on HTTP 413 with a safe error body, and the intentional rate-limit case returned 429 as expected.
 4. Run the authenticated user flow separately and capture reproducible notes or screenshots for the manual UI check. Record browser/device, account role, relevant query/filter scenarios, and any failures.
-5. Ask Khánh to merge the shared Recommendation contract into the agreed integration commit. Confirm both lanes use the same commit before declaring Integrated AI PASS.
+5. Have Khánh review/accept the shared Recommendation integration on the agreed commit. Confirm both lanes use that commit before declaring Integrated AI PASS.
 6. Generation is disabled by default. If owner-authorized to probe, run `powershell -NoProfile -File .\scripts\local-acceptance\gemini-generation-probe.ps1 -Models 'model-a,model-b' -Thinking none` (or `low`/`medium` as explicitly selected), review `models.get` capabilities and safe quota fields, and leave pacing enabled. Do not put a key on the command line. Re-enable generation only after the owner approves quota/data terms and a generated response is verified.
 7. Complete owner review of weak-evidence wording and author-written labels. Keep K-05 reporting-only; do not tune on holdout.
 8. Run the agreed integrated acceptance suite on the final shared commit. Only after guest and authenticated flows, DB safety, provider behavior, and shared contract all pass should the owner change the status to **Integrated AI PASS**.
@@ -101,3 +101,12 @@ Cache-only analysis against the baseline runtime/cache at `86fb0dc` uses exact `
 `RAG_OWNER_REVIEWED_QUERIES.jsonl` contains 12 drafts and zero confirmed rows. `-OwnerReviewedOnly` returns **chưa có dữ liệu** and keeps this set out of all other metrics. `label-check.ps1` and `owner-query-candidates.ps1` are owner-side read-only tools restricted to `ECommerceDb_Dev`; no DB access was made in this update. The current synthetic query file has no explicit predicate field. Non-SKU lexical checks are diagnostics and cannot certify semantic/category/attribute relevance.
 
 Owner-reported at `eb05190` for this update: `dotnet test` Passed 129 / Failed 0 / Skipped 0; guest smoke PASS=16 / FAIL=0 / KNOWN_LIMITATION=1; database counts unchanged. These results were not rerun in this sandbox.
+
+## Recommendation Engine / RAG completion work (local integration worktree, 2026-11-15)
+
+- The integration worktree is based on Recommendation commit `b4e62cb`; this update has not been pushed and does not modify Owner PR #3/#4 or `main`.
+- Backend C# regression/integration suite: **213 passed / 0 failed / 0 skipped**. Release backend build: **0 errors**. Frontend build: **passed**. Frontend lint exited 0 with existing warnings in `HomePage.tsx` (`react-hooks/exhaustive-deps`) and `tests/session-isolation.test.mjs` (`no-unused-vars`).
+- Recommendation regression coverage verifies brand and structured-attribute use for personalized and similar-product ranking, adapter delegation to the shared service, the scoped DI contract used by Recommendation API and RAG, and Assistant routing with customer ID preservation. Existing RAG golden tests are included in the passing suite.
+- The deterministic in-memory recommendation experiment is documented in [Recommendation Evaluation Report](recommendation-system/RECOMMENDATION_EVALUATION_REPORT.md). It demonstrates feature impact on a deliberately small synthetic fixture; it is not human-reviewed or real-world evidence. The supplied 180-row temporal split was inspected but not executed. Owner-reviewed Recommendation labels: none.
+- Persistent database safety: no API was started, no database connection/query was made, and no persistent database was mutated. No Gemini call, RAG evaluator, or RAG holdout run occurred.
+- Completion status: Recommendation/RAG integration and offline regression checks are implemented. Live `ECommerceDb_Dev` runtime acceptance, frontend-to-API recommendation behavior, owner-reviewed label evaluation, and joint Khang/Khánh acceptance are **not yet verified**. Do not claim Localhost or Integrated AI PASS from this sandbox run alone.

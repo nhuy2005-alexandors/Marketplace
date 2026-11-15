@@ -13,6 +13,11 @@ Thư mục này cung cấp tài liệu hướng dẫn toàn diện, giải pháp
 | **[03. Hướng Dẫn Tích Hợp Vào ChatBot RAG](03-rag-chatbot-integration.md)** | Kế hoạch tích hợp vào `ChatBot.tsx` & `ragService.ts`: Context Injection, Prompt template cho LLM (Gemini), kết hợp giỏ hàng/wishlist/lịch sử mua với câu hỏi người dùng. |
 | **[04. Các Phương Án Triển Khai Kỹ Thuật](04-backend-implementation-options.md)** | So sánh 3 kiến trúc triển khai: (A) Client-Side Transformers.js, (B) .NET 9 Backend với ONNX Runtime / ML.NET, (C) Microservice Python FastAPI + Vector DB. |
 | **[Sample Code / Code Mẫu Tham Khảo](sample-code/)** | Các script mẫu hoàn chỉnh (TypeScript, Python, C#) để tham khảo và tái sử dụng khi bạn bắt đầu code. |
+| **[Recommendation Evaluation Report](RECOMMENDATION_EVALUATION_REPORT.md)** | Báo cáo benchmark synthetic có số liệu thực nghiệm, baseline, temporal split, cold-start/RFM và giới hạn; hiện chưa có nhãn human-reviewed. |
+
+## Current implementation status (integration branch)
+
+The shared .NET `IRecommendationService` now incorporates Catalog V2 brand, active structured attributes, category, product text characteristics, purchase history, price affinity, eligible-order popularity, and ratings. Both the Recommendation API and RAG's `RecommendationProviderAdapter` use this same service. RAG routes advice and similar-product requests to the shared engine; ordinary product-information queries remain on RAG retrieval. The report linked above contains a small reproducible synthetic experiment. Its scores are an engineering check, not a claim of real-world recommendation quality.
 
 ---
 
