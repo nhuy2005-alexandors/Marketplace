@@ -41,7 +41,10 @@ public sealed class RfmService : IRfmService
                 order.Id,
                 order.UserId,
                 order.CreatedAt,
-                order.Payment!.Amount))
+                order.Payment!.Amount,
+                order.Items.Where(item => item.Status != FulfillmentStatus.Cancelled)
+                    .Sum(item => item.UnitPrice * item.Quantity),
+                order.Items.Sum(item => item.UnitPrice * item.Quantity)))
             .ToListAsync(cancellationToken);
 
         var byCustomer = eligibleOrders
@@ -127,7 +130,16 @@ public sealed class RfmService : IRfmService
             lastOrderAt,
             recencyDays,
             distinctOrders.Length,
-            distinctOrders.Sum(order => order.PaymentAmount));
+            distinctOrders.Sum(AllocateEligiblePaymentAmount));
+    }
+
+    private static decimal AllocateEligiblePaymentAmount(EligibleOrderRow order)
+    {
+        if (order.OrderSubtotal <= 0 || order.EligibleSubtotal <= 0)
+            return 0m;
+
+        var eligibleShare = Math.Min(1m, order.EligibleSubtotal / order.OrderSubtotal);
+        return decimal.Round(order.PaymentAmount * eligibleShare, 2, MidpointRounding.AwayFromZero);
     }
 
     private static void AssignQuintiles(IReadOnlyList<RfmMetric> purchasers)
@@ -201,7 +213,9 @@ public sealed class RfmService : IRfmService
         int OrderId,
         int UserId,
         DateTime CreatedAt,
-        decimal PaymentAmount);
+        decimal PaymentAmount,
+        decimal EligibleSubtotal,
+        decimal OrderSubtotal);
 
     private sealed class RfmMetric(
         int userId,
