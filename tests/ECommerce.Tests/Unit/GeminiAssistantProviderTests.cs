@@ -40,8 +40,9 @@ public sealed class GeminiAssistantProviderTests
         using var body = JsonDocument.Parse(capturedBody!);
         var requests = body.RootElement.GetProperty("requests");
         Assert.Equal(2, requests.GetArrayLength());
-        Assert.Equal("RETRIEVAL_QUERY", requests[0].GetProperty("taskType").GetString());
-        Assert.Equal(768, requests[0].GetProperty("outputDimensionality").GetInt32());
+        var embedConfig = requests[0].GetProperty("embedContentConfig");
+        Assert.Equal("RETRIEVAL_QUERY", embedConfig.GetProperty("taskType").GetString());
+        Assert.Equal(768, embedConfig.GetProperty("outputDimensionality").GetInt32());
     }
 
     [Fact]
