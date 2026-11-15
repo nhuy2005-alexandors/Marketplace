@@ -170,6 +170,20 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
                 generationConfig = new
                 {
                     responseMimeType = "application/json",
+                    responseSchema = new
+                    {
+                        type = "OBJECT",
+                        properties = new
+                        {
+                            answer = new { type = "STRING" },
+                            sourceProductIds = new
+                            {
+                                type = "ARRAY",
+                                items = new { type = "INTEGER" }
+                            }
+                        },
+                        required = new[] { "answer", "sourceProductIds" }
+                    },
                     maxOutputTokens = Math.Clamp(_options.MaxOutputTokens, 128, 1200)
                 }
             });
