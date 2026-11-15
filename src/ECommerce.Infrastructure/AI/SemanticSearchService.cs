@@ -15,6 +15,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
 {
     private const int MaximumCatalogCandidates = 500;
     private const int MaximumAttributeFilters = 20;
+    private const int EmbeddingBatchSize = 32;
     private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
     {
         "a", "an", "and", "are", "can", "co", "cua", "cho", "gi", "hay", "is", "la",
@@ -206,16 +207,26 @@ public sealed class SemanticSearchService : ISemanticSearchService
         if (missing.Length == 0)
             return;
 
-        var vectors = await _embeddings.EmbedAsync(
-            missing.Select(document => document.Text).ToArray(),
-            "RETRIEVAL_DOCUMENT",
-            ct);
+        for (var offset = 0; offset < missing.Length; offset += EmbeddingBatchSize)
+        {
+            var batch = missing.Skip(offset).Take(EmbeddingBatchSize).ToArray();
+            var vectors = await _embeddings.EmbedAsync(
+                batch.Select(document => document.Text).ToArray(),
+                "RETRIEVAL_DOCUMENT",
+                ct);
 
-        if (vectors is null || vectors.Count != missing.Length)
-            return;
+            if (vectors is null || vectors.Count != batch.Length || vectors.Any(vector => vector.Length == 0))
+            {
+                _logger.LogWarning(
+                    "Semantic retrieval embedding batch failed; cached {CachedCount} of {MissingCount} missing product documents.",
+                    offset,
+                    missing.Length);
+                break;
+            }
 
-        for (var index = 0; index < missing.Length; index++)
-            _cache.Set(missing[index].ContentHash, vectors[index]);
+            for (var index = 0; index < batch.Length; index++)
+                _cache.Set(batch[index].ContentHash, vectors[index]);
+        }
     }
 
     private static bool ValidFilters(AssistantChatFilters? filters)
