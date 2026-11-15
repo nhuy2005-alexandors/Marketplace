@@ -101,8 +101,10 @@ public sealed class RecommendationServiceTests
         [Item(4, product, quantity: 2), Item(5, product, quantity: 1)], amount: 27m);
         var second = Order(5, 10, OrderStatus.Delivered, PaymentStatus.Completed,
             [Item(6, product)], amount: 13m);
+        var cancelledOnly = Order(6, 10, OrderStatus.Delivered, PaymentStatus.Completed,
+            [Item(7, product, FulfillmentStatus.Cancelled)], amount: 100m);
 
-        var profile = RecommendationService.BuildPurchaseProfile([first, first, second]);
+        var profile = RecommendationService.BuildPurchaseProfile([first, first, second, cancelledOnly]);
 
         profile.Frequency.Should().Be(2);
         profile.Monetary.Should().Be(40m);
@@ -158,6 +160,105 @@ public sealed class RecommendationServiceTests
     }
 
     [Fact]
+    public async Task GetForUserAsync_ExcludesProductsFromPendingSellers()
+    {
+        using var db = TestDb.Create();
+        var purchased = Product(585, categoryId: 1);
+        var approvedCandidate = Product(586, categoryId: 1);
+        var pendingCandidate = Product(587, categoryId: 1);
+        var pendingSeller = new User
+        {
+            Id = 2,
+            Email = "pending-seller@example.test",
+            PasswordHash = "test-only",
+            FullName = "Pending Seller",
+            Role = UserRole.Seller,
+            SellerStatus = SellerStatus.Pending
+        };
+        db.Users.Add(pendingSeller);
+        pendingCandidate.SellerId = pendingSeller.Id;
+        pendingCandidate.Seller = pendingSeller;
+        await SeedProductsAsync(db, purchased, approvedCandidate, pendingCandidate);
+        db.Orders.Add(Order(585, 17, OrderStatus.Delivered, PaymentStatus.Completed, [Item(585, purchased)]));
+        await db.SaveChangesAsync();
+
+        var result = await Service(db, new RecommendationOptions
+        {
+            CategoryWeight = 1,
+            PriceWeight = 0,
+            BrandWeight = 0,
+            AttributeWeight = 0,
+            CharacteristicWeight = 0,
+            RepeatPurchaseWeight = 0,
+            PersonalizedMinimumScore = 0.1,
+            AllowRePurchase = false
+        }).GetForUserAsync(17, asOfUtc: Cutoff, cutoffExclusiveUtc: Cutoff);
+
+        result.Items.Select(item => item.Product.Id).Should().Contain(approvedCandidate.Id);
+        result.Items.Should().NotContain(item => item.Product.Id == pendingCandidate.Id);
+    }
+
+    [Fact]
+    public async Task GetForUserAsync_IgnoresAttributeDefinitionsAndValuesCreatedAfterCutoff()
+    {
+        using var db = TestDb.Create();
+        var purchased = Product(588, categoryId: 1);
+        var candidate = Product(589, categoryId: 1);
+        await SeedProductsAsync(db, purchased, candidate);
+        db.AttributeDefinitions.AddRange(
+            new AttributeDefinition
+            {
+                Id = 10, CategoryId = 1, Code = "ram", DisplayName = "RAM",
+                DataType = CatalogAttributeType.Number, Unit = "GB", IsActive = true,
+                IsComparable = true, IsFilterable = true, CreatedAt = Cutoff.AddDays(1)
+            },
+            new AttributeDefinition
+            {
+                Id = 11, CategoryId = 1, Code = "storage", DisplayName = "Storage",
+                DataType = CatalogAttributeType.Number, Unit = "GB", IsActive = true,
+                IsComparable = true, IsFilterable = true, CreatedAt = Cutoff.AddDays(-5)
+            });
+        db.ProductAttributeValues.AddRange(
+            new ProductAttributeValue
+            {
+                Id = 10, ProductId = purchased.Id, AttributeDefinitionId = 10, CategoryId = 1,
+                DataType = CatalogAttributeType.Number, ValueNumber = 32, CreatedAt = Cutoff.AddDays(-1)
+            },
+            new ProductAttributeValue
+            {
+                Id = 11, ProductId = candidate.Id, AttributeDefinitionId = 10, CategoryId = 1,
+                DataType = CatalogAttributeType.Number, ValueNumber = 32, CreatedAt = Cutoff.AddDays(-1)
+            },
+            new ProductAttributeValue
+            {
+                Id = 12, ProductId = purchased.Id, AttributeDefinitionId = 11, CategoryId = 1,
+                DataType = CatalogAttributeType.Number, ValueNumber = 1024, CreatedAt = Cutoff.AddDays(1)
+            },
+            new ProductAttributeValue
+            {
+                Id = 13, ProductId = candidate.Id, AttributeDefinitionId = 11, CategoryId = 1,
+                DataType = CatalogAttributeType.Number, ValueNumber = 1024, CreatedAt = Cutoff.AddDays(1)
+            });
+        db.Orders.Add(Order(588, 18, OrderStatus.Delivered, PaymentStatus.Completed, [Item(588, purchased)]));
+        await db.SaveChangesAsync();
+
+        var result = await Service(db, new RecommendationOptions
+        {
+            CategoryWeight = 0,
+            PriceWeight = 0,
+            BrandWeight = 0,
+            AttributeWeight = 1,
+            CharacteristicWeight = 0,
+            RepeatPurchaseWeight = 0,
+            PersonalizedMinimumScore = 0.01,
+            AllowRePurchase = false
+        }).GetForUserAsync(18, asOfUtc: Cutoff, cutoffExclusiveUtc: Cutoff);
+
+        result.Strategy.Should().Be("no_signal");
+        result.Items.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task GetForUserAsync_UsesBrandAndStructuredAttributePurchaseSignals()
     {
         using var db = TestDb.Create();
@@ -174,12 +275,13 @@ public sealed class RecommendationServiceTests
         db.AttributeDefinitions.Add(new AttributeDefinition
         {
             Id = 1, CategoryId = 1, Code = "ram", DisplayName = "RAM", DataType = CatalogAttributeType.Number,
-            Unit = "GB", IsActive = true, IsComparable = true, IsFilterable = true
+            Unit = "GB", IsActive = true, IsComparable = true, IsFilterable = true,
+            CreatedAt = Cutoff.AddDays(-10)
         });
         db.ProductAttributeValues.AddRange(
-            new ProductAttributeValue { Id = 1, ProductId = purchased.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
-            new ProductAttributeValue { Id = 2, ProductId = matching.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
-            new ProductAttributeValue { Id = 3, ProductId = weaker.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 12 });
+            new ProductAttributeValue { Id = 1, ProductId = purchased.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16, CreatedAt = Cutoff.AddDays(-10) },
+            new ProductAttributeValue { Id = 2, ProductId = matching.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16, CreatedAt = Cutoff.AddDays(-10) },
+            new ProductAttributeValue { Id = 3, ProductId = weaker.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 12, CreatedAt = Cutoff.AddDays(-10) });
         db.Orders.Add(Order(58, 15, OrderStatus.Delivered, PaymentStatus.Completed, [Item(58, purchased)]));
         await db.SaveChangesAsync();
 
@@ -213,12 +315,13 @@ public sealed class RecommendationServiceTests
         db.AttributeDefinitions.Add(new AttributeDefinition
         {
             Id = 1, CategoryId = 1, Code = "ram", DisplayName = "RAM", DataType = CatalogAttributeType.Number,
-            Unit = "GB", IsActive = true, IsComparable = true, IsFilterable = true
+            Unit = "GB", IsActive = true, IsComparable = true, IsFilterable = true,
+            CreatedAt = Cutoff.AddDays(-10)
         });
         db.ProductAttributeValues.AddRange(
-            new ProductAttributeValue { Id = 1, ProductId = target.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
-            new ProductAttributeValue { Id = 2, ProductId = matching.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16 },
-            new ProductAttributeValue { Id = 3, ProductId = weaker.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 12 });
+            new ProductAttributeValue { Id = 1, ProductId = target.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16, CreatedAt = Cutoff.AddDays(-10) },
+            new ProductAttributeValue { Id = 2, ProductId = matching.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 16, CreatedAt = Cutoff.AddDays(-10) },
+            new ProductAttributeValue { Id = 3, ProductId = weaker.Id, AttributeDefinitionId = 1, CategoryId = 1, DataType = CatalogAttributeType.Number, ValueNumber = 12, CreatedAt = Cutoff.AddDays(-10) });
         await db.SaveChangesAsync();
 
         var result = await Service(db, new RecommendationOptions
@@ -392,6 +495,7 @@ public sealed class RecommendationServiceTests
             PasswordHash = "test-only",
             FullName = "Test Seller",
             Role = UserRole.Seller,
+            SellerStatus = SellerStatus.Approved,
             ShopName = "Test Shop"
         });
         db.Categories.AddRange(products.Select(product => product.CategoryId).Distinct()
