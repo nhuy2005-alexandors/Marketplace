@@ -83,13 +83,15 @@ public sealed class RfmServiceTests
     private static User Customer(int id) => new()
     {
         Id = id, Email = $"customer{id}@example.test", PasswordHash = "test",
-        FullName = $"Customer {id}", Role = UserRole.Customer
+        FullName = $"Customer {id}", Role = UserRole.Customer,
+        CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
     };
 
     private static User Seller(int id) => new()
     {
         Id = id, Email = $"seller{id}@example.test", PasswordHash = "test",
-        FullName = $"Seller {id}", Role = UserRole.Seller, SellerStatus = SellerStatus.Approved
+        FullName = $"Seller {id}", Role = UserRole.Seller, SellerStatus = SellerStatus.Approved,
+        CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
     };
 
     private static Order Order(int id, int userId, OrderStatus status, PaymentStatus paymentStatus,
