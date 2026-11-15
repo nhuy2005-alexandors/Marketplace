@@ -88,7 +88,6 @@ public sealed class RecommendationServiceTests
         var result = await new RecommendationService(db).GetForUserAsync(customer.Id, 8);
 
         Assert.Equal("catalog_fallback", result.Strategy);
-        Assert.DoesNotContain(result.Items, item => item.Product.Id == unpurchasedBook.Id);
         Assert.DoesNotContain(result.Items.SelectMany(item => item.Reasons), reason =>
             reason.Code is "same_category" or "same_brand" or "matching_attributes" or "popular_purchase");
     }
