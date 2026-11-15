@@ -42,8 +42,11 @@ public sealed class GeminiAssistantProvider : IEmbeddingProvider, IAssistantAnsw
             {
                 model = $"models/{_options.EmbeddingModel}",
                 content = new { parts = new[] { new { text } } },
-                taskType,
-                outputDimensionality = Math.Clamp(_options.EmbeddingDimensions, 128, 3072)
+                embedContentConfig = new
+                {
+                    taskType,
+                    outputDimensionality = Math.Clamp(_options.EmbeddingDimensions, 128, 3072)
+                }
             }).ToArray();
 
             using var request = CreateRequest(
