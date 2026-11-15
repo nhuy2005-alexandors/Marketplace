@@ -41,13 +41,23 @@ public class StartupSafetyTests
     [Fact]
     public void Development_startup_rejects_the_repository_default_database_target()
     {
-        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-            builder.UseEnvironment("Development"));
-
-        var exception = Record.Exception(() => factory.CreateClient());
-
-        Assert.NotNull(exception);
-        Assert.Contains("MSSQLLocalDB/ECommerceDb target is forbidden", exception!.ToString(), StringComparison.OrdinalIgnoreCase);
+        var root = Path.Combine(Path.GetTempPath(), $"marketplace-startup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var settings = Path.Combine(root, "appsettings.json");
+        File.WriteAllText(settings, """{"ConnectionStrings":{"DefaultConnection":"Server=(localdb)\\MSSQLLocalDB;Database=ECommerceDb;Integrated Security=true"}}""");
+        try
+        {
+            using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+                builder.UseEnvironment("Development").UseContentRoot(root));
+            var exception = Record.Exception(() => factory.CreateClient());
+            Assert.NotNull(exception);
+            Assert.Contains("MSSQLLocalDB/ECommerceDb target is forbidden", exception!.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(settings);
+            Directory.Delete(root);
+        }
     }
 
 }

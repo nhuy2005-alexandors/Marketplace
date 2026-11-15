@@ -38,11 +38,7 @@ public class SellerOrderService : ISellerOrderService
             var sellerItems = o.Items.Where(i => i.SellerId == sellerId).ToList();
             var sellerSubtotal = sellerItems.Sum(i => i.Subtotal);
 
-            // Pro-rate: phần giảm giá của seller = tỉ trọng subtotal seller trong tổng đơn.
-            var orderSubtotal = o.Subtotal;
-            var sellerDiscount = orderSubtotal > 0
-                ? Math.Round(o.DiscountAmount * (sellerSubtotal / orderSubtotal), 2)
-                : 0m;
+            var sellerDiscount = SellerDiscountAllocation.ForOrder(o)[sellerId];
             var sellerTotal = Math.Max(0, sellerSubtotal - sellerDiscount);
 
             return new OrderDto(
@@ -55,7 +51,8 @@ public class SellerOrderService : ISellerOrderService
                 sellerTotal,
                 o.CreatedAt,
                 sellerItems.Select(i => i.ToDto()).ToList(),
-                o.Payment?.ToDto(), o.RefundPending);
+                o.Payment is null ? null : new PaymentDto(sellerTotal, o.Payment.Method.ToString(),
+                    o.Payment.Status.ToString(), null, null, o.Payment.RequiresReconciliation, o.Payment.IsDemo), o.RefundPending);
         }).ToList();
 
         return new PagedResult<OrderDto>

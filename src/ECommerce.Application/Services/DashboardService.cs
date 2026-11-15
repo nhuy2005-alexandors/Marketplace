@@ -23,19 +23,15 @@ public class DashboardService : IDashboardService
         decimal revenue = 0m;
         foreach (var order in paidOrders)
         {
-            var originalSubtotal = order.Items.Sum(i => i.Subtotal);
-            var activeItems = order.Items.Where(i => i.Status != FulfillmentStatus.Cancelled).ToList();
-            var activeSubtotal = activeItems.Sum(i => i.Subtotal);
-            if (activeSubtotal <= 0 || originalSubtotal <= 0) continue;
-
-            var sellerSubtotal = sellerId.HasValue
-                ? activeItems.Where(i => i.SellerId == sellerId.Value).Sum(i => i.Subtotal)
-                : activeSubtotal;
-            if (sellerSubtotal <= 0) continue;
-
-            var allocatedDiscount = Math.Round(
-                order.DiscountAmount * (sellerSubtotal / originalSubtotal), 2, MidpointRounding.AwayFromZero);
-            revenue += Math.Max(0m, sellerSubtotal - allocatedDiscount);
+            var discounts = SellerDiscountAllocation.ForOrder(order);
+            foreach (var group in order.Items.GroupBy(i => i.SellerId).Where(g => sellerId is null || g.Key == sellerId.Value))
+            {
+                var originalSubtotal = group.Sum(i => i.Subtotal);
+                if (originalSubtotal <= 0) continue;
+                var activeSubtotal = group.Where(i => i.Status != FulfillmentStatus.Cancelled).Sum(i => i.Subtotal);
+                var activeDiscount = Math.Round(discounts[group.Key] * (activeSubtotal / originalSubtotal), 2, MidpointRounding.AwayFromZero);
+                revenue += Math.Max(0m, activeSubtotal - activeDiscount);
+            }
         }
 
         var totalOrders = sellerId == null

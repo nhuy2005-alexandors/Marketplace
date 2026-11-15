@@ -29,24 +29,39 @@ public class CartService : ICartService
         if (product is null || !IsPubliclyAvailable(product))
             return Result.Fail<CartDto>("Product not found.", ErrorType.NotFound);
 
-        var cart = await LoadCartAsync(userId, ct);
-        var item = cart.Items.FirstOrDefault(i => i.ProductId == r.ProductId);
-        var newQty = (item?.Quantity ?? 0) + r.Quantity;
-        if (newQty > product.Stock)
-            return Result.Fail<CartDto>($"Only {product.Stock} in stock.", ErrorType.Validation);
+        try
+        {
+            var cart = await LoadCartAsync(userId, ct);
+            var item = cart.Items.FirstOrDefault(i => i.ProductId == r.ProductId);
+            if (r.Quantity > product.Stock - (item?.Quantity ?? 0))
+                return Result.Fail<CartDto>($"Only {product.Stock} in stock.", ErrorType.Validation);
 
-        if (item is null)
-        {
-            item = new CartItem { CartId = cart.Id, ProductId = r.ProductId, Quantity = r.Quantity };
-            cart.Items.Add(item);
-            _db.CartItems.Add(item);
+            if (item is not null && _db.Entry(item).Context.Database.ProviderName is
+                "Microsoft.EntityFrameworkCore.SqlServer" or "Microsoft.EntityFrameworkCore.Sqlite")
+            {
+                var updated = await _db.CartItems.Where(i => i.Id == item.Id && i.Quantity <= product.Stock - r.Quantity)
+                    .ExecuteUpdateAsync(set => set.SetProperty(i => i.Quantity, i => i.Quantity + r.Quantity), ct);
+                if (updated == 0)
+                    return Result.Fail<CartDto>("Cart changed concurrently. Reload and retry.", ErrorType.Conflict);
+                await _db.Entry(item).ReloadAsync(ct);
+            }
+            else
+            {
+                if (item is null)
+                {
+                    item = new CartItem { CartId = cart.Id, ProductId = r.ProductId, Quantity = r.Quantity };
+                    cart.Items.Add(item);
+                    _db.CartItems.Add(item);
+                }
+                else item.Quantity += r.Quantity;
+                await _db.SaveChangesAsync(ct);
+            }
+            return Result.Ok((await LoadCartAsync(userId, ct)).ToDto());
         }
-        else
+        catch (DbUpdateConcurrencyException)
         {
-            item.Quantity = newQty;
+            return Result.Fail<CartDto>("Cart changed concurrently. Reload and retry.", ErrorType.Conflict);
         }
-        await _db.SaveChangesAsync(ct);
-        return Result.Ok((await LoadCartAsync(userId, ct)).ToDto());
     }
 
     public async Task<Result<CartDto>> UpdateItemAsync(int userId, int itemId, UpdateCartItemRequest r, CancellationToken ct = default)
@@ -97,14 +112,18 @@ public class CartService : ICartService
 
     private async Task<Cart> LoadCartAsync(int userId, CancellationToken ct)
     {
-        var cart = await _db.Carts
-            .Include(c => c.Items).ThenInclude(i => i.Product).ThenInclude(p => p.Seller)
-            .FirstOrDefaultAsync(c => c.UserId == userId, ct);
+        var query = _db.Carts.Include(c => c.Items).ThenInclude(i => i.Product).ThenInclude(p => p.Seller);
+        var cart = await query.FirstOrDefaultAsync(c => c.UserId == userId, ct);
         if (cart is null)
         {
             cart = new Cart { UserId = userId };
             _db.Carts.Add(cart);
-            await _db.SaveChangesAsync(ct);
+            try { await _db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException)
+            {
+                _db.Entry(cart).State = EntityState.Detached;
+                cart = await query.SingleAsync(c => c.UserId == userId, ct);
+            }
         }
         return cart;
     }

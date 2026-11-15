@@ -40,6 +40,13 @@ public class AppDbContext : DbContext, IAppDbContext
         {
             throw new DuplicateRefundException(ex);
         }
+        catch (DbUpdateException ex) when (ex.InnerException is SqlException sql &&
+            sql.Number is 2601 or 2627 && ex.Entries.Any(e => e.Entity is Cart or CartItem) &&
+            (sql.Message.Contains("IX_Carts_UserId", StringComparison.Ordinal) ||
+             sql.Message.Contains("IX_CartItems_CartId_ProductId", StringComparison.Ordinal)))
+        {
+            throw new DbUpdateConcurrencyException("Cart changed concurrently. Reload and retry.", ex);
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder b)

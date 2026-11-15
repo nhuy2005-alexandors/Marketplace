@@ -9,6 +9,97 @@ namespace ECommerce.Tests.Unit;
 
 public class PaymentSplitTests
 {
+    [Fact]
+    public async Task SplitAndDashboard_LargeValidAmounts_DoNotOverflowProration()
+    {
+        using var db = TestDb.Create();
+        var (buyerId, sellerA, _, orderId) = await SeedOrderAsync(db, 1_000_000_000_000_000m);
+        var order = db.Orders.Single(o => o.Id == orderId);
+        foreach (var item in order.Items) { item.UnitPrice = 1_000_000_000_000_000m; item.Quantity = 1; }
+        order.Status = OrderStatus.Paid;
+        order.Payment = new Payment { Amount = order.Total, Status = PaymentStatus.Completed, Method = PaymentMethod.EWallet };
+        await db.SaveChangesAsync();
+
+        var split = (await new OrderService(db).GetSplitAsync(buyerId, false, orderId)).Value!;
+
+        split.Sellers.Sum(s => s.DiscountShare).Should().Be(order.DiscountAmount);
+        (await new DashboardService(db).GetAsync(sellerA)).TotalRevenue.Should().Be(500_000_000_000_000m);
+    }
+
+    [Fact]
+    public async Task SellerOrderPayment_DoesNotExposePlatformPaymentIdentifiersOrAmount()
+    {
+        using var db = TestDb.Create();
+        var (_, sellerA, _, orderId) = await SeedOrderAsync(db, 10m);
+        var order = db.Orders.Single(o => o.Id == orderId);
+        order.Payment = new Payment
+        {
+            Amount = order.Total, Method = PaymentMethod.EWallet, Status = PaymentStatus.Completed,
+            TransactionId = "platform-provider-transaction", RequiresReconciliation = true,
+            ReconciliationAmount = 123456m, ReconciliationCurrency = "VND", ReconciliationReference = "platform-reconciliation"
+        };
+        await db.SaveChangesAsync();
+
+        var dto = (await new SellerOrderService(db).GetForSellerAsync(sellerA, 1, 20)).Items.Single();
+
+        dto.Payment!.Amount.Should().Be(dto.Total);
+        dto.Payment.TransactionId.Should().BeNull();
+        dto.Payment.ReconciliationAmount.Should().BeNull();
+        dto.Payment.ReconciliationCurrency.Should().BeNull();
+        dto.Payment.ReconciliationReference.Should().BeNull();
+        dto.Payment.Status.Should().Be("Completed");
+        dto.Payment.RequiresReconciliation.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SellerOrdersAndDashboards_UseTheSameCentAllocationAsOrderSplit()
+    {
+        using var db = TestDb.Create();
+        var buyer = new User { Email = "allocation-buyer@example.invalid", FullName = "Buyer", PasswordHash = "h" };
+        var sellers = Enumerable.Range(1, 3).Select(i => new User
+        {
+            Email = $"allocation-seller{i}@example.invalid", FullName = $"Seller {i}", PasswordHash = "h", Role = UserRole.Seller
+        }).ToArray();
+        db.Users.Add(buyer);
+        db.Users.AddRange(sellers);
+        await db.SaveChangesAsync();
+        var order = new Order { UserId = buyer.Id, ShippingAddress = "Audit", Status = OrderStatus.Paid, DiscountAmount = 1m };
+        foreach (var seller in sellers)
+            order.Items.Add(new OrderItem { ProductId = seller.Id, SellerId = seller.Id, ProductName = "P", UnitPrice = 1m, Quantity = 1 });
+        order.Payment = new Payment { Amount = 2m, Status = PaymentStatus.Completed, Method = PaymentMethod.EWallet };
+        db.Orders.Add(order);
+        await db.SaveChangesAsync();
+        var split = (await new OrderService(db).GetSplitAsync(buyer.Id, false, order.Id)).Value!;
+
+        foreach (var seller in sellers)
+        {
+            var expected = split.Sellers.Single(s => s.SellerId == seller.Id);
+            var sellerOrder = (await new SellerOrderService(db).GetForSellerAsync(seller.Id, 1, 20)).Items.Single();
+            sellerOrder.DiscountAmount.Should().Be(expected.DiscountShare);
+            sellerOrder.Total.Should().Be(expected.NetTotal);
+            (await new DashboardService(db).GetAsync(seller.Id)).TotalRevenue.Should().Be(expected.NetTotal);
+        }
+        (await new DashboardService(db).GetAsync()).TotalRevenue.Should().Be(split.Total);
+    }
+
+    [Fact]
+    public async Task Split_SmallSellerSubtotals_DoNotLoseTheDiscountRemainder()
+    {
+        using var db = TestDb.Create();
+        var (_, _, _, orderId) = await SeedOrderAsync(db, 0.02m);
+        var order = db.Orders.Single(o => o.Id == orderId);
+        foreach (var item in order.Items) { item.UnitPrice = 0.01m; item.Quantity = 1; }
+        order.Items.Add(new OrderItem { SellerId = 100, ProductId = 100, ProductName = "C", UnitPrice = 0.01m, Quantity = 1 });
+        order.Items.Add(new OrderItem { SellerId = 101, ProductId = 101, ProductName = "D", UnitPrice = 0.01m, Quantity = 1 });
+        await db.SaveChangesAsync();
+
+        var split = (await new OrderService(db).GetSplitAsync(0, true, orderId)).Value!;
+
+        split.Sellers.Sum(s => s.DiscountShare).Should().Be(0.02m);
+        split.Sellers.Sum(s => s.NetTotal).Should().Be(split.Total);
+        split.Sellers.Should().OnlyContain(s => s.DiscountShare >= 0 && s.DiscountShare <= s.Subtotal);
+    }
+
     private static async Task<(int userId, int sellerA, int sellerB, int orderId)> SeedOrderAsync(
         Infrastructure.Persistence.AppDbContext db, decimal discount)
     {

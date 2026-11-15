@@ -1,3 +1,21 @@
+# Current checkpoint — Owner local audit, 2026-11-15
+
+- Active scope: Owner DB/business only. RAG and recommendation/classification await corrected AI lanes; no AI source imported.
+- Local branch: codex/marketplace-owner-local-20261115, based on main 540d296836be789a58ede9db1039447d95a3c9cc. No remote push/PR/merge.
+- Existing DB: (localdb)\MarketplaceRefundDev20261113 / ECommerceDb_Dev; all 16 migrations match source, no pending model changes. No new DB/instance, reseed or restore.
+- One source audit found/fixed seller payment leakage, inconsistent cent allocation, hidden-product reviews, concurrent cart increments/inserts and seller fulfillment controls during holds. Also fixed cart integer overflow and StartupSafety test isolation; patched frontend lockfile dependencies.
+- Verification: backend 159 passed/3 disposable-only SQL facts skipped; frontend 6 passed, build/lint passed; npm audit 0 vulnerabilities. Fresh SQL probes cover existing-cart increments, first cart/item races and snapshot-trigger rollback. These probes are not substitutes for refund/callback concurrency facts.
+- Actual browser: Admin login/dashboard/catalog, Customer add-to-cart/COD checkout/cancel, Seller own-order view. Dedicated browser/auth vault profiles cleaned.
+- Audit fixtures retained: Customer1022, Seller1023, Orders5001(cancelled COD),5002(paid demo),5003(cancelled COD). Product499 stock39 from40 due one retained demo purchase; other stock/SKU unchanged. Temporary catalog/coupon fixtures removed through their APIs.
+- Online refund/capture live acceptance remains NOT RUN: no approved FX/gateway setup and zero completed non-demo payments with frozen provider evidence. No fake capture or external transfer was created.
+- App URLs: frontend localhost:5173, API/Swagger localhost:5215/swagger. Use the private gitignored Local.json; startup never migrates/seeds.
+- Original D:/Dev/Workspaces/E-Commerce and 138 protected files, DbSeeder.cs, V1/V2 backups preserved.
+- Report/evidence: C:/Users/HUY/Documents/Marketplace-Local-Completion/20261115/owner/audit-20261115/REPORT.md.
+
+Historical checkpoint below is retained; older dates/results do not describe current runtime.
+
+---
+
 # Task Checkpoint — MiniShop
 
 Cập nhật: 2026-07-05

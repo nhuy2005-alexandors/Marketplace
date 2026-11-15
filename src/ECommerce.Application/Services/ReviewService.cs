@@ -17,7 +17,8 @@ public class ReviewService : IReviewService
     {
         var reviews = await _db.Reviews
             .Include(r => r.User)
-            .Where(r => r.ProductId == productId)
+            .Where(r => r.ProductId == productId && r.Product.Seller != null &&
+                (r.Product.Seller.Role != UserRole.Seller || r.Product.Seller.SellerStatus == SellerStatus.Approved))
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(ct);
         return reviews.Select(r => r.ToDto()).ToList();
