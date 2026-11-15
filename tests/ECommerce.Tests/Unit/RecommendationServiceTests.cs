@@ -129,7 +129,7 @@ public sealed class RecommendationServiceTests
 
         Assert.Equal("catalog_fallback", result.Strategy);
         Assert.Contains(result.Items, item => item.Product.Id == product.Id);
-        Assert.DoesNotContain(result.Strategy, "trending", StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("trending", result.Strategy, StringComparison.OrdinalIgnoreCase);
     }
 
     private static User Customer(int id) => new()
