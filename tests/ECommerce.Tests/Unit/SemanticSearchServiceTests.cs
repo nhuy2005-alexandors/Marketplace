@@ -151,14 +151,63 @@ public sealed class SemanticSearchServiceTests
     }
 
     [Fact]
-    public async Task WarmUpAsync_KeepsEarlierSuccessfulBatchesWhenLaterBatchFails()
+    public async Task SearchCandidatesAsync_IncludesProductsBeyondFirstFiveHundredCatalogRows()
     {
         using var db = TestDb.Create();
         var category = new Category { Id = 1, Name = "Audio" };
         var seller = Seller(2, SellerStatus.Approved);
         db.Users.Add(seller);
         db.Categories.Add(category);
-        db.Products.AddRange(Enumerable.Range(1, 33)
+        db.Products.AddRange(Enumerable.Range(1, 501)
+            .Select(id => Product(
+                id,
+                id == 501 ? "Target camera" : $"Generic audio item {id}",
+                "Portable sound device",
+                category,
+                seller)));
+        await db.SaveChangesAsync();
+
+        var service = Service(db, new FakeEmbeddings(returnNull: true), new EmbeddingCacheStore());
+
+        var results = await service.SearchCandidatesAsync("target camera", null, 8);
+
+        var result = Assert.Single(results);
+        Assert.Equal(501, result.Product.Id);
+    }
+
+    [Fact]
+    public async Task WarmUpAsync_BoundsLongDocumentsAndPreservesProductIdentity()
+    {
+        using var db = TestDb.Create();
+        var category = new Category { Id = 1, Name = "Audio" };
+        var seller = Seller(2, SellerStatus.Approved);
+        var product = Product(10, "Long description product", new string('x', 5000), category, seller);
+        db.Users.Add(seller);
+        db.Categories.Add(category);
+        db.Products.Add(product);
+        await db.SaveChangesAsync();
+
+        var embeddings = new FakeEmbeddings();
+        var service = Service(db, embeddings, new EmbeddingCacheStore());
+
+        await service.WarmUpAsync();
+
+        var document = Assert.Single(embeddings.EmbeddedTexts);
+        Assert.True(document.Length <= 1800);
+        Assert.Contains("Long description product", document);
+        Assert.Contains("Audio", document);
+        Assert.Contains("SKU-10", document);
+    }
+
+    [Fact]
+    public async Task WarmUpAsync_ContinuesWithLaterBatchesWhenOneBatchFails()
+    {
+        using var db = TestDb.Create();
+        var category = new Category { Id = 1, Name = "Audio" };
+        var seller = Seller(2, SellerStatus.Approved);
+        db.Users.Add(seller);
+        db.Categories.Add(category);
+        db.Products.AddRange(Enumerable.Range(1, 65)
             .Select(id => Product(id, $"Audio product {id}", "Portable sound device", category, seller)));
         await db.SaveChangesAsync();
 
@@ -168,8 +217,8 @@ public sealed class SemanticSearchServiceTests
 
         await service.WarmUpAsync();
 
-        Assert.Equal(32, cache.Count);
-        Assert.Equal(2, embeddings.CallCount);
+        Assert.Equal(33, cache.Count);
+        Assert.Equal(3, embeddings.CallCount);
     }
 
     [Fact]
@@ -241,6 +290,7 @@ public sealed class SemanticSearchServiceTests
     {
         public int CallCount { get; private set; }
         public List<string> TaskTypes { get; } = [];
+        public List<string> EmbeddedTexts { get; } = [];
 
         public Task<IReadOnlyList<float[]>?> EmbedAsync(
             IReadOnlyList<string> texts,
@@ -249,6 +299,7 @@ public sealed class SemanticSearchServiceTests
         {
             CallCount++;
             TaskTypes.Add(taskType);
+            EmbeddedTexts.AddRange(texts);
             if (returnNull || CallCount == failOnCall)
                 return Task.FromResult<IReadOnlyList<float[]>?>(null);
 
