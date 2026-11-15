@@ -33,14 +33,20 @@ public sealed class RfmServiceTests
             asOf.AddDays(-3), 700m, Item(103, product, seller.Id, FulfillmentStatus.Delivered)));
         db.Orders.Add(Order(104, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
             asOf.AddDays(-4), 600m, Item(104, product, seller.Id, FulfillmentStatus.Cancelled)));
+        var partialCancelled = Order(105, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            asOf.AddDays(-20), 150m,
+            Item(105, product, seller.Id, FulfillmentStatus.Delivered),
+            Item(106, product, seller.Id, FulfillmentStatus.Cancelled));
+        partialCancelled.Items.Last().UnitPrice = 50m;
+        db.Orders.Add(partialCancelled);
         await db.SaveChangesAsync();
 
         var result = await new RfmService(db).GetCustomersAsync(1, 25, asOf);
 
         Assert.Equal(2, result.TotalCustomers);
         var purchased = Assert.Single(result.Items, item => item.UserId == customer.Id);
-        Assert.Equal(1, purchased.Frequency);
-        Assert.Equal(100m, purchased.MonetaryUsd);
+        Assert.Equal(2, purchased.Frequency);
+        Assert.Equal(200m, purchased.MonetaryUsd);
         Assert.Equal(20, purchased.RecencyDays);
         Assert.Equal(asOf.AddDays(-20), purchased.LastEligibleOrderCreatedAtUtc);
         var coldStart = Assert.Single(result.Items, item => item.UserId == noPurchase.Id);
