@@ -5,6 +5,7 @@ using ECommerce.Application.DTOs.AI;
 using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
 using ECommerce.Domain.Entities;
+using ECommerce.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -109,18 +110,26 @@ public sealed class SemanticSearchService : ISemanticSearchService
     public async Task<AssistantQueryAnalysis> AnalyzeQueryAsync(string query, CancellationToken ct = default)
     {
         var categories = await _db.Categories.AsNoTracking().ToListAsync(ct);
-        var products = await _db.Products.AsNoTracking().ToListAsync(ct);
+        var products = await _db.Products.AsNoTracking()
+            .Where(product => product.Seller != null &&
+                              (product.Seller.Role != UserRole.Seller || product.Seller.SellerStatus == SellerStatus.Approved))
+            .ToListAsync(ct);
         var brands = await _db.Brands.AsNoTracking().ToListAsync(ct);
         var definitions = await _db.AttributeDefinitions.AsNoTracking().Where(definition => definition.IsActive).ToListAsync(ct);
+        var productIds = products.Select(product => product.Id).ToArray();
         var values = await _db.ProductAttributeValues.AsNoTracking()
             .Include(value => value.AttributeDefinition)
-            .Where(value => value.AttributeDefinition.IsActive).ToListAsync(ct);
+            .Where(value => productIds.Contains(value.ProductId) && value.AttributeDefinition.IsActive)
+            .ToListAsync(ct);
         return AssistantQueryAnalyzer.Analyze(query, categories, products, brands, definitions, values, _domainOptions);
     }
 
     public async Task<bool> HasLexicalEvidenceAsync(string query, AssistantChatFilters? filters, CancellationToken ct = default)
     {
-        var dbQuery = _db.Products.AsNoTracking().Include(p => p.Category).Include(p => p.Brand).Include(p => p.Seller).Include(p => p.Reviews).AsQueryable();
+        var dbQuery = _db.Products.AsNoTracking()
+            .Where(product => product.Seller != null &&
+                              (product.Seller.Role != UserRole.Seller || product.Seller.SellerStatus == SellerStatus.Approved))
+            .Include(p => p.Category).Include(p => p.Brand).Include(p => p.Seller).Include(p => p.Reviews).AsQueryable();
         if (filters?.CategoryId is int categoryId) dbQuery = dbQuery.Where(p => p.CategoryId == categoryId);
         if (filters?.SellerId is int sellerId) dbQuery = dbQuery.Where(p => p.SellerId == sellerId);
         if (filters?.MinPrice is decimal minPrice) dbQuery = dbQuery.Where(p => p.Price >= minPrice);
@@ -154,7 +163,10 @@ public sealed class SemanticSearchService : ISemanticSearchService
     public async Task<IReadOnlyList<AssistantRetrievalCandidate>> SearchCandidatesAsync(
         string query, AssistantChatFilters? filters, IReadOnlyList<AssistantTypedConstraint> constraints, int limit, CancellationToken ct = default)
     {
-        var dbQuery = _db.Products.AsNoTracking().Include(p => p.Category).Include(p => p.Brand).Include(p => p.Seller).Include(p => p.Reviews).AsQueryable();
+        var dbQuery = _db.Products.AsNoTracking()
+            .Where(product => product.Seller != null &&
+                              (product.Seller.Role != UserRole.Seller || product.Seller.SellerStatus == SellerStatus.Approved))
+            .Include(p => p.Category).Include(p => p.Brand).Include(p => p.Seller).Include(p => p.Reviews).AsQueryable();
         if (filters?.CategoryId is int categoryId) dbQuery = dbQuery.Where(p => p.CategoryId == categoryId);
         if (filters?.SellerId is int sellerId) dbQuery = dbQuery.Where(p => p.SellerId == sellerId);
         if (filters?.MinPrice is decimal minPrice) dbQuery = dbQuery.Where(p => p.Price >= minPrice);
