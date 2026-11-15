@@ -17,6 +17,16 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>(opt =>
             opt.UseSqlServer(config.GetConnectionString("DefaultConnection")));
 
+
+        services.Configure<GeminiOptions>(config.GetSection(GeminiOptions.SectionName));
+        services.AddSingleton<EmbeddingCacheStore>();
+        services.AddHttpClient<GeminiAssistantProvider>();
+        services.AddScoped<IEmbeddingProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
+        services.AddScoped<IAssistantAnswerProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
+        services.AddScoped<ISemanticSearchService, SemanticSearchService>();
+        services.AddScoped<IAssistantService, AssistantService>();
+        services.AddHostedService<EmbeddingWarmupHostedService>();
+
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services.Configure<JwtSettings>(config.GetSection("Jwt"));
