@@ -6,7 +6,7 @@
 **Base:** `540d296836be789a58ede9db1039447d95a3c9cc`  
 **Verified code head:** `1d526661d2a6ad57538b968d180926dbb5366692`  
 **PR:** #7 — Draft, open, mergeable; not merged  
-**Latest CI run:** [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) — backend/frontend PASS; Windows LocalDB job still in progress. Previous complete run [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496) passed 3/3 jobs at the immediately preceding code head.
+**CI run:** [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) — completed successfully, 3/3 jobs PASS.
 
 ## Scope and ownership
 
@@ -85,7 +85,7 @@ The embedding cache is process-local and is rebuilt after API restart. No vector
 
 ## Verification evidence
 
-Latest run [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) has backend and frontend jobs completed successfully at code head `1d526661d2a6ad57538b968d180926dbb5366692`; its Windows LocalDB job is still running. The previous full run [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496) passed all three jobs at code head `637417747e246de5af53ed45efad523444ff0624`.
+CI run [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) completed successfully at code head `1d526661d2a6ad57538b968d180926dbb5366692`.
 
 | Check | Result |
 |---|---:|
@@ -106,7 +106,7 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 - No live Gemini API execution or API-key validation.
 - No human-reviewed RAG evaluation set, retrieval benchmark, or calibrated ranking weights. Hybrid score weights and thresholds remain deterministic heuristics, not measured quality claims.
 - Catalog retrieval is capped at the first 500 matching products ordered by ascending product ID; products beyond that window are not considered. Embedding cache is in-memory and resets on process restart.
-- Gemini `gemini-embedding-001` has a 2,048-token input limit. Product documents are not currently truncated/chunked before embedding; an oversized document can fail its batch, and the warm-up/retrieval loop stops at the first failed batch. Actual catalog rows have not been scanned for this condition.
+- Gemini `gemini-embedding-001` has a 2,048-token input limit ([Google documentation](https://ai.google.dev/gemini-api/docs/embeddings)). Product documents are not currently truncated/chunked before embedding; an oversized document can fail its batch, and the warm-up/retrieval loop stops at the first failed batch. Actual catalog rows have not been scanned for this condition.
 - Frontend UI integration is implemented and build-verified. The current frontend regression suite contains three existing tests unrelated to the new AI screens; no browser E2E or local UI runtime smoke has been run.
 - No schema/migration, database reset, seeding, import, persistent development database mutation, deployment, or external payment action was performed.
 
@@ -117,4 +117,4 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 - `main` remains at `540d296836be789a58ede9db1039447d95a3c9cc`.
 - Khang/Khánh branches were not modified, merged, rebased, or synchronized.
 
-**Acceptance boundary:** Backend build/tests and frontend build/tests PASS at code head `1d526661d2a6ad57538b968d180926dbb5366692`; the latest Windows LocalDB job is still in progress, while the immediately preceding full CI run passed all 3 jobs. The long-context, whole-token follow-up, and RFM payment-cutoff regressions are covered by backend tests. Live Gemini behavior, RAG relevance/quality, oversized-document behavior, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
+**Acceptance boundary:** CI PASS (3/3 jobs) at code head `1d526661d2a6ad57538b968d180926dbb5366692`: backend build/tests 186 PASS, 3 SKIP; frontend build and 3/3 existing tests PASS; Windows disposable LocalDB tests 2/2 PASS. The long-context, whole-token follow-up, and RFM payment-cutoff regressions are covered by backend tests. Live Gemini behavior, RAG relevance/quality, oversized-document behavior, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
