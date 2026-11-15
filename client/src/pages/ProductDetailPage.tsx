@@ -1,18 +1,21 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import {
-  useAddToCart, useCreateReview, useProduct, useProductReviews, useToggleWishlist,
+  useAddToCart, useCreateReview, useProduct, useProductReviews, useToggleWishlist, useSimilarProducts,
 } from "../api/hooks";
 import { useAuth } from "../store/auth";
 import { apiError } from "../api/client";
 import { Heart } from "lucide-react";
 import { Button, Card, Input, Select, Spinner, Stars, Textarea } from "../components/ui";
+import { ProductCard } from "../components/ProductCard";
+import { RecommendationReasonLabels } from "../components/RecommendationReasonLabels";
 
 export function ProductDetailPage() {
   const { id } = useParams();
   const productId = Number(id);
   const { data: product, isLoading } = useProduct(productId);
   const { data: reviews } = useProductReviews(productId);
+  const { data: similarRecommendations } = useSimilarProducts(productId, 4);
   const addToCart = useAddToCart();
   const toggleWishlist = useToggleWishlist();
   const createReview = useCreateReview(productId);
@@ -99,6 +102,20 @@ export function ProductDetailPage() {
           )}
         </div>
       </Card>
+
+      {similarRecommendations?.items.length ? (
+        <section className="mt-8">
+          <h2 className="text-lg font-semibold mb-4">Sản phẩm tương tự</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {similarRecommendations.items.map((item) => (
+              <div key={item.product.id} className="min-w-0">
+                <ProductCard product={item.product} />
+                <RecommendationReasonLabels reasons={item.reasons} />
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <Card className="mt-8 p-6">
         <h2 className="text-lg font-semibold mb-4">Đánh giá</h2>
