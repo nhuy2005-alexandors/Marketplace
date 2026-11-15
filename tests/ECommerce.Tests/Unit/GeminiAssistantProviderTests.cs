@@ -14,12 +14,16 @@ public sealed class GeminiAssistantProviderTests
     [Fact]
     public async Task EmbedAsync_UsesConfiguredTaskTypeAndReturnsVectorsInInputOrder()
     {
-        HttpRequestMessage? captured = null;
-        var handler = new StubHandler((request, _) =>
+        string? capturedUrl = null;
+        string? capturedApiKey = null;
+        string? capturedBody = null;
+        var handler = new StubHandler(async (request, ct) =>
         {
-            captured = request;
-            return Task.FromResult(JsonResponse(
-                """{"embeddings":[{"values":[0.1,0.2]},{"values":[0.3,0.4]}]}"""));
+            capturedUrl = request.RequestUri!.AbsoluteUri;
+            capturedApiKey = request.Headers.GetValues("x-goog-api-key").Single();
+            capturedBody = await request.Content!.ReadAsStringAsync(ct);
+            return JsonResponse(
+                """{"embeddings":[{"values":[0.1,0.2]},{"values":[0.3,0.4]}]}""");
         });
         using var http = new HttpClient(handler);
         var provider = Provider(http);
@@ -30,11 +34,10 @@ public sealed class GeminiAssistantProviderTests
         Assert.Equal(2, result!.Count);
         Assert.Equal(0.1f, result[0][0], 5);
         Assert.Equal(0.4f, result[1][1], 5);
-        Assert.NotNull(captured);
-        Assert.Contains("batchEmbedContents", captured!.RequestUri!.AbsoluteUri);
-        Assert.Equal("test-api-key", captured.Headers.GetValues("x-goog-api-key").Single());
+        Assert.Contains("batchEmbedContents", capturedUrl);
+        Assert.Equal("test-api-key", capturedApiKey);
 
-        using var body = JsonDocument.Parse(await captured.Content!.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(capturedBody!);
         var requests = body.RootElement.GetProperty("requests");
         Assert.Equal(2, requests.GetArrayLength());
         Assert.Equal("RETRIEVAL_QUERY", requests[0].GetProperty("taskType").GetString());
@@ -59,11 +62,13 @@ public sealed class GeminiAssistantProviderTests
               ]
             }
             """;
-        HttpRequestMessage? captured = null;
-        var handler = new StubHandler((request, _) =>
+        string? capturedUrl = null;
+        string? capturedBody = null;
+        var handler = new StubHandler(async (request, ct) =>
         {
-            captured = request;
-            return Task.FromResult(JsonResponse(responseBody));
+            capturedUrl = request.RequestUri!.AbsoluteUri;
+            capturedBody = await request.Content!.ReadAsStringAsync(ct);
+            return JsonResponse(responseBody);
         });
         using var http = new HttpClient(handler);
         var provider = Provider(http);
@@ -77,10 +82,9 @@ public sealed class GeminiAssistantProviderTests
         Assert.NotNull(result);
         Assert.Equal("Tai nghe này phù hợp.", result!.Answer);
         Assert.Equal([10, 11, 999], result.SourceProductIds);
-        Assert.NotNull(captured);
-        Assert.Contains("gemini-3.8-flash:generateContent", captured!.RequestUri!.AbsoluteUri);
+        Assert.Contains("gemini-3.8-flash:generateContent", capturedUrl);
 
-        using var body = JsonDocument.Parse(await captured.Content!.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(capturedBody!);
         Assert.False(body.RootElement.GetProperty("generationConfig").TryGetProperty("temperature", out _));
         Assert.Equal("application/json",
             body.RootElement.GetProperty("generationConfig").GetProperty("responseMimeType").GetString());
