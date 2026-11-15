@@ -35,7 +35,7 @@ export function Navbar() {
     e.preventDefault();
     const query = search.trim();
     if (query) {
-      trackSearch(query);
+      trackSearch(query, user?.id ?? null);
       navigate(`/products?search=${encodeURIComponent(query)}`);
     } else {
       navigate("/products");

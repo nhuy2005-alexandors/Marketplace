@@ -1,40 +1,39 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import {
-  useAddToCart, useCreateReview, useProduct, useProducts, useProductReviews, useToggleWishlist,
+  useAddToCart, useCreateReview, useProduct, useProductReviews, useSimilarProducts, useToggleWishlist,
 } from "../api/hooks";
 import { useAuth } from "../store/auth";
 import { apiError } from "../api/client";
 import { Heart, Sparkles } from "lucide-react";
 import { Button, Card, Input, Select, Spinner, Stars, Textarea } from "../components/ui";
 import { ProductCard } from "../components/ProductCard";
+import { RecommendationReasonLabels } from "../components/RecommendationReasonLabels";
 import { useRecommendationStore } from "../store/recommendation";
-import { computeSimilarProducts } from "../services/recommendationService";
 
 export function ProductDetailPage() {
   const { id } = useParams();
   const productId = Number(id);
+  const userId = useAuth((s) => s.user?.id ?? null);
   const { data: product, isLoading } = useProduct(productId);
-  const { data: allProductsData } = useProducts({ page: 1, pageSize: 30 });
+  const { data: similarResponse } = useSimilarProducts(productId, 4);
   const { data: reviews } = useProductReviews(productId);
   const addToCart = useAddToCart();
   const toggleWishlist = useToggleWishlist();
   const createReview = useCreateReview(productId);
   const isAuthed = useAuth((s) => s.user?.role === "Customer");
   const trackView = useRecommendationStore((s) => s.trackView);
+  const setOwnerUserId = useRecommendationStore((s) => s.setOwnerUserId);
 
-  // Ghi nhận lượt xem sản phẩm cho recommendation engine
+  useEffect(() => {
+    setOwnerUserId(userId);
+  }, [setOwnerUserId, userId]);
+
   useEffect(() => {
     if (productId) {
-      trackView(productId);
+      trackView(productId, userId);
     }
-  }, [productId, trackView]);
-
-  // Tính toán sản phẩm tương tự kiểu Netflix
-  const similarProducts = useMemo(() => {
-    if (!product || !allProductsData?.items) return [];
-    return computeSimilarProducts(product, allProductsData.items, 4);
-  }, [product, allProductsData]);
+  }, [productId, trackView, userId]);
 
   const [qty, setQty] = useState(1);
   const [rating, setRating] = useState(5);
@@ -128,7 +127,7 @@ export function ProductDetailPage() {
       </Card>
 
       {/* Sản phẩm tương tự (Gợi ý AI phong cách Netflix) */}
-      {similarProducts.length > 0 && (
+      {(similarResponse?.items.length ?? 0) > 0 && (
         <section className="mt-8 space-y-4">
           <div className="flex items-center gap-2">
             <span className="grid place-items-center w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
@@ -139,14 +138,17 @@ export function ProductDetailPage() {
                 Sản phẩm tương tự bạn có thể thích
               </h2>
               <p className="text-xs muted">
-                Gợi ý cùng nhóm tính năng và tầm giá tương đương với "{product.name}"
+                Gợi ý cùng danh mục và mức giá tương đối gần với "{product.name}"
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {similarProducts.map((p) => (
-              <ProductCard key={p.id} product={p} />
+            {similarResponse?.items.map((item) => (
+              <div key={item.product.id}>
+                <ProductCard product={item.product} />
+                <RecommendationReasonLabels reasons={item.reasons} />
+              </div>
             ))}
           </div>
         </section>

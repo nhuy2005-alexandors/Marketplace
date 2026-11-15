@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Flame, Headphones, PackageCheck, ShieldCheck, Shirt, ShoppingBag, Sparkles, Star, Tag, Truck } from "lucide-react";
-import { useActiveCoupons, useCategories, useProducts, useOrders, useWishlist, useCart } from "../api/hooks";
+import { useActiveCoupons, useCategories, useProduct, useProducts, usePersonalizedRecommendations, useSimilarProducts } from "../api/hooks";
 import { useAuth } from "../store/auth";
 import { ProductCard } from "../components/ProductCard";
 import { HeroBanners } from "../components/home/HeroBanners";
@@ -9,14 +9,10 @@ import { FlashSale } from "../components/home/FlashSale";
 import { LowStockSection, ProductSection } from "../components/home/ProductSection";
 import { RecommendationSection } from "../components/home/RecommendationSection";
 import { Spinner } from "../components/ui";
-import type { Category } from "../types";
+import type { Category, RecommendationStrategy } from "../types";
 import { useRecommendationStore } from "../store/recommendation";
-import {
-  buildUserProfileFromData,
-  computePersonalizedRecommendations,
-  computeSimilarProducts,
-} from "../services/recommendationService";
-import { useMemo, useEffect } from "react";
+import { strategyReason } from "../api/sessionIsolation";
+import { useEffect } from "react";
 
 const CATEGORY_ICONS = [ShoppingBag, Shirt, Sparkles, Headphones, Tag];
 
@@ -40,85 +36,46 @@ function CategoryCircle({ category, index }: { category: Category; index: number
 
 export function HomePage() {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const { data: categories } = useCategories();
   const { data: coupons } = useActiveCoupons();
-  const { data: featured, isLoading } = useProducts({ page: 1, pageSize: 20, sortBy: "price", desc: true });
+  const { data: featured, isLoading } = useProducts({ page: 1, pageSize: 20, sortBy: "createdAt", desc: true });
   const { data: topRated } = useProducts({ page: 1, pageSize: 5, sortBy: "rating", desc: true });
   const { data: newest } = useProducts({ page: 1, pageSize: 10, sortBy: "createdAt", desc: true });
   const { data: lowStock } = useProducts({ page: 1, pageSize: 8, sortBy: "stock", desc: false });
+  const personalized = usePersonalizedRecommendations(8);
+  const store = useRecommendationStore();
+  const ownsStore = store.ownerUserId === userId;
+  const viewedProductIds = ownsStore ? store.viewedProductIds : [];
+  const sessionSearches = ownsStore ? store.sessionSearches : [];
 
-  // Tín hiệu người dùng để phục vụ Recommendation Engine
-  const isCustomer = user?.role === "Customer";
-  const { data: myOrders } = useOrders(1, 20);
-  const { data: wishlist } = useWishlist();
-  const { data: cart } = useCart();
-
-  const {
-    sessionSearches,
-    viewedProductIds,
-    activeRecommendations,
-    recommendationReason,
-    recommendationType,
-    setRecommendations,
-  } = useRecommendationStore();
-
-  const allAvailableProducts = useMemo(() => {
-    return featured?.items ?? [];
-  }, [featured]);
-
-  // Tính toán đề xuất cá nhân hóa kiểu Netflix
-  const recommendationResult = useMemo(() => {
-    if (allAvailableProducts.length === 0) {
-      return { products: [], reason: "", type: "trending" as const };
-    }
-
-    const wishlistIds = wishlist?.map((w) => w.productId) ?? [];
-    const cartIds = cart?.items.map((i) => i.productId) ?? [];
-    const ordersList = isCustomer && myOrders?.items ? myOrders.items : [];
-
-    const profile = buildUserProfileFromData(
-      user?.id,
-      user?.fullName,
-      ordersList,
-      wishlistIds,
-      cartIds,
-      sessionSearches,
-      viewedProductIds,
-      allAvailableProducts
-    );
-
-    return computePersonalizedRecommendations(allAvailableProducts, profile, 8);
-  }, [
-    allAvailableProducts,
-    isCustomer,
-    myOrders,
-    wishlist,
-    cart,
-    sessionSearches,
-    viewedProductIds,
-    user,
-  ]);
-
-  // Cập nhật kết quả vào Zustand store dùng chung cho cả Màn hình và ChatBot
   useEffect(() => {
-    if (recommendationResult.products.length > 0) {
-      setRecommendations(
-        recommendationResult.products,
-        recommendationResult.reason,
-        recommendationResult.type
-      );
-    }
-  }, [recommendationResult, setRecommendations]);
+    store.setOwnerUserId(userId);
+  }, [store.ownerUserId, store.setOwnerUserId, userId]);
 
-  // Tính toán khối "Vì bạn vừa xem..." nếu có sản phẩm vừa xem
-  const similarToLastViewed = useMemo(() => {
-    if (viewedProductIds.length === 0 || allAvailableProducts.length === 0) return null;
-    const lastId = viewedProductIds[viewedProductIds.length - 1];
-    const source = allAvailableProducts.find((p) => p.id === lastId);
-    if (!source) return null;
-    const similarItems = computeSimilarProducts(source, allAvailableProducts, 5);
-    return { sourceProduct: source, similarItems };
-  }, [viewedProductIds, allAvailableProducts]);
+  const lastViewedId = viewedProductIds.at(-1) ?? 0;
+  const { data: lastViewedProduct } = useProduct(lastViewedId);
+  const similarToLastViewedQuery = useSimilarProducts(lastViewedId, 5);
+  const similarToLastViewed = lastViewedProduct && similarToLastViewedQuery.data?.items.length
+    ? { sourceProduct: lastViewedProduct, similarItems: similarToLastViewedQuery.data.items }
+    : null;
+
+  const recommendationResponse = personalized.data;
+  const recommendationItems = recommendationResponse?.items ?? [];
+  const recommendationStrategy: RecommendationStrategy = recommendationResponse?.strategy ?? "no_signal";
+  const sessionStrategy = recommendationStrategy === "similar" || recommendationStrategy === "similar_no_match"
+    ? "no_signal"
+    : recommendationStrategy;
+
+  useEffect(() => {
+    if (!recommendationResponse) return;
+    store.setRecommendations(
+      recommendationResponse.items.map((item) => item.product),
+      strategyReason(sessionStrategy),
+      sessionStrategy,
+      userId,
+    );
+  }, [recommendationResponse, sessionStrategy, store.setRecommendations, userId]);
 
   const heroProducts = featured?.items ?? [];
   const flashProducts = newest?.items.slice(0, 8) ?? [];
@@ -162,11 +119,12 @@ export function HomePage() {
 
       <FlashSale products={flashProducts} />
 
-      {/* Khối gợi ý AI cá nhân hóa (Netflix-style Recommendation) */}
+      {/* Recommendation service response */}
       <RecommendationSection
-        products={activeRecommendations.length > 0 ? activeRecommendations : recommendationResult.products}
-        reason={recommendationReason || recommendationResult.reason}
-        type={recommendationType || recommendationResult.type}
+        recommendations={recommendationItems}
+        strategy={sessionStrategy}
+        sessionSearches={sessionSearches}
+        onClearHistory={() => store.clearHistory(userId)}
         similarToLastViewed={similarToLastViewed}
       />
 

@@ -30,6 +30,32 @@ export interface Product {
   reviewCount: number;
 }
 
+export type RecommendationStrategy =
+  | "personalized"
+  | "popular"
+  | "top_rated"
+  | "no_signal"
+  | "empty_catalog"
+  | "similar"
+  | "similar_no_match";
+
+export interface RecommendationReason {
+  code: string;
+  label: string;
+}
+
+export interface RecommendedProduct {
+  product: Product;
+  score: number;
+  reasons: RecommendationReason[];
+}
+
+export interface RecommendationResponse {
+  strategy: RecommendationStrategy;
+  generatedAtUtc: string;
+  items: RecommendedProduct[];
+}
+
 export interface Category {
   id: number;
   name: string;

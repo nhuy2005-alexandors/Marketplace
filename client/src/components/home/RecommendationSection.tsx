@@ -1,30 +1,41 @@
 import { Link } from "react-router-dom";
 import { Sparkles, Bot, ArrowRight, RefreshCw, Eye } from "lucide-react";
-import type { Product } from "../../types";
+import type { Product, RecommendationStrategy, RecommendedProduct } from "../../types";
 import { ProductCard } from "../ProductCard";
-import { useRecommendationStore } from "../../store/recommendation";
+import { RecommendationReasonLabels } from "../RecommendationReasonLabels";
+import { strategyBadge, strategyReason } from "../../api/sessionIsolation";
 
 interface RecommendationSectionProps {
-  products: Product[];
-  reason: string;
-  type: "personalized" | "search_intent" | "collaborative" | "trending";
+  recommendations: RecommendedProduct[];
+  strategy: RecommendationStrategy;
+  sessionSearches: string[];
+  onClearHistory: () => void;
   onRefresh?: () => void;
   similarToLastViewed?: {
     sourceProduct: Product;
-    similarItems: Product[];
+    similarItems: RecommendedProduct[];
   } | null;
 }
 
 export function RecommendationSection({
-  products,
-  reason,
-  type,
+  recommendations,
+  strategy,
+  sessionSearches,
+  onClearHistory,
   onRefresh,
   similarToLastViewed,
 }: RecommendationSectionProps) {
-  const { sessionSearches, clearHistory } = useRecommendationStore();
+  const displayStrategy = strategy === "similar" || strategy === "similar_no_match" ? "no_signal" : strategy;
+  const reason = strategyReason(displayStrategy);
+  const title = displayStrategy === "personalized"
+    ? "Gợi ý phù hợp với bạn"
+    : displayStrategy === "popular"
+      ? "Sản phẩm phổ biến"
+      : displayStrategy === "top_rated"
+        ? "Sản phẩm được đánh giá cao"
+        : "Gợi ý sản phẩm";
 
-  if (products.length === 0 && (!similarToLastViewed || similarToLastViewed.similarItems.length === 0)) {
+  if (recommendations.length === 0 && (!similarToLastViewed || similarToLastViewed.similarItems.length === 0)) {
     return null;
   }
 
@@ -39,7 +50,7 @@ export function RecommendationSection({
   return (
     <div className="space-y-8 animate-fade-in">
       {/* 1. KHỐI GỢI Ý CHÍNH: DÀNH RIÊNG CHO BẠN (NETFLIX STYLE) */}
-      {products.length > 0 && (
+      {recommendations.length > 0 && (
         <section className="rounded-3xl p-5 sm:p-6 bg-gradient-to-br from-indigo-50/80 via-white to-sky-50/50 dark:from-slate-900/90 dark:via-slate-900/60 dark:to-indigo-950/40 border border-indigo-100/80 dark:border-indigo-900/40 shadow-sm relative overflow-hidden">
           {/* Background decorative glow */}
           <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-gradient-to-br from-indigo-400/10 to-sky-400/10 blur-3xl pointer-events-none" />
@@ -52,9 +63,9 @@ export function RecommendationSection({
                   <Sparkles className="w-4 h-4" />
                 </span>
                 <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                  Gợi ý dành riêng cho bạn
+                  {title}
                   <span className="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                    {type === "personalized" ? "Cá nhân hóa" : type === "search_intent" ? "Theo tìm kiếm" : "AI Match"}
+                    {strategyBadge(displayStrategy)}
                   </span>
                 </h2>
               </div>
@@ -81,7 +92,7 @@ export function RecommendationSection({
               )}
               {sessionSearches.length > 0 && (
                 <button
-                  onClick={clearHistory}
+                  onClick={onClearHistory}
                   title="Xóa lịch sử tìm kiếm cá nhân hóa"
                   className="px-2.5 py-1.5 text-xs rounded-xl text-slate-400 hover:text-rose-500 transition"
                 >
@@ -99,13 +110,14 @@ export function RecommendationSection({
 
           {/* Grid sản phẩm gợi ý */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 relative z-10">
-            {products.slice(0, 8).map((p) => (
-              <div key={p.id} className="relative group/rec flex flex-col">
-                <ProductCard product={p} />
+            {recommendations.slice(0, 8).map((item) => (
+              <div key={item.product.id} className="relative group/rec flex flex-col">
+                <ProductCard product={item.product} />
+                <RecommendationReasonLabels reasons={item.reasons} />
                 
                 {/* Nút hành động nhanh: Hỏi Chatbot về sản phẩm này */}
                 <button
-                  onClick={() => handleAskBot(p.name)}
+                  onClick={() => handleAskBot(item.product.name)}
                   className="mt-1.5 w-full py-1 px-2 text-[11px] font-medium rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60 flex items-center justify-center gap-1.5 transition active:scale-98"
                 >
                   <Bot className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
@@ -132,14 +144,17 @@ export function RecommendationSection({
                     "{similarToLastViewed.sourceProduct.name}"
                   </span>
                 </h3>
-                <p className="text-xs muted">Gợi ý sản phẩm cùng nhóm tính năng và tầm giá tương đương</p>
+              <p className="text-xs muted">Sản phẩm cùng danh mục và có giá tương đối gần</p>
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {similarToLastViewed.similarItems.map((p) => (
-              <ProductCard key={p.id} product={p} />
+            {similarToLastViewed.similarItems.map((item) => (
+              <div key={item.product.id}>
+                <ProductCard product={item.product} />
+                <RecommendationReasonLabels reasons={item.reasons} />
+              </div>
             ))}
           </div>
         </section>

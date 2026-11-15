@@ -1,72 +1,92 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Product } from "../types";
+import {
+  emptyRecommendationSession,
+  resetRecommendationSession,
+  type RecommendationSessionData,
+} from "../api/sessionIsolation";
 
-interface RecommendationState {
-  sessionSearches: string[];
-  viewedProductIds: number[];
-  activeRecommendations: Product[];
-  recommendationReason: string;
-  recommendationType: "personalized" | "search_intent" | "collaborative" | "trending";
-
-  trackSearch: (query: string) => void;
-  trackView: (productId: number) => void;
+interface RecommendationState extends RecommendationSessionData {
+  trackSearch: (query: string, userId: number | null) => void;
+  trackView: (productId: number, userId: number | null) => void;
+  setOwnerUserId: (userId: number | null) => void;
   setRecommendations: (
     products: Product[],
     reason: string,
-    type: "personalized" | "search_intent" | "collaborative" | "trending"
+    type: RecommendationSessionData["recommendationType"],
+    userId: number | null,
   ) => void;
-  clearHistory: () => void;
+  resetForIdentity: (userId: number | null) => void;
+  clearHistory: (userId: number | null) => void;
 }
 
 export const useRecommendationStore = create<RecommendationState>()(
   persist(
     (set) => ({
-      sessionSearches: [],
-      viewedProductIds: [],
-      activeRecommendations: [],
-      recommendationReason: "Sản phẩm được gợi ý cho bạn",
-      recommendationType: "trending",
+      ...emptyRecommendationSession(null),
 
-      trackSearch: (query: string) => {
+      trackSearch: (query, userId) => {
         const trimmed = query.trim();
         if (!trimmed) return;
         set((state) => {
-          const filtered = state.sessionSearches.filter(
-            (q) => q.toLowerCase() !== trimmed.toLowerCase()
+          const current = resetRecommendationSession(state, userId);
+          const filtered = current.sessionSearches.filter(
+            (item) => item.toLowerCase() !== trimmed.toLowerCase(),
           );
-          // Lưu tối đa 8 tìm kiếm gần nhất
-          return { sessionSearches: [...filtered, trimmed].slice(-8) };
+          return { ...current, sessionSearches: [...filtered, trimmed].slice(-8) };
         });
       },
 
-      trackView: (productId: number) => {
+      trackView: (productId, userId) => {
         if (!productId) return;
         set((state) => {
-          const filtered = state.viewedProductIds.filter((id) => id !== productId);
-          // Lưu tối đa 10 sản phẩm xem gần nhất
-          return { viewedProductIds: [...filtered, productId].slice(-10) };
+          const current = resetRecommendationSession(state, userId);
+          const filtered = current.viewedProductIds.filter((id) => id !== productId);
+          return { ...current, viewedProductIds: [...filtered, productId].slice(-10) };
         });
       },
 
-      setRecommendations: (products, reason, type) => {
-        set({
+      setOwnerUserId: (userId) => {
+        set((state) => ({ ...resetRecommendationSession(state, userId) }));
+      },
+
+      setRecommendations: (products, reason, type, userId) => {
+        set((state) => ({
+          ...resetRecommendationSession(state, userId),
           activeRecommendations: products,
           recommendationReason: reason,
           recommendationType: type,
-        });
+        }));
       },
 
-      clearHistory: () => {
+      resetForIdentity: (userId) => {
+        set((state) => ({ ...resetRecommendationSession(state, userId) }));
+      },
+
+      clearHistory: (userId) => {
+        const empty = emptyRecommendationSession(userId);
         set({
-          sessionSearches: [],
-          viewedProductIds: [],
-          activeRecommendations: [],
+          ownerUserId: empty.ownerUserId,
+          sessionSearches: empty.sessionSearches,
+          viewedProductIds: empty.viewedProductIds,
+          activeRecommendations: empty.activeRecommendations,
+          recommendationReason: empty.recommendationReason,
+          recommendationType: empty.recommendationType,
         });
       },
     }),
     {
       name: "minishop-recommendations",
-    }
-  )
+      version: 2,
+      // Recommendations are fetched again per identity; do not hydrate another session's cards into ChatBot.
+      partialize: (state) => ({
+        ownerUserId: state.ownerUserId,
+        sessionSearches: state.sessionSearches,
+        viewedProductIds: state.viewedProductIds,
+      }),
+      // v1 persisted cards without an owner, so discard them instead of guessing whose they were.
+      migrate: () => emptyRecommendationSession(null),
+    },
+  ),
 );

@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
   AuthResponse, Cart, Category, Coupon, CouponPreview, Dashboard, Order, Paged, PayResult,
-  OrderSplit, Product, Review, SellerApplication, SellerShop, User, WishlistItem,
+  OrderSplit, Product, RecommendationResponse, Review, SellerApplication, SellerShop, User, WishlistItem,
 } from "../types";
 import { useAuth } from "../store/auth";
+import { privateQueryKeys } from "./sessionIsolation";
 
 // ---- Auth ----
 export function useRegister() {
@@ -165,59 +166,72 @@ export function useCreateReview(productId: number) {
 
 // ---- Cart ----
 export function useCart() {
-  return useQuery({ queryKey: ["cart"], queryFn: () => api.get<Cart>("/cart").then((r) => r.data) });
+  const userId = useAuth((state) => state.user?.id ?? null);
+  const isCustomer = useAuth((state) => state.user?.role === "Customer");
+  return useQuery({
+    queryKey: privateQueryKeys.cart(userId),
+    queryFn: () => api.get<Cart>("/cart").then((r) => r.data),
+    enabled: userId !== null && isCustomer,
+  });
 }
 
 export function useAddToCart() {
   const qc = useQueryClient();
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useMutation({
     mutationFn: (body: { productId: number; quantity: number }) =>
       api.post<Cart>("/cart/items", body).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cart"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: privateQueryKeys.cart(userId) }),
   });
 }
 
 export function useUpdateCartItem() {
   const qc = useQueryClient();
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useMutation({
     mutationFn: ({ id, quantity }: { id: number; quantity: number }) =>
       api.put<Cart>(`/cart/items/${id}`, { quantity }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cart"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: privateQueryKeys.cart(userId) }),
   });
 }
 
 export function useRemoveCartItem() {
   const qc = useQueryClient();
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useMutation({
     mutationFn: (id: number) => api.delete<Cart>(`/cart/items/${id}`).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cart"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: privateQueryKeys.cart(userId) }),
   });
 }
 
 // ---- Orders ----
 export function useOrders(page = 1, pageSize = 10) {
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useQuery({
-    queryKey: ["orders", page, pageSize],
+    queryKey: privateQueryKeys.orders(userId, page, pageSize),
     queryFn: () => api.get<Paged<Order>>("/orders", { params: { page, pageSize } }).then((r) => r.data),
+    enabled: userId !== null,
   });
 }
 
 export function useOrder(id: number) {
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useQuery({
-    queryKey: ["order", id],
+    queryKey: privateQueryKeys.order(userId, id),
     queryFn: () => api.get<Order>(`/orders/${id}`).then((r) => r.data),
-    enabled: !!id,
+    enabled: !!id && userId !== null,
   });
 }
 
 export function useCheckout() {
   const qc = useQueryClient();
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useMutation({
     mutationFn: (body: { shippingAddress: string; couponCode?: string }) =>
       api.post<Order>("/orders", body).then((r) => r.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["cart"] });
-      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: privateQueryKeys.cart(userId) });
+      qc.invalidateQueries({ queryKey: privateQueryKeys.orders(userId) });
     },
   });
 }
@@ -225,18 +239,39 @@ export function useCheckout() {
 // method: mock | cod | momo. Trả requiresRedirect=true kèm redirectUrl khi cần chuyển sang cổng.
 export function usePayOrder() {
   const qc = useQueryClient();
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useMutation({
     mutationFn: ({ id, method, returnUrl }: { id: number; method: string; returnUrl?: string }) =>
       api.post<PayResult>(`/orders/${id}/pay`, { method, returnUrl }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: privateQueryKeys.orders(userId) }),
   });
 }
 
 export function useOrderSplit(id: number, enabled = true) {
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useQuery({
-    queryKey: ["order-split", id],
+    queryKey: privateQueryKeys.orderSplit(userId, id),
     queryFn: () => api.get<OrderSplit>(`/orders/${id}/split`).then((r) => r.data),
-    enabled: !!id && enabled,
+    enabled: !!id && enabled && userId !== null,
+  });
+}
+
+export function usePersonalizedRecommendations(limit = 8) {
+  const userId = useAuth((state) => state.user?.id ?? null);
+  return useQuery({
+    queryKey: privateQueryKeys.recommendations(userId, limit),
+    queryFn: () => api.get<RecommendationResponse>("/recommendations/personalized", { params: { limit } }).then((r) => r.data),
+    staleTime: 60_000,
+  });
+}
+
+export function useSimilarProducts(productId: number, limit = 8) {
+  const userId = useAuth((state) => state.user?.id ?? null);
+  return useQuery({
+    queryKey: privateQueryKeys.similarProducts(userId, productId, limit),
+    queryFn: () => api.get<RecommendationResponse>(`/recommendations/similar-products/${productId}`, { params: { limit } }).then((r) => r.data),
+    enabled: productId > 0,
+    staleTime: 60_000,
   });
 }
 
@@ -299,18 +334,22 @@ export function useUpdateOrderStatus() {
 
 // ---- Wishlist ----
 export function useWishlist() {
+  const userId = useAuth((state) => state.user?.id ?? null);
+  const isCustomer = useAuth((state) => state.user?.role === "Customer");
   return useQuery({
-    queryKey: ["wishlist"],
+    queryKey: privateQueryKeys.wishlist(userId),
     queryFn: () => api.get<WishlistItem[]>("/wishlist").then((r) => r.data),
+    enabled: userId !== null && isCustomer,
   });
 }
 
 export function useToggleWishlist() {
   const qc = useQueryClient();
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useMutation({
     mutationFn: ({ productId, add }: { productId: number; add: boolean }) =>
       add ? api.post(`/wishlist/${productId}`) : api.delete(`/wishlist/${productId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["wishlist"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: privateQueryKeys.wishlist(userId) }),
   });
 }
 
@@ -340,16 +379,20 @@ export function useApproveSeller() {
 
 // ---- Seller ----
 export function useSellerDashboard() {
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useQuery({
-    queryKey: ["seller-dashboard"],
+    queryKey: privateQueryKeys.sellerDashboard(userId),
     queryFn: () => api.get<Dashboard>("/seller/dashboard").then((r) => r.data),
+    enabled: userId !== null,
   });
 }
 
 export function useSellerOrders(page = 1, pageSize = 10) {
+  const userId = useAuth((state) => state.user?.id ?? null);
   return useQuery({
-    queryKey: ["seller-orders", page, pageSize],
+    queryKey: privateQueryKeys.sellerOrders(userId, page, pageSize),
     queryFn: () => api.get<Paged<Order>>("/seller/orders", { params: { page, pageSize } }).then((r) => r.data),
+    enabled: userId !== null,
   });
 }
 
@@ -369,14 +412,16 @@ export function useUpdateItemStatus() {
 // cập nhật mà không cần logout/login lại.
 export function useMe() {
   const token = useAuth((s) => s.token);
+  const userId = useAuth((s) => s.user?.id ?? null);
   const setUser = useAuth((s) => s.setUser);
   return useQuery({
-    queryKey: ["me"],
+    queryKey: privateQueryKeys.me(userId),
     queryFn: async () => {
       const user = await api.get<User>("/auth/me").then((r) => r.data);
-      setUser(user);
+      // A late response from a previous identity must not switch the active account back.
+      if (useAuth.getState().user?.id === userId) setUser(user);
       return user;
     },
-    enabled: !!token,
+    enabled: !!token && userId !== null,
   });
 }
