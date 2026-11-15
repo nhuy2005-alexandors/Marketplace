@@ -2,6 +2,7 @@ using ECommerce.Application.DTOs.AI;
 using ECommerce.Application.DTOs.Catalog;
 using ECommerce.Application.Interfaces;
 using ECommerce.Domain.Entities;
+using ECommerce.Domain.Enums;
 using ECommerce.Infrastructure.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -44,8 +45,16 @@ public sealed class AiRagRemediationTests
         await using var db = TestDb.Create();
         var audio = new Category { Id = 1, Name = "Audio" };
         var accessories = new Category { Id = 2, Name = "Accessories" };
-        var seller10 = new User { Id = 10, Email = "seller@example.test", PasswordHash = "test-hash", FullName = "Seller", ShopName = "Demo shop" };
-        var seller11 = new User { Id = 11, Email = "seller2@example.test", PasswordHash = "test-hash", FullName = "Seller 2", ShopName = "Demo shop 2" };
+        var seller10 = new User
+        {
+            Id = 10, Email = "seller@example.test", PasswordHash = "test-hash", FullName = "Seller",
+            ShopName = "Demo shop", Role = UserRole.Seller, SellerStatus = SellerStatus.Approved
+        };
+        var seller11 = new User
+        {
+            Id = 11, Email = "seller2@example.test", PasswordHash = "test-hash", FullName = "Seller 2",
+            ShopName = "Demo shop 2", Role = UserRole.Seller, SellerStatus = SellerStatus.Pending
+        };
         db.Categories.AddRange(audio, accessories);
         db.Users.AddRange(seller10, seller11);
         db.Products.AddRange(
@@ -64,6 +73,9 @@ public sealed class AiRagRemediationTests
         Assert.Equal(1, results[0].Product.Id);
         Assert.InRange(results[0].Product.Price, 20, 30);
         Assert.True(results[0].Product.Stock > 0);
+
+        var unfiltered = await service.SearchCandidatesAsync("wireless headphones", null, 8);
+        Assert.DoesNotContain(unfiltered, result => result.Product.Id == 3);
     }
 
     [Fact]
@@ -166,6 +178,25 @@ public sealed class AiRagRemediationTests
         Assert.Equal("no-evidence", response.AnswerSource);
         Assert.Equal(0, search.CallCount);
         Assert.Equal(0, answers.CallCount);
+    }
+
+    [Fact]
+    public async Task Assistant_StrictEvidenceRejectsCommonCatalogOverlapWithoutProductEvidence()
+    {
+        var search = new FakeSearch([Candidate(ProductDto(3, "Unrelated demo product"))])
+        {
+            Analysis = new AssistantQueryAnalysis([], true, false, [])
+        };
+        var service = new AssistantService(search, new FakeAnswerProvider(null), new FakeRecommendationProvider(),
+            NullLogger<AssistantService>.Instance,
+            geminiOptions: Options.Create(new GeminiOptions { StrictEvidenceEnabled = true }));
+
+        var response = await service.ChatAsync(new AssistantChatRequest("show me a quiet green valley"), null);
+
+        Assert.Empty(response.Products);
+        Assert.Empty(response.Sources);
+        Assert.Equal("no-evidence", response.AnswerSource);
+        Assert.Equal(0, search.CallCount);
     }
 
     [Fact]
@@ -463,6 +494,22 @@ public sealed class AiRagRemediationTests
         Assert.Equal("new_topic", newTopic.Action);
         Assert.Equal("Tìm laptop gaming", newTopic.Query);
         Assert.DoesNotContain(RetrievalScoring.Normalize("FictionBrand 07"), RetrievalScoring.Normalize(newTopic.Query), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AssistantContextualizerV2_PrefersExplicitColorFollowUpOverProductTermMatch()
+    {
+        var turns = new[]
+        {
+            new AssistantConversationTurn("user", "Tìm tai nghe Sony"),
+            new AssistantConversationTurn("assistant", "Có một số tai nghe Sony phù hợp.")
+        };
+
+        var result = AssistantContextualizer.ContextualizeQueryV2(
+            "Có màu trắng không?", turns, hasNewProductTerm: true, hasTypedConstraint: false, ["mau trang"]);
+
+        Assert.Equal("followup", result.Action);
+        Assert.Contains("tai nghe sony", RetrievalScoring.Normalize(result.Query), StringComparison.Ordinal);
     }
 
     [Fact]
