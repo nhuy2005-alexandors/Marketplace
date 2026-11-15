@@ -34,6 +34,9 @@ public sealed class RfmService : IRfmService
             .Where(order => EligibleOrderStatuses.Contains(order.Status) &&
                             order.Payment != null &&
                             order.Payment.Status == PaymentStatus.Completed &&
+                            !order.Payment.IsDemo &&
+                            !order.Payment.RequiresReconciliation &&
+                            !order.RefundPending &&
                             order.CreatedAt < asOf &&
                             order.Payment.CreatedAt < asOf &&
                             order.Items.Any(item => item.Status != FulfillmentStatus.Cancelled))
