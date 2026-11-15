@@ -7,6 +7,7 @@ import { VoucherStrip } from "../components/home/VoucherStrip";
 import { FlashSale } from "../components/home/FlashSale";
 import { LowStockSection, ProductSection } from "../components/home/ProductSection";
 import { Spinner } from "../components/ui";
+import { RecommendationStrip } from "../components/home/RecommendationStrip";
 import type { Category } from "../types";
 
 const CATEGORY_ICONS = [ShoppingBag, Shirt, Sparkles, Headphones, Tag];
@@ -78,6 +79,8 @@ export function HomePage() {
       )}
 
       <FlashSale products={flashProducts} />
+
+      <RecommendationStrip />
 
       {topRated && <ProductSection title="Được yêu thích nhất" icon={Star} products={topRated.items} to="/products?sortBy=rating&desc=true" />}
 
