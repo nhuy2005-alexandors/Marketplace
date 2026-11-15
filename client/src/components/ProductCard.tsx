@@ -34,6 +34,7 @@ export function ProductCard({ product }: { product: Product }) {
         <Link to={`/products/${product.id}`} className="font-semibold hover:text-brand-600 dark:hover:text-brand-400 line-clamp-1 transition-colors">
           {product.name}
         </Link>
+        {product.brandName && <div className="muted text-xs mt-1 truncate">{product.brandName}</div>}
         <div className="flex items-center justify-between text-xs mt-1">
           <span className="muted">{product.categoryName}</span>
           <Link to={`/shop/${product.sellerId}`} className="inline-flex items-center gap-1 muted truncate max-w-[45%] hover:text-brand-600 dark:hover:text-brand-400 transition-colors" title={product.sellerShopName}><Store className="w-3.5 h-3.5 shrink-0" aria-hidden /> <span className="truncate">{product.sellerShopName}</span></Link>

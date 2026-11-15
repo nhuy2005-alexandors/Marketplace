@@ -43,6 +43,9 @@ public class RefundService : IRefundService
             return Result.Fail<RefundDto>("COD refunds are not supported until cash collection is recorded.", ErrorType.Conflict);
         if (order.Payment.Amount <= 0 || order.Payment.Amount != order.Total)
             return Result.Fail<RefundDto>("The captured payment amount does not match the order total.", ErrorType.Conflict);
+        if (order.Payment.ProviderAmount is null or <= 0 ||
+            string.IsNullOrWhiteSpace(order.Payment.ProviderCurrency))
+            return Result.Fail<RefundDto>("Original provider capture amount/currency is unavailable; the refund cannot be verified.", ErrorType.Conflict);
         if (order.Items.Count == 0 || order.Items.Any(i => i.Status != FulfillmentStatus.Pending))
             return Result.Fail<RefundDto>("A full refund can only be requested before fulfillment starts.", ErrorType.Conflict);
 
@@ -91,6 +94,7 @@ public class RefundService : IRefundService
         var query = _db.Refunds
             .AsNoTracking()
             .Include(r => r.Order).ThenInclude(o => o.User)
+            .Include(r => r.Payment)
             .Include(r => r.ProcessedByUser)
             .Where(r => r.Order.UserId == userId);
 
@@ -110,6 +114,7 @@ public class RefundService : IRefundService
         IQueryable<Refund> query = _db.Refunds
             .AsNoTracking()
             .Include(r => r.Order).ThenInclude(o => o.User)
+            .Include(r => r.Payment)
             .Include(r => r.ProcessedByUser);
 
         if (!string.IsNullOrWhiteSpace(status))
@@ -158,6 +163,8 @@ public class RefundService : IRefundService
             refund.Payment.Method == PaymentMethod.CashOnDelivery ||
             refund.Payment.RequiresReconciliation || refund.Payment.IsDemo || !refund.Order.RefundPending ||
             refund.Payment.Amount != refund.Amount ||
+            refund.Payment.ProviderAmount is null or <= 0 ||
+            string.IsNullOrWhiteSpace(refund.Payment.ProviderCurrency) ||
             refund.Order.Items.Count == 0 ||
             refund.Order.Items.Any(i => i.Status != FulfillmentStatus.Pending))
         {
@@ -292,5 +299,10 @@ public class RefundService : IRefundService
         refund.ProcessedAt,
         refund.ExternalReference,
         refund.Note,
-        refund.ProcessedByUser?.FullName);
+        refund.ProcessedByUser?.FullName,
+        refund.Payment?.ProviderAmount,
+        refund.Payment?.ProviderCurrency,
+        refund.Payment?.Method.ToString(),
+        refund.Payment?.ProviderKey,
+        refund.Payment?.TransactionId);
 }

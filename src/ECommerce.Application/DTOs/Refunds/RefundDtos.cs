@@ -17,4 +17,9 @@ public record RefundDto(
     DateTime? ProcessedAt,
     string? ExternalReference,
     string? Note,
-    string? ProcessedByName);
+    string? ProcessedByName,
+    decimal? ProviderAmount = null,
+    string? ProviderCurrency = null,
+    string? PaymentMethod = null,
+    string? PaymentProvider = null,
+    string? PaymentTransactionId = null);

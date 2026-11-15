@@ -39,7 +39,17 @@ public class ProductAttributeValueConfiguration : IEntityTypeConfiguration<Produ
         b.Property(x => x.ValueText).HasMaxLength(2000);
         b.Property(x => x.ValueNumber).HasPrecision(18, 4);
         b.HasIndex(x => new { x.ProductId, x.AttributeDefinitionId }).IsUnique();
-        b.HasOne(x => x.Product).WithMany().HasForeignKey(x => new { x.ProductId, x.CategoryId }).HasPrincipalKey(x => new { x.Id, x.CategoryId }).OnDelete(DeleteBehavior.Restrict);
-        b.HasOne(x => x.AttributeDefinition).WithMany().HasForeignKey(x => new { x.AttributeDefinitionId, x.CategoryId, x.DataType }).HasPrincipalKey(x => new { x.Id, x.CategoryId, x.DataType }).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.AttributeDefinitionId, x.ValueNumber })
+            .HasFilter("[ValueNumber] IS NOT NULL");
+        b.HasIndex(x => new { x.AttributeDefinitionId, x.ValueBoolean })
+            .HasFilter("[ValueBoolean] IS NOT NULL");
+        b.HasOne(x => x.Product).WithMany(p => p.AttributeValues)
+            .HasForeignKey(x => new { x.ProductId, x.CategoryId })
+            .HasPrincipalKey(p => new { p.Id, p.CategoryId })
+            .OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.AttributeDefinition).WithMany()
+            .HasForeignKey(x => new { x.AttributeDefinitionId, x.CategoryId, x.DataType })
+            .HasPrincipalKey(x => new { x.Id, x.CategoryId, x.DataType })
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

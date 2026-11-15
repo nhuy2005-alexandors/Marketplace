@@ -1,4 +1,5 @@
 using ECommerce.Domain.Entities;
+using ECommerce.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -8,7 +9,11 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
 {
     public void Configure(EntityTypeBuilder<Order> b)
     {
-        b.ToTable("Orders", t => t.HasCheckConstraint("CK_Orders_Discount", "[DiscountAmount] >= 0"));
+        b.ToTable("Orders", t =>
+        {
+            t.HasCheckConstraint("CK_Orders_Discount", "[DiscountAmount] >= 0");
+            t.HasCheckConstraint("CK_Orders_Status", "[Status] IN (0, 1, 2, 3, 4, 5)");
+        });
         b.HasKey(o => o.Id);
         b.Property(o => o.Status).HasConversion<int>();
         b.Property(o => o.ShippingAddress).IsRequired().HasMaxLength(500);
@@ -30,7 +35,12 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
 {
     public void Configure(EntityTypeBuilder<OrderItem> b)
     {
-        b.ToTable("OrderItems", t => t.HasCheckConstraint("CK_OrderItems_Amounts", "[UnitPrice] >= 0 AND [Quantity] > 0"));
+        b.ToTable("OrderItems", t =>
+        {
+            t.HasCheckConstraint("CK_OrderItems_Amounts", "[UnitPrice] >= 0 AND [Quantity] > 0");
+            t.HasCheckConstraint("CK_OrderItems_Status", "[Status] IN (0, 1, 2, 3)");
+            t.HasTrigger("TR_OrderItems_ProtectSnapshot");
+        });
         b.HasKey(i => i.Id);
         b.Property(i => i.ProductName).IsRequired().HasMaxLength(200);
         b.Property(i => i.UnitPrice).HasColumnType("decimal(18,2)");
@@ -39,6 +49,8 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
         b.Ignore(i => i.Subtotal);
         b.HasOne(i => i.Product).WithMany()
             .HasForeignKey(i => i.ProductId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<User>().WithMany()
+            .HasForeignKey(i => i.SellerId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(i => i.SellerId);
     }
 }
@@ -47,7 +59,12 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 {
     public void Configure(EntityTypeBuilder<Payment> b)
     {
-        b.ToTable("Payments", t => t.HasCheckConstraint("CK_Payments_Amount", "[Amount] >= 0"));
+        b.ToTable("Payments", t =>
+        {
+            t.HasCheckConstraint("CK_Payments_Amount", "[Amount] >= 0");
+            t.HasCheckConstraint("CK_Payments_Status", "[Status] IN (0, 1, 2, 3, 4)");
+            t.HasCheckConstraint("CK_Payments_Method", "[Method] IN (0, 1, 2, 3)");
+        });
         b.HasKey(p => p.Id);
         b.Property(p => p.Amount).HasColumnType("decimal(18,2)");
         b.Property(p => p.Method).HasConversion<int>();

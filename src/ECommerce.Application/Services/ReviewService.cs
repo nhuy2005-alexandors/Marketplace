@@ -27,14 +27,24 @@ public class ReviewService : IReviewService
     {
         if (r.Rating < 1 || r.Rating > 5)
             return Result.Fail<ReviewDto>("Rating must be between 1 and 5.", ErrorType.Validation);
+        if (r.Comment?.Length > 1000)
+            return Result.Fail<ReviewDto>("Review comment must not exceed 1000 characters.", ErrorType.Validation);
         if (!await _db.Products.AnyAsync(p => p.Id == productId, ct))
             return Result.Fail<ReviewDto>("Product not found.", ErrorType.NotFound);
 
-        var hasPurchased = await _db.Orders
-            .Where(o => o.UserId == userId && o.Status != OrderStatus.Cancelled)
-            .AnyAsync(o => o.Items.Any(i => i.ProductId == productId), ct);
+        var eligibleOrderStatuses = new[] { OrderStatus.Paid, OrderStatus.Shipped, OrderStatus.Delivered };
+        var hasPurchased = await _db.Orders.AnyAsync(o =>
+            o.UserId == userId &&
+            eligibleOrderStatuses.Contains(o.Status) &&
+            o.Payment != null &&
+            o.Payment.Status == PaymentStatus.Completed &&
+            !o.Payment.IsDemo &&
+            !o.Payment.RequiresReconciliation &&
+            o.Items.Any(i => i.ProductId == productId && i.Status != FulfillmentStatus.Cancelled), ct);
+
         if (!hasPurchased)
-            return Result.Fail<ReviewDto>("You can only review products you have purchased.", ErrorType.Forbidden);
+            return Result.Fail<ReviewDto>(
+                "You can only review a product from a completed, non-demo purchase.", ErrorType.Forbidden);
 
         if (await _db.Reviews.AnyAsync(rv => rv.ProductId == productId && rv.UserId == userId, ct))
             return Result.Fail<ReviewDto>("You have already reviewed this product.", ErrorType.Conflict);
@@ -47,7 +57,11 @@ public class ReviewService : IReviewService
             Comment = r.Comment?.Trim()
         };
         _db.Reviews.Add(review);
-        await _db.SaveChangesAsync(ct);
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateException)
+        {
+            return Result.Fail<ReviewDto>("You have already reviewed this product.", ErrorType.Conflict);
+        }
         await _db.Entry(review).Reference(rv => rv.User).LoadAsync(ct);
         return Result.Ok(review.ToDto());
     }

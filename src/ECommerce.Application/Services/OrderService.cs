@@ -30,11 +30,15 @@ public class OrderService : IOrderService
     public async Task<Result<OrderDto>> CheckoutAsync(int userId, CheckoutRequest r, CancellationToken ct = default)
     {
         var cart = await _db.Carts
-            .Include(c => c.Items).ThenInclude(i => i.Product)
+            .Include(c => c.Items).ThenInclude(i => i.Product).ThenInclude(p => p.Seller)
             .FirstOrDefaultAsync(c => c.UserId == userId, ct);
 
         if (cart is null || cart.Items.Count == 0)
             return Result.Fail<OrderDto>("Cart is empty.", ErrorType.Validation);
+
+        // Revalidate the complete cart before changing any stock or coupon state.
+        if (cart.Items.Any(item => !IsPubliclyAvailable(item.Product)))
+            return Result.Fail<OrderDto>("One or more products are no longer available for purchase.", ErrorType.Conflict);
 
         var order = new Order
         {
@@ -326,6 +330,10 @@ public class OrderService : IOrderService
         return Result.Ok(new OrderSplitDto(
             order.Id, orderSubtotal, order.DiscountAmount, order.Total, splits));
     }
+
+    private static bool IsPubliclyAvailable(Product product) =>
+        product.Seller is not null &&
+        (product.Seller.Role != UserRole.Seller || product.Seller.SellerStatus == SellerStatus.Approved);
 
     private IQueryable<Order> BaseQuery() =>
         _db.Orders.Include(o => o.Items).Include(o => o.Payment);

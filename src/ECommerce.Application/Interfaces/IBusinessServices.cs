@@ -16,9 +16,7 @@ public interface IAuthService
     Task<Result<AuthResponse>> RegisterSellerAsync(RegisterSellerRequest request, CancellationToken ct = default);
     Task<Result<AuthResponse>> LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task<Result<UserDto>> GetCurrentAsync(int userId, CancellationToken ct = default);
-    // Đổi refresh token lấy cặp token mới (rotate: token cũ bị thu hồi).
     Task<Result<AuthResponse>> RefreshAsync(string refreshToken, CancellationToken ct = default);
-    // Thu hồi refresh token (logout).
     Task<Result> LogoutAsync(string refreshToken, CancellationToken ct = default);
 }
 
@@ -30,6 +28,23 @@ public interface IProductService
     Task<Result<ProductDto>> UpdateAsync(int actorId, bool isAdmin, int id, UpdateProductRequest request, CancellationToken ct = default);
     Task<Result> DeleteAsync(int actorId, bool isAdmin, int id, CancellationToken ct = default);
     Task<Result<SellerShopDto>> GetSellerShopAsync(int sellerId, CancellationToken ct = default);
+}
+
+public interface IBrandService
+{
+    Task<IReadOnlyList<BrandDto>> GetAllAsync(CancellationToken ct = default);
+    Task<Result<BrandDto>> CreateAsync(CreateBrandRequest request, CancellationToken ct = default);
+    Task<Result<BrandDto>> UpdateAsync(int id, UpdateBrandRequest request, CancellationToken ct = default);
+    Task<Result> DeleteAsync(int id, CancellationToken ct = default);
+}
+
+public interface IAttributeDefinitionService
+{
+    Task<IReadOnlyList<AttributeDefinitionDto>> GetAllAsync(
+        int? categoryId = null, bool includeInactive = false, CancellationToken ct = default);
+    Task<Result<AttributeDefinitionDto>> CreateAsync(CreateAttributeDefinitionRequest request, CancellationToken ct = default);
+    Task<Result<AttributeDefinitionDto>> UpdateAsync(int id, UpdateAttributeDefinitionRequest request, CancellationToken ct = default);
+    Task<Result> DeleteAsync(int id, CancellationToken ct = default);
 }
 
 public interface ICategoryService
@@ -61,9 +76,7 @@ public interface IOrderService
 
 public interface IPaymentService
 {
-    // Khởi tạo thanh toán: redirect (momo) hoặc hoàn tất ngay (mock/cod).
     Task<Result<PayResultDto>> InitiateAsync(int userId, int orderId, PayOrderRequest request, CancellationToken ct = default);
-    // Xác minh callback từ cổng, chốt trạng thái Order.
     Task<Result<OrderDto>> ConfirmAsync(string provider, IReadOnlyDictionary<string, string> callbackData, CancellationToken ct = default);
 }
 
@@ -91,22 +104,17 @@ public interface IWishlistService
 
 public interface IDashboardService
 {
-    // sellerId = null -> toàn hệ thống (Admin); có giá trị -> chỉ dữ liệu của seller đó.
     Task<DashboardDto> GetAsync(int? sellerId = null, CancellationToken ct = default);
 }
 
 public interface ISellerAdminService
 {
-    // Danh sách seller theo trạng thái duyệt; status = null -> tất cả seller.
     Task<IReadOnlyList<SellerApplicationDto>> GetSellersAsync(string? status = null, CancellationToken ct = default);
-    // Admin duyệt seller đang Pending.
     Task<Result<SellerApplicationDto>> ApproveAsync(int sellerId, CancellationToken ct = default);
 }
 
 public interface ISellerOrderService
 {
-    // Đơn hàng chứa item của seller — chỉ trả về các item thuộc seller đó.
     Task<PagedResult<OrderDto>> GetForSellerAsync(int sellerId, int page, int pageSize, CancellationToken ct = default);
-    // Seller cập nhật trạng thái giao hàng cho item của chính mình.
     Task<Result<OrderItemDto>> UpdateFulfillmentAsync(int sellerId, int orderItemId, UpdateFulfillmentStatusRequest request, CancellationToken ct = default);
 }

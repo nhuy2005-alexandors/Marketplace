@@ -21,6 +21,7 @@ public class Product : BaseEntity
     public User Seller { get; set; } = null!;
 
     public ICollection<Review> Reviews { get; set; } = new List<Review>();
+    public ICollection<ProductAttributeValue> AttributeValues { get; set; } = new List<ProductAttributeValue>();
 
     // Optimistic concurrency token — chặn oversell khi nhiều checkout cùng lúc.
     public byte[]? RowVersion { get; set; }
