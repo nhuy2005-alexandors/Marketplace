@@ -268,3 +268,80 @@ export interface Dashboard {
   ordersByStatus: StatusCount[];
   topProducts: TopProduct[];
 }
+
+
+export interface AssistantConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AssistantChatFilters {
+  categoryId?: number;
+  brandId?: number;
+  sellerId?: number;
+  minPrice?: number;
+  maxPrice?: number;
+  inStockOnly?: boolean;
+  attributeFilters?: ProductAttributeFilter[];
+}
+
+export interface AssistantChatRequest {
+  query: string;
+  filters?: AssistantChatFilters;
+  recentTurns?: AssistantConversationTurn[];
+}
+
+export interface AssistantChatResponse {
+  answer: string;
+  products: Product[];
+  sourceProductIds: number[];
+  evidenceStrength: string;
+  answerSource: string;
+  intent: string;
+  retrievalMode: string;
+}
+
+export interface RecommendationReason {
+  code: string;
+  label: string;
+}
+
+export interface RecommendedProduct {
+  product: Product;
+  score: number;
+  reasons: RecommendationReason[];
+}
+
+export interface RecommendationResponse {
+  strategy: string;
+  generatedAtUtc: string;
+  items: RecommendedProduct[];
+}
+
+export interface RfmCustomer {
+  userId: number;
+  lastEligibleOrderCreatedAtUtc: string | null;
+  recencyDays: number | null;
+  frequency: number;
+  monetaryUsd: number;
+  rQuintile: number | null;
+  fQuintile: number | null;
+  mQuintile: number | null;
+  segmentCode: string;
+  segmentLabel: string;
+}
+
+export interface RfmSegmentCount {
+  segmentCode: string;
+  segmentLabel: string;
+  count: number;
+}
+
+export interface RfmCustomerPage {
+  asOfUtc: string;
+  page: number;
+  pageSize: number;
+  totalCustomers: number;
+  segmentCounts: RfmSegmentCount[];
+  items: RfmCustomer[];
+}

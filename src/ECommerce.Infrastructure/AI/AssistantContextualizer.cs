@@ -8,6 +8,8 @@ public sealed record ContextualizedAssistantQuery(
 
 public static class AssistantContextualizer
 {
+    private const int MaximumContextualizedQueryLength = 1000;
+
     private static readonly string[] FollowUpCues =
     [
         "it", "this", "that", "those", "mau", "màu", "re hon", "cheaper",
@@ -48,7 +50,17 @@ public static class AssistantContextualizer
         if (string.IsNullOrWhiteSpace(subject))
             return new ContextualizedAssistantQuery(trimmedQuery, boundedTurns);
 
-        return new ContextualizedAssistantQuery($"{subject} {trimmedQuery}", boundedTurns);
+        var availableSubjectLength = MaximumContextualizedQueryLength - trimmedQuery.Length - 1;
+        if (availableSubjectLength <= 0)
+            return new ContextualizedAssistantQuery(trimmedQuery, boundedTurns);
+
+        var boundedSubject = subject.Length > availableSubjectLength
+            ? subject[..availableSubjectLength].TrimEnd()
+            : subject;
+
+        return string.IsNullOrWhiteSpace(boundedSubject)
+            ? new ContextualizedAssistantQuery(trimmedQuery, boundedTurns)
+            : new ContextualizedAssistantQuery($"{boundedSubject} {trimmedQuery}", boundedTurns);
     }
 
     private static bool LooksLikeFollowUp(string query)
