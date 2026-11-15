@@ -8,13 +8,13 @@ public sealed class RecommendationProviderAdapter(IRecommendationService recomme
 {
     public async Task<IReadOnlyList<ProductDto>> GetProductsAsync(int? customerId, int limit, CancellationToken ct = default)
     {
-        var response = await recommendations.GetForUserAsync(customerId, Math.Clamp(limit, 1, 20), cancellationToken: ct);
+        var response = await recommendations.GetForUserAsync(customerId, Math.Clamp(limit, 1, 100), cancellationToken: ct);
         return response.Items.Select(item => item.Product).ToArray();
     }
 
     public async Task<IReadOnlyList<ProductDto>> GetSimilarProductsAsync(int targetProductId, int limit, CancellationToken ct = default)
     {
-        var response = await recommendations.GetSimilarAsync(targetProductId, Math.Clamp(limit, 1, 20), cancellationToken: ct);
+        var response = await recommendations.GetSimilarAsync(targetProductId, Math.Clamp(limit, 1, 100), cancellationToken: ct);
         return response.Items.Select(item => item.Product).ToArray();
     }
 }
