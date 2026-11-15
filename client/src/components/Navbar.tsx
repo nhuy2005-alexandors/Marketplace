@@ -41,6 +41,7 @@ export function Navbar() {
       { to: "/admin/coupons", label: "Mã giảm giá" },
       { to: "/admin/sellers", label: "Duyệt seller" },
       { to: "/admin/refunds", label: "Hoàn tiền" },
+      { to: "/admin/customers/segments", label: "Phân loại KH" },
     ];
     if (user?.role === "Seller") return [
       { to: "/seller", label: "Dashboard", end: true },
