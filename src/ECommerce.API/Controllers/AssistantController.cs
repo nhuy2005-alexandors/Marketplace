@@ -15,7 +15,7 @@ public sealed class AssistantController(IAssistantService assistant) : ApiContro
         [FromBody] AssistantChatRequest request,
         CancellationToken cancellationToken)
     {
-        var customerId = User.Identity?.IsAuthenticated == true && User.IsInRole("Customer")
+        int? customerId = User.Identity?.IsAuthenticated == true && User.IsInRole("Customer")
             ? UserId
             : null;
 
