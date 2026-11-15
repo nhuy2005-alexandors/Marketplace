@@ -4,9 +4,9 @@
 **Repository:** `nhuy2005-alexandors/Marketplace`  
 **Branch:** `codex/marketplace-owner-ai-lanes-20261115`  
 **Base:** `540d296836be789a58ede9db1039447d95a3c9cc`  
-**Verified code head:** `341314747489abe27caa1df0e398644916c809fd`  
+**Verified code head:** `637417747e246de5af53ed45efad523444ff0624`  
 **PR:** #7 — Draft, open, mergeable; not merged  
-**CI run:** [43730424084](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43730424084)
+**CI run:** [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496)
 
 ## Scope and ownership
 
@@ -50,7 +50,7 @@ RAG may call the shared Recommendation application service for generic recommend
 - Generation uses stable model ID `gemini-3.8-flash` with a structured JSON response schema.
 - Generated source product IDs are validated against backend retrieval candidates. If citations are missing or contain any unknown product ID, generated prose is discarded and backend-grounded fallback is returned.
 - If retrieval yields no candidates, the assistant abstains and does not call the generation provider.
-- Recent conversation context is bounded to six turns; each turn is bounded to 500 characters. Contextualized retrieval queries are capped at 1,000 characters while preserving the current user query.
+- Recent conversation context is bounded to six turns; each turn is bounded to 500 characters. Contextualized retrieval queries are capped at 1,000 characters while preserving the current user query. Follow-up cues use whole-token matching to avoid false positives such as `it` inside `monitor`.
 - Public assistant chat has a separate 20-requests/minute/IP rate limit.
 
 ## API surface
@@ -83,12 +83,12 @@ The embedding cache is process-local and is rebuilt after API restart. No vector
 
 ## Verification evidence
 
-CI run [43730424084](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43730424084) completed successfully at verified code head `341314747489abe27caa1df0e398644916c809fd`.
+CI run [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496) completed successfully at verified code head `637417747e246de5af53ed45efad523444ff0624`.
 
 | Check | Result |
 |---|---:|
 | Backend build | PASS — 0 warnings, 0 errors |
-| Backend unit + integration tests | 184 passed, 0 failed, 3 opt-in skips |
+| Backend unit + integration tests | 186 passed, 0 failed, 3 opt-in skips |
 | Frontend TypeScript/Vite build | PASS |
 | Frontend regression tests | 3/3 PASS |
 | Windows disposable SQL Server LocalDB migration/trigger tests | 2/2 PASS |
@@ -114,4 +114,4 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 - `main` remains at `540d296836be789a58ede9db1039447d95a3c9cc`.
 - Khang/Khánh branches were not modified, merged, rebased, or synchronized.
 
-**Acceptance boundary:** CI PASS for the backend and frontend build/integration contracts. The targeted long-context regression was first run test-only at `4e91c014` and failed at the expected 1,000-character bound (183 passed, 3 skipped); the fix is included in verified code head `341314747489abe27caa1df0e398644916c809fd`, whose CI run passes. Live Gemini behavior, RAG relevance/quality, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
+**Acceptance boundary:** CI PASS for the backend and frontend build/integration contracts. The targeted long-context regression was first run test-only at `4e91c014` and failed at the expected 1,000-character bound. A second regression caught false follow-up detection from substring matching (`it` inside `monitor`). Both fixes are included in verified code head `637417747e246de5af53ed45efad523444ff0624`, whose CI run passes. Live Gemini behavior, RAG relevance/quality, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
