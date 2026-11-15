@@ -151,7 +151,10 @@ public sealed class RecommendationService : IRecommendationService
             .Where(order => order.UserId == userId &&
                             EligibleOrderStatuses.Contains(order.Status) &&
                             order.Payment != null &&
-                            order.Payment.Status == PaymentStatus.Completed)
+                            order.Payment.Status == PaymentStatus.Completed &&
+                            !order.Payment.IsDemo &&
+                            !order.Payment.RequiresReconciliation &&
+                            !order.RefundPending)
             .Include(order => order.Payment)
             .Include(order => order.Items.Where(item => item.Status != FulfillmentStatus.Cancelled))
                 .ThenInclude(item => item.Product)
@@ -167,7 +170,10 @@ public sealed class RecommendationService : IRecommendationService
         var orders = await _db.Orders.AsNoTracking()
             .Where(order => EligibleOrderStatuses.Contains(order.Status) &&
                             order.Payment != null &&
-                            order.Payment.Status == PaymentStatus.Completed)
+                            order.Payment.Status == PaymentStatus.Completed &&
+                            !order.Payment.IsDemo &&
+                            !order.Payment.RequiresReconciliation &&
+                            !order.RefundPending)
             .Include(order => order.Items.Where(item => item.Status != FulfillmentStatus.Cancelled))
             .ToListAsync(ct);
 
