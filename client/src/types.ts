@@ -82,6 +82,51 @@ export interface Product {
   attributes?: ProductAttribute[];
 }
 
+export interface RecommendationReason {
+  code: string;
+  label: string;
+}
+
+export interface RecommendedProduct {
+  product: Product;
+  score: number;
+  reasons: RecommendationReason[];
+}
+
+export interface RecommendationResponse {
+  strategy: string;
+  generatedAtUtc: string;
+  items: RecommendedProduct[];
+}
+
+export interface RfmCustomer {
+  userId: number;
+  lastEligibleOrderCreatedAtUtc?: string | null;
+  recencyDays: number | null;
+  frequency: number;
+  monetaryUsd: number;
+  rQuintile: number | null;
+  fQuintile: number | null;
+  mQuintile: number | null;
+  segmentCode: string;
+  segmentLabel: string;
+}
+
+export interface RfmSegmentCount {
+  segmentCode: string;
+  segmentLabel: string;
+  count: number;
+}
+
+export interface RfmCustomerPage {
+  asOfUtc: string;
+  page: number;
+  pageSize: number;
+  totalCustomers: number;
+  segmentCounts: RfmSegmentCount[];
+  items: RfmCustomer[];
+}
+
 export interface Category {
   id: number;
   name: string;
