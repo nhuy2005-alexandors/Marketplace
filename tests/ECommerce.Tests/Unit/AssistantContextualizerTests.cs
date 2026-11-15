@@ -55,4 +55,17 @@ public sealed class AssistantContextualizerTests
         Assert.Equal(2, result.RecentTurns.Count);
         Assert.Contains("Tìm tai nghe Sony", result.Query);
     }
+
+    [Fact]
+    public void Contextualize_LongFollowUpPreservesCurrentQueryWithinRetrievalLimit()
+    {
+        var subject = "Tìm tai nghe " + new string('x', 480);
+        var query = "Màu đen " + new string('y', 900);
+        var turns = new[] { new AssistantConversationTurn("user", subject) };
+
+        var result = AssistantContextualizer.Contextualize(query, turns);
+
+        Assert.True(result.Query.Length <= 1000);
+        Assert.True(result.Query.EndsWith(query, StringComparison.Ordinal));
+    }
 }
