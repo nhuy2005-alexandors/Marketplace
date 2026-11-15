@@ -60,22 +60,37 @@ public sealed class RecommendationServiceTests
         var purchased = Product(10, "Audio product", audio, seller, null, 50m);
         var pendingSignal = Product(11, "Pending order signal", books, seller, null, 40m);
         var cancelledSignal = Product(12, "Cancelled item signal", books, seller, null, 30m);
+        var demoSignal = Product(13, "Demo payment signal", books, seller, null, 25m);
+        var reconciliationSignal = Product(14, "Unreconciled payment signal", books, seller, null, 20m);
+        var refundPendingSignal = Product(15, "Refund pending signal", books, seller, null, 15m);
+        var unpurchasedBook = Product(16, "Unpurchased book candidate", books, seller, null, 35m);
         db.Users.AddRange(customer, seller);
         db.Categories.AddRange(audio, books);
-        db.Products.AddRange(purchased, pendingSignal, cancelledSignal);
+        db.Products.AddRange(purchased, pendingSignal, cancelledSignal, demoSignal, reconciliationSignal,
+            refundPendingSignal, unpurchasedBook);
         db.Orders.Add(Order(100, customer.Id, OrderStatus.Pending, PaymentStatus.Completed,
             DateTime.UtcNow.AddDays(-1), 40m, Item(100, pendingSignal, seller.Id, FulfillmentStatus.Delivered)));
         db.Orders.Add(Order(101, customer.Id, OrderStatus.Cancelled, PaymentStatus.Completed,
             DateTime.UtcNow.AddDays(-2), 30m, Item(101, cancelledSignal, seller.Id, FulfillmentStatus.Delivered)));
         db.Orders.Add(Order(102, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
             DateTime.UtcNow.AddDays(-3), 50m, Item(102, purchased, seller.Id, FulfillmentStatus.Cancelled)));
+        db.Orders.Add(Order(103, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            DateTime.UtcNow.AddDays(-4), 25m, true, false, false,
+            Item(103, demoSignal, seller.Id, FulfillmentStatus.Delivered)));
+        db.Orders.Add(Order(104, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            DateTime.UtcNow.AddDays(-5), 20m, false, true, false,
+            Item(104, reconciliationSignal, seller.Id, FulfillmentStatus.Delivered)));
+        db.Orders.Add(Order(105, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            DateTime.UtcNow.AddDays(-6), 15m, false, false, true,
+            Item(105, refundPendingSignal, seller.Id, FulfillmentStatus.Delivered)));
         await db.SaveChangesAsync();
 
         var result = await new RecommendationService(db).GetForUserAsync(customer.Id, 8);
 
-        Assert.NotEqual("personalized", result.Strategy);
+        Assert.Equal("catalog_fallback", result.Strategy);
+        Assert.DoesNotContain(result.Items, item => item.Product.Id == unpurchasedBook.Id);
         Assert.DoesNotContain(result.Items.SelectMany(item => item.Reasons), reason =>
-            reason.Code is "same_category" or "same_brand" or "matching_attributes");
+            reason.Code is "same_category" or "same_brand" or "matching_attributes" or "popular_purchase");
     }
 
     [Fact]
@@ -169,18 +184,24 @@ public sealed class RecommendationServiceTests
     }
 
     private static Order Order(int id, int userId, OrderStatus status, PaymentStatus paymentStatus,
-        DateTime createdAt, decimal amount, params OrderItem[] items)
+        DateTime createdAt, decimal amount, params OrderItem[] items) =>
+        Order(id, userId, status, paymentStatus, createdAt, amount, false, false, false, items);
+
+    private static Order Order(int id, int userId, OrderStatus status, PaymentStatus paymentStatus,
+        DateTime createdAt, decimal amount, bool isDemo, bool requiresReconciliation, bool refundPending,
+        params OrderItem[] items)
     {
         var order = new Order
         {
             Id = id, UserId = userId, Status = status, ShippingAddress = "Test",
-            CreatedAt = createdAt, Items = items
+            CreatedAt = createdAt, Items = items, RefundPending = refundPending
         };
         foreach (var item in items) item.Order = order;
         order.Payment = new Payment
         {
             Id = id, OrderId = id, Order = order, Amount = amount,
-            Method = PaymentMethod.CreditCard, Status = paymentStatus, CreatedAt = createdAt
+            Method = PaymentMethod.CreditCard, Status = paymentStatus, CreatedAt = createdAt,
+            IsDemo = isDemo, RequiresReconciliation = requiresReconciliation
         };
         return order;
     }
