@@ -75,9 +75,16 @@ public sealed class AssistantService : IAssistantService
                 .Distinct()
                 .ToHashSet();
 
-            // Model-supplied IDs are never authoritative. No valid backend source means abstain.
-            if (validIds.Count == 0)
-                return NoEvidence("product_search", _search.RetrievalMode);
+            // If the model omits citations or cites any unknown product, discard its prose
+            // and fall back to the backend candidate facts rather than partially trusting it.
+            if (validIds.Count == 0 || validIds.Count != generated.SourceProductIds.Distinct().Count())
+            {
+                return BuildResponse(
+                    BuildGroundedFallback(candidates),
+                    candidates,
+                    "fallback",
+                    "product_search");
+            }
 
             var grounded = candidates
                 .Where(candidate => validIds.Contains(candidate.Product.Id))
