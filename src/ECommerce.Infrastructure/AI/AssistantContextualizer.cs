@@ -43,7 +43,7 @@ public static class AssistantContextualizer
             .Where(turn => string.Equals(turn.Role, "user", StringComparison.OrdinalIgnoreCase))
             .Reverse()
             .Select(turn => turn.Content.Trim())
-            .FirstOrDefault(content => !LooksLikeFollowUp(content) && !StartsNewTopic(content));
+.FirstOrDefault(content => !LooksLikeFollowUp(content));
 
         if (string.IsNullOrWhiteSpace(subject))
             return new ContextualizedAssistantQuery(trimmedQuery, boundedTurns);
