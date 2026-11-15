@@ -140,20 +140,37 @@ public sealed class RfmService : IRfmService
 
     private static void AssignQuintiles(IReadOnlyList<RfmMetric> purchasers)
     {
-        Assign(purchasers.OrderBy(row => row.RecencyDays).ThenBy(row => row.UserId).ToList(), (row, score) => row.RQuintile = score);
-        Assign(purchasers.OrderByDescending(row => row.Frequency).ThenBy(row => row.UserId).ToList(), (row, score) => row.FQuintile = score);
-        Assign(purchasers.OrderByDescending(row => row.MonetaryUsd).ThenBy(row => row.UserId).ToList(), (row, score) => row.MQuintile = score);
+        Assign(purchasers.OrderBy(row => row.RecencyDays).ToList(), row => row.RecencyDays!.Value,
+            (row, score) => row.RQuintile = score);
+        Assign(purchasers.OrderByDescending(row => row.Frequency).ToList(), row => row.Frequency,
+            (row, score) => row.FQuintile = score);
+        Assign(purchasers.OrderByDescending(row => row.MonetaryUsd).ToList(), row => row.MonetaryUsd,
+            (row, score) => row.MQuintile = score);
     }
 
-    private static void Assign(IReadOnlyList<RfmMetric> rankedBestFirst, Action<RfmMetric, int> setScore)
+    private static void Assign<T>(
+        IReadOnlyList<RfmMetric> rankedBestFirst,
+        Func<RfmMetric, T> metric,
+        Action<RfmMetric, int> setScore)
     {
         var count = rankedBestFirst.Count;
-        for (var index = 0; index < count; index++)
+        var index = 0;
+        while (index < count)
         {
-            // Best-first ordering: quintile 5 is best. For small populations,
-            // buckets are deterministic and some quintiles may be empty.
-            var degradationBucket = Math.Min(4, index * 5 / count);
-            setScore(rankedBestFirst[index], 5 - degradationBucket);
+            var value = metric(rankedBestFirst[index]);
+            var end = index + 1;
+            while (end < count && EqualityComparer<T>.Default.Equals(metric(rankedBestFirst[end]), value))
+                end++;
+
+            // Equal metric values share one score; use their average rank so user IDs
+            // cannot create artificial RFM segments when the underlying values tie.
+            var averageRank = (index + end - 1) / 2d;
+            var degradationBucket = Math.Min(4, (int)(averageRank * 5 / count));
+            var score = 5 - degradationBucket;
+            for (var tiedIndex = index; tiedIndex < end; tiedIndex++)
+                setScore(rankedBestFirst[tiedIndex], score);
+
+            index = end;
         }
     }
 
