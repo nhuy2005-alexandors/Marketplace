@@ -87,8 +87,14 @@ public sealed class GeminiAssistantProviderTests
 
         using var body = JsonDocument.Parse(capturedBody!);
         Assert.False(body.RootElement.GetProperty("generationConfig").TryGetProperty("temperature", out _));
-        Assert.Equal("application/json",
-            body.RootElement.GetProperty("generationConfig").GetProperty("responseMimeType").GetString());
+        var generationConfig = body.RootElement.GetProperty("generationConfig");
+        Assert.Equal("application/json", generationConfig.GetProperty("responseMimeType").GetString());
+        var schema = generationConfig.GetProperty("responseSchema");
+        Assert.Equal("OBJECT", schema.GetProperty("type").GetString());
+        Assert.Equal("ARRAY", schema.GetProperty("properties").GetProperty("sourceProductIds")
+            .GetProperty("type").GetString());
+        Assert.Equal(["answer", "sourceProductIds"],
+            schema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
     }
 
     [Fact]
