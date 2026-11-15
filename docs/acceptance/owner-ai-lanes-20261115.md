@@ -83,7 +83,7 @@ The embedding cache is process-local and is rebuilt after API restart. No vector
 
 ## Verification evidence
 
-CI run [43730424084](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43730424084) completed successfully at verified code head `ad0c32d9bb02b9f3cdedbf41f7edb0078ed0bbc3`.
+CI run [43730424084](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43730424084) completed successfully at verified code head `341314747489abe27caa1df0e398644916c809fd`.
 
 | Check | Result |
 |---|---:|
