@@ -1,4 +1,5 @@
 using ECommerce.Application.Interfaces;
+using ECommerce.Infrastructure.AI;
 using ECommerce.Infrastructure.Auth;
 using ECommerce.Infrastructure.Notifications;
 using ECommerce.Infrastructure.Payments;
