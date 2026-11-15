@@ -14,7 +14,7 @@ public sealed class RecommendationsController(IRecommendationService recommendat
         [FromQuery] int? take,
         CancellationToken cancellationToken)
     {
-        var customerId = User.Identity?.IsAuthenticated == true && User.IsInRole("Customer")
+        int? customerId = User.Identity?.IsAuthenticated == true && User.IsInRole("Customer")
             ? UserId
             : null;
 
