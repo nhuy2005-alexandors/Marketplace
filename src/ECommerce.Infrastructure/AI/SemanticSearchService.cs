@@ -13,7 +13,7 @@ namespace ECommerce.Infrastructure.AI;
 
 public sealed class SemanticSearchService : ISemanticSearchService
 {
-    private const int MaximumCatalogCandidates = 500;
+    private const int MaximumEmbeddingDocumentCharacters = 1500;
     private const int MaximumAttributeFilters = 20;
     private const int EmbeddingBatchSize = 32;
     private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
@@ -192,7 +192,6 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
         return await query
             .OrderBy(product => product.Id)
-            .Take(MaximumCatalogCandidates)
             .ToListAsync(ct);
     }
 
@@ -207,6 +206,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         if (missing.Length == 0)
             return;
 
+        var failureLogged = false;
         for (var offset = 0; offset < missing.Length; offset += EmbeddingBatchSize)
         {
             var batch = missing.Skip(offset).Take(EmbeddingBatchSize).ToArray();
@@ -217,11 +217,14 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
             if (vectors is null || vectors.Count != batch.Length || vectors.Any(vector => vector.Length == 0))
             {
-                _logger.LogWarning(
-                    "Semantic retrieval embedding batch failed; cached {CachedCount} of {MissingCount} missing product documents.",
-                    offset,
-                    missing.Length);
-                break;
+                if (!failureLogged)
+                {
+                    _logger.LogWarning(
+                        "A semantic retrieval embedding batch failed; affected products will use lexical retrieval while later batches continue.");
+                    failureLogged = true;
+                }
+
+                continue;
             }
 
             for (var index = 0; index < batch.Length; index++)
@@ -266,13 +269,21 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 _ => string.Empty
             });
 
-        var text = string.Join(" ",
+        // Keep identity and structured attributes ahead of free-form description so
+        // truncation never removes the fields most useful for catalog matching.
+        var identity = string.Join(" ",
             product.Name,
-            product.Description,
             product.Category.Name,
             product.Brand?.Name,
             product.Sku,
             string.Join(" ", attributeText));
+        identity = identity[..Math.Min(identity.Length, MaximumEmbeddingDocumentCharacters)];
+
+        var remainingDescriptionCharacters = Math.Max(0, MaximumEmbeddingDocumentCharacters - identity.Length - 1);
+        var description = product.Description ?? string.Empty;
+        var text = remainingDescriptionCharacters == 0
+            ? identity
+            : $"{identity} {description[..Math.Min(description.Length, remainingDescriptionCharacters)]}".Trim();
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
         return new ProductDocument(product, text, hash);

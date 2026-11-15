@@ -193,7 +193,7 @@ public sealed class SemanticSearchServiceTests
         await service.WarmUpAsync();
 
         var document = Assert.Single(embeddings.EmbeddedTexts);
-        Assert.True(document.Length <= 1800);
+        Assert.True(document.Length <= 1500);
         Assert.Contains("Long description product", document);
         Assert.Contains("Audio", document);
         Assert.Contains("SKU-10", document);
