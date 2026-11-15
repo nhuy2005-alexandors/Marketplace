@@ -77,7 +77,6 @@ public sealed class OwnerAiEndpointsTests : IClassFixture<CustomWebApplicationFa
         var page = await adminResponse.Content.ReadFromJsonAsync<RfmCustomerPageDto>();
         page.Should().NotBeNull();
         page!.TotalCustomers.Should().BeGreaterThan(0);
-        page.Items.Should().NotContainNull();
         page.Items.Should().OnlyContain(item =>
             item.UserId > 0 &&
             item.SegmentCode.Length > 0 &&
