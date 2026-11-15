@@ -1,12 +1,12 @@
 # Owner AI Lanes — Acceptance Receipt
 
-**Date:** 2026-11-15  
+**Date:** 2026-11-16  
 **Repository:** `nhuy2005-alexandors/Marketplace`  
 **Branch:** `codex/marketplace-owner-ai-lanes-20261115`  
 **Base:** `540d296836be789a58ede9db1039447d95a3c9cc`  
-**Verified code head:** `1d526661d2a6ad57538b968d180926dbb5366692`  
+**Verified code head:** `8ceca88eeeb2db82e1442c2748d6765ecedc2a27`  
 **PR:** #7 — Draft, open, mergeable; not merged  
-**CI run:** [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) — completed successfully, 3/3 jobs PASS.
+**CI run:** [43740638782](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43740638782) — completed successfully, 3/3 jobs PASS.
 
 ## Scope and ownership
 
@@ -47,8 +47,8 @@ RAG may call the shared Recommendation application service for generic recommend
 - Hard-filtered catalog retrieval over approved sellers using category, brand, seller, price, stock, and typed attribute filters.
 - Lexical retrieval is always available. Optional semantic retrieval uses Gemini `gemini-embedding-001` with `RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` task types.
 - Embedding dimension defaults to 768; cosine similarity normalizes vector magnitudes during scoring.
-- Product documents are SHA-256 keyed. The process-local embedding cache is bounded to 1,000 entries.
-- Catalog retrieval currently considers at most 500 products per request.
+- Product documents are SHA-256 keyed after a conservative 1,500-character embedding-input cap; product name, category, brand, SKU, and typed attributes are prioritized before free-form description. The process-local embedding cache is bounded to 1,000 entries.
+- Retrieval loads all matching approved-seller products before ranking; there is no fixed 500-product cutoff. A failed embedding batch is logged and skipped without aborting later batches; affected products remain available through lexical retrieval.
 - Generation uses stable model ID `gemini-3.8-flash` with a structured JSON response schema.
 - Generated source product IDs are validated against backend retrieval candidates. If citations are missing or contain any unknown product ID, generated prose is discarded and backend-grounded fallback is returned.
 - If retrieval yields no candidates, the assistant abstains and does not call the generation provider.
@@ -85,12 +85,12 @@ The embedding cache is process-local and is rebuilt after API restart. No vector
 
 ## Verification evidence
 
-CI run [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) completed successfully at code head `1d526661d2a6ad57538b968d180926dbb5366692`.
+CI run [43740638782](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43740638782) completed successfully at code head `8ceca88eeeb2db82e1442c2748d6765ecedc2a27`.
 
 | Check | Result |
 |---|---:|
 | Backend build | PASS — 0 warnings, 0 errors |
-| Backend unit + integration tests | 186 passed, 0 failed, 3 opt-in skips |
+| Backend unit + integration tests | 188 passed, 0 failed, 3 opt-in skips |
 | Frontend TypeScript/Vite build | PASS |
 | Frontend regression tests | 3/3 PASS |
 | Windows disposable SQL Server LocalDB migration/trigger tests | 2/2 PASS |
@@ -105,8 +105,8 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 
 - No live Gemini API execution or API-key validation.
 - No human-reviewed RAG evaluation set, retrieval benchmark, or calibrated ranking weights. Hybrid score weights and thresholds remain deterministic heuristics, not measured quality claims.
-- Catalog retrieval is capped at the first 500 matching products ordered by ascending product ID; products beyond that window are not considered. Embedding cache is in-memory and resets on process restart.
-- Gemini `gemini-embedding-001` has a 2,048-token input limit ([Google documentation](https://ai.google.dev/gemini-api/docs/embeddings)). Product documents are not currently truncated/chunked before embedding; an oversized document can fail its batch, and the warm-up/retrieval loop stops at the first failed batch. Actual catalog rows have not been scanned for this condition.
+- Retrieval currently loads all matching catalog products into memory before ranking; this is suitable for the coursework demo catalog, not a production-scale retrieval design. The process-local embedding cache remains capped at 1,000 entries and resets on API restart; catalogs larger than the cache may evict older vectors and use lexical retrieval for those products.
+- Gemini `gemini-embedding-001` has a 2,048-token input limit ([Google documentation](https://ai.google.dev/gemini-api/docs/embeddings)). Product documents are capped at 1,500 characters before embedding, with identity/typed attributes preserved ahead of description. This is a conservative character bound, not an exact provider-token count; exceptionally token-dense text has not been measured against the live API.
 - Frontend UI integration is implemented and build-verified. The current frontend regression suite contains three existing tests unrelated to the new AI screens; no browser E2E or local UI runtime smoke has been run.
 - No schema/migration, database reset, seeding, import, persistent development database mutation, deployment, or external payment action was performed.
 
@@ -117,4 +117,4 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 - `main` remains at `540d296836be789a58ede9db1039447d95a3c9cc`.
 - Khang/Khánh branches were not modified, merged, rebased, or synchronized.
 
-**Acceptance boundary:** CI PASS (3/3 jobs) at code head `1d526661d2a6ad57538b968d180926dbb5366692`: backend build/tests 186 PASS, 3 SKIP; frontend build and 3/3 existing tests PASS; Windows disposable LocalDB tests 2/2 PASS. The long-context, whole-token follow-up, and RFM payment-cutoff regressions are covered by backend tests. Live Gemini behavior, RAG relevance/quality, oversized-document behavior, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
+**Acceptance boundary:** CI PASS (3/3 jobs) at code head `8ceca88eeeb2db82e1442c2748d6765ecedc2a27`: backend build/tests 188 PASS, 3 SKIP; frontend build and 3/3 existing tests PASS; Windows disposable LocalDB tests 2/2 PASS. Regression tests cover long-document bounding/identity preservation, retrieval beyond 500 catalog rows, continuing after a failed embedding batch, whole-token follow-up matching, and the RFM payment-capture cutoff. Live Gemini behavior, RAG relevance/quality, exact provider tokenization, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
