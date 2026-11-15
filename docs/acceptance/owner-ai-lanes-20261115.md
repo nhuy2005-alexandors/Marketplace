@@ -4,9 +4,9 @@
 **Repository:** `nhuy2005-alexandors/Marketplace`  
 **Branch:** `codex/marketplace-owner-ai-lanes-20261115`  
 **Base:** `540d296836be789a58ede9db1039447d95a3c9cc`  
-**Verified code head:** `637417747e246de5af53ed45efad523444ff0624`  
+**Verified code head:** `1d526661d2a6ad57538b968d180926dbb5366692`  
 **PR:** #7 — Draft, open, mergeable; not merged  
-**CI run:** [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496)
+**Latest CI run:** [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) — backend/frontend PASS; Windows LocalDB job still in progress. Previous complete run [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496) passed 3/3 jobs at the immediately preceding code head.
 
 ## Scope and ownership
 
@@ -38,7 +38,9 @@ RAG may call the shared Recommendation application service for generic recommend
 - Eligible orders must be Paid/Shipped/Delivered with Completed payment, non-demo payment, no reconciliation hold, no pending refund, and at least one non-cancelled OrderItem.
 - Monetary value is canonical USD. For partially cancelled orders, captured USD payment is allocated pro-rata to non-cancelled line-item subtotal.
 - Recency uses the last eligible order. Frequency counts eligible orders. Tied metric values receive the same quintile.
+- The `asOfUtc` cutoff checks payment capture time (`PaidAt`, falling back to `Payment.CreatedAt` for legacy rows) so a payment captured after the cutoff is not counted.
 - Endpoint is protected by Admin role authorization.
+- `asOfUtc` is not a full historical snapshot: eligibility still uses current order/payment/refund states because the schema does not retain historical state transitions.
 
 ### RAG Core
 
@@ -83,7 +85,7 @@ The embedding cache is process-local and is rebuilt after API restart. No vector
 
 ## Verification evidence
 
-CI run [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496) completed successfully at verified code head `637417747e246de5af53ed45efad523444ff0624`.
+Latest run [43735233293](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43735233293) has backend and frontend jobs completed successfully at code head `1d526661d2a6ad57538b968d180926dbb5366692`; its Windows LocalDB job is still running. The previous full run [43734721496](https://github.com/nhuy2005-alexandors/Marketplace/actions/runs/43734721496) passed all three jobs at code head `637417747e246de5af53ed45efad523444ff0624`.
 
 | Check | Result |
 |---|---:|
@@ -103,7 +105,8 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 
 - No live Gemini API execution or API-key validation.
 - No human-reviewed RAG evaluation set, retrieval benchmark, or calibrated ranking weights. Hybrid score weights and thresholds remain deterministic heuristics, not measured quality claims.
-- Catalog retrieval is capped at 500 products; embedding cache is in-memory and resets on process restart.
+- Catalog retrieval is capped at the first 500 matching products ordered by ascending product ID; products beyond that window are not considered. Embedding cache is in-memory and resets on process restart.
+- Gemini `gemini-embedding-001` has a 2,048-token input limit. Product documents are not currently truncated/chunked before embedding; an oversized document can fail its batch, and the warm-up/retrieval loop stops at the first failed batch. Actual catalog rows have not been scanned for this condition.
 - Frontend UI integration is implemented and build-verified. The current frontend regression suite contains three existing tests unrelated to the new AI screens; no browser E2E or local UI runtime smoke has been run.
 - No schema/migration, database reset, seeding, import, persistent development database mutation, deployment, or external payment action was performed.
 
@@ -114,4 +117,4 @@ The unchanged frontend dependency lockfile was not part of this PR. During `npm 
 - `main` remains at `540d296836be789a58ede9db1039447d95a3c9cc`.
 - Khang/Khánh branches were not modified, merged, rebased, or synchronized.
 
-**Acceptance boundary:** CI PASS for the backend and frontend build/integration contracts. The targeted long-context regression was first run test-only at `4e91c014` and failed at the expected 1,000-character bound. A second regression caught false follow-up detection from substring matching (`it` inside `monitor`). Both fixes are included in verified code head `637417747e246de5af53ed45efad523444ff0624`, whose CI run passes. Live Gemini behavior, RAG relevance/quality, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
+**Acceptance boundary:** Backend build/tests and frontend build/tests PASS at code head `1d526661d2a6ad57538b968d180926dbb5366692`; the latest Windows LocalDB job is still in progress, while the immediately preceding full CI run passed all 3 jobs. The long-context, whole-token follow-up, and RFM payment-cutoff regressions are covered by backend tests. Live Gemini behavior, RAG relevance/quality, oversized-document behavior, browser-level frontend behavior, local development runtime health, and production acceptance remain UNKNOWN / NOT ACCEPTED. Keep PR #7 Draft until those boundaries are explicitly reviewed.
