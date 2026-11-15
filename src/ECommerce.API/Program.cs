@@ -17,6 +17,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Override secret/config nhạy cảm bằng file local (gitignored) khi deploy.
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+// Keep runtime and design-time precedence identical: explicit environment wins.
+builder.Configuration.AddEnvironmentVariables();
+
+// Development must never fall back to the repository's legacy MSSQLLocalDB/ECommerceDb target.
+if (builder.Environment.IsDevelopment())
+    DatabaseTargetGuard.ValidateIsolatedDevelopmentTarget(builder.Configuration.GetConnectionString("DefaultConnection"));
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -112,14 +118,6 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-}
-
-// Auto-migrate + seed khi khởi động (idempotent) — khỏi phải chạy 'ef database update' tay.
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-    await DbSeeder.SeedAsync(db, hasher);
 }
 
 app.UseCors(CorsPolicy);

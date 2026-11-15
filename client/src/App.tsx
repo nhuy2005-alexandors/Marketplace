@@ -15,6 +15,7 @@ import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminProductsPage } from "./pages/AdminProductsPage";
 import { AdminCouponsPage } from "./pages/AdminCouponsPage";
 import { AdminSellersPage } from "./pages/AdminSellersPage";
+import { AdminRefundsPage } from "./pages/AdminRefundsPage";
 import { SellerDashboardPage } from "./pages/SellerDashboardPage";
 import { SellerProductsPage } from "./pages/SellerProductsPage";
 import { SellerOrdersPage } from "./pages/SellerOrdersPage";
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/admin/products" element={<AdminProductsPage />} />
           <Route path="/admin/coupons" element={<AdminCouponsPage />} />
           <Route path="/admin/sellers" element={<AdminSellersPage />} />
+          <Route path="/admin/refunds" element={<AdminRefundsPage />} />
         </Route>
         <Route element={<ProtectedRoute roles={["Seller"]} />}>
           <Route path="/seller" element={<SellerDashboardPage />} />

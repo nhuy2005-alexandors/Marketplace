@@ -14,7 +14,7 @@ export function CheckoutPage() {
   const navigate = useNavigate();
 
   const [address, setAddress] = useState("");
-  const [method, setMethod] = useState("mock");
+  const [method, setMethod] = useState("cod");
   const [couponInput, setCouponInput] = useState("");
   const [couponApplied, setCouponApplied] = useState<{ code: string; discount: number } | null>(null);
   const [error, setError] = useState("");

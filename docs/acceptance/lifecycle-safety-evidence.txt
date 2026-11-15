@@ -1,0 +1,50 @@
+Marketplace lifecycle acceptance — 2026-11-14
+Synthetic fixtures only. No tokens, credentials or customer records.
+
+PORTABLE BACKEND
+Passed: 118; Failed: 0; Skipped: 2 (opt-in Windows LocalDB facts).
+Affected lifecycle/fulfillment tests after demo-revenue correction: 27/27.
+MoMo verification/configuration tests: 4/4, including VND case normalization.
+Frontend regression: 3/3. TypeScript/Vite build: passed.
+
+SQL SERVER
+POPULATED_PREV2_SKU_UPGRADE PASS
+EXISTING_REFUND_PENDING_HOLD_BACKFILL PASS
+REQUEST_SHIPMENT_ATOMIC_RACE PASS
+EXACT_DUPLICATE_REFUND_INDEX_MAPPING PASS
+SQL_TRANSACTION_ROLLBACK PASS
+COMPLETE_REJECT_HOLD_TERMINAL_RACE PASS
+PAYMENT_CALLBACK_RACE_RETRY PASS
+NONUNIQUE_SQL_ERROR_NOT_DUPLICATE PASS
+INITIATION_RESERVATION_SINGLE_PROVIDER_CALL_AND_LATE_SUCCESS PASS
+SIGNED_INCONSISTENT_CAPTURE_DURABLE_RECONCILIATION PASS
+SQL test facts: 2 passed.
+
+REAL BROWSER / API / SQL
+CUSTOMER_PENDING_HOLD_UI_PASS
+Admin PUT order/status during hold: 409.
+Admin reject: 200; PUT order/status after rejection: 200.
+Two repeated refund POSTs for the already-requested fixture order: 409,409.
+Admin complete: 200; completed card has zero processing forms.
+REAL_CUSTOMER_HISTORY_AND_RECONCILIATION_PASS
+REAL_API_ERROR_RETRY_RECOVERY_PASS
+REAL_LIFECYCLE_API_SQL_ASSERTIONS_PASS
+
+REAL SIGNED CALLBACKS (synthetic keys, actual API and SQL Server)
+REAL_INVALID_SIGNATURE_NO_MUTATION PASS
+REAL_SIGNED_CAPTURE_DUPLICATE_LATE_FAILURE PASS
+REAL_LATE_CAPTURE_RECONCILIATION_IDEMPOTENT PASS
+REAL_LEGACY_CAPTURE_DURABLE_RECONCILIATION_PASS
+REAL_SIGNED_MISMATCH_CAPTURE_PERSISTED_IDEMPOTENT_PASS
+
+PERSISTENT DEVELOPMENT
+Target: (localdb)\MarketplaceRefundDev20261113 / ECommerceDb_Dev.
+Applied migrations: 15. Refund fixture records: 0.
+EF: No changes have been made to the model since the last migration.
+
+PRESERVATION
+Original DbSeeder SHA256:
+bd576b8982526d13057bb086981065b87b66553ed56435cc8adf5774f7152c3a
+Canonical V2 backup SHA256:
+f5d7444bc36a1fedea7a367ea52d9353d7bf7d020d51530ac9cffe496189a38e
+Both disposable test instances deleted; persistent development instance retained.

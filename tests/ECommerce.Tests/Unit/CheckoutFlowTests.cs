@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using ECommerce.Application.Common;
 using ECommerce.Application.DTOs.Cart;
 using ECommerce.Application.DTOs.Orders;
@@ -108,6 +109,66 @@ public class CheckoutFlowTests
         result.Success.Should().BeTrue();
         result.Value!.Status.Should().Be("Cancelled");
         (await db.Products.FindAsync(productId))!.Stock.Should().Be(10);
+    }
+
+    [Fact]
+    public async Task CancelOrder_PaidOnlineMustUseRefundWorkflow()
+    {
+        using var db = TestDb.Create();
+        var (userId, productId) = await SeedAsync(db, stock: 10);
+        var cart = new CartService(db);
+        await cart.AddItemAsync(userId, new AddCartItemRequest(productId, 1));
+        var orders = new OrderService(db);
+        var order = (await orders.CheckoutAsync(userId, new CheckoutRequest("x"))).Value!;
+        await new PaymentService(db, TestDb.PaymentFactory())
+            .InitiateAsync(userId, order.Id, new PayOrderRequest("mock", null));
+
+        var result = await orders.CancelAsync(userId, order.Id);
+
+        result.Success.Should().BeFalse();
+        result.ErrorType.Should().Be(ErrorType.Conflict);
+        (await db.Products.FindAsync(productId))!.Stock.Should().Be(9);
+    }
+
+    [Fact]
+    public async Task CancelOrder_UncollectedCodCanBeCancelledWithoutRefund()
+    {
+        using var db = TestDb.Create();
+        var (userId, productId) = await SeedAsync(db, stock: 10);
+        var cart = new CartService(db);
+        await cart.AddItemAsync(userId, new AddCartItemRequest(productId, 2));
+        var orders = new OrderService(db);
+        var order = (await orders.CheckoutAsync(userId, new CheckoutRequest("x"))).Value!;
+        await new PaymentService(db, TestDb.PaymentFactory())
+            .InitiateAsync(userId, order.Id, new PayOrderRequest("cod", null));
+
+        var result = await orders.CancelAsync(userId, order.Id);
+
+        result.Success.Should().BeTrue();
+        result.Value!.Status.Should().Be("Cancelled");
+        (await db.Payments.SingleAsync()).Status.Should().Be(PaymentStatus.Cancelled);
+        (await db.Products.FindAsync(productId))!.Stock.Should().Be(10);
+        (await db.Refunds.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CancelOrder_AfterFulfillmentStartsDoesNotRestoreStock()
+    {
+        using var db = TestDb.Create();
+        var (userId, productId) = await SeedAsync(db, stock: 10);
+        var cart = new CartService(db);
+        await cart.AddItemAsync(userId, new AddCartItemRequest(productId, 4));
+        var orders = new OrderService(db);
+        var order = (await orders.CheckoutAsync(userId, new CheckoutRequest("x"))).Value!;
+        var item = await db.OrderItems.SingleAsync();
+        item.ChangeStatus(FulfillmentStatus.Shipped);
+        await db.SaveChangesAsync();
+
+        var result = await orders.CancelAsync(userId, order.Id);
+
+        result.Success.Should().BeFalse();
+        result.ErrorType.Should().Be(ErrorType.Conflict);
+        (await db.Products.FindAsync(productId))!.Stock.Should().Be(6);
     }
 
     [Fact]

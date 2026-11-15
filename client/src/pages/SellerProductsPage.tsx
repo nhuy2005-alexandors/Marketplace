@@ -84,7 +84,7 @@ export function SellerProductsPage() {
           <Textarea placeholder="Mô tả" value={form.description ?? ""}
             onChange={(e) => setForm({ ...form, description: e.target.value })} />
           <div className="flex gap-2">
-            <Input required type="number" step="0.01" min={0.01} placeholder="Giá" value={form.price || ""}
+            <Input required type="number" step="0.01" min={0.01} placeholder="Giá (USD)" value={form.price || ""}
               onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
               className="w-1/2" />
             <Input required type="number" min={0} placeholder="Tồn kho" value={form.stock || ""}

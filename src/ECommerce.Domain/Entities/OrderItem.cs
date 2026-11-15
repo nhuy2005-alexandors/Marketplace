@@ -20,6 +20,9 @@ public class OrderItem : BaseEntity
 
     public FulfillmentStatus Status { get; set; } = FulfillmentStatus.Pending;
 
+    // Concurrency token: a refund cannot cancel an item while a seller ships it concurrently.
+    public byte[]? RowVersion { get; set; }
+
     public decimal Subtotal => UnitPrice * Quantity;
 
     private static readonly Dictionary<FulfillmentStatus, FulfillmentStatus[]> AllowedTransitions = new()
@@ -41,4 +44,3 @@ public class OrderItem : BaseEntity
         UpdatedAt = DateTime.UtcNow;
     }
 }
-
