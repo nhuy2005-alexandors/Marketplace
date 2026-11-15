@@ -35,9 +35,10 @@ public sealed class AssistantServiceTests
 
         var result = await service.ChatAsync(new AssistantChatRequest("tìm tai nghe Sony"), null);
 
-        Assert.Equal("generated", result.AnswerSource);
-        Assert.Equal([10], result.SourceProductIds);
-        Assert.Equal([10], result.Products.Select(product => product.Id));
+        Assert.Equal("fallback", result.AnswerSource);
+        Assert.Equal([10, 11], result.SourceProductIds);
+        Assert.Contains("Tai nghe Sony", result.Answer);
+        Assert.DoesNotContain("Sony phù hợp.", result.Answer);
     }
 
     [Fact]
@@ -49,9 +50,25 @@ public sealed class AssistantServiceTests
 
         var result = await service.ChatAsync(new AssistantChatRequest("tìm tai nghe Sony"), null);
 
-        Assert.Equal("no-evidence", result.AnswerSource);
-        Assert.Empty(result.Products);
-        Assert.Empty(result.SourceProductIds);
+        Assert.Equal("fallback", result.AnswerSource);
+        Assert.Equal([10], result.SourceProductIds);
+        Assert.Contains("Tai nghe Sony", result.Answer);
+        Assert.Single(result.Products);
+    }
+
+    [Fact]
+    public async Task ChatAsync_UsesGroundedFallbackWhenGeneratorOmitsSourceIds()
+    {
+        var search = new FakeSearch([Candidate(10, "Tai nghe Sony", 0.9)]);
+        var answer = new FakeAnswerProvider(new AssistantGeneratedAnswer("Một câu trả lời không có nguồn.", []));
+        var service = Service(search, answer, new FakeRecommendations());
+
+        var result = await service.ChatAsync(new AssistantChatRequest("tìm tai nghe Sony"), null);
+
+        Assert.Equal("fallback", result.AnswerSource);
+        Assert.Contains("Tai nghe Sony", result.Answer);
+        Assert.DoesNotContain("Một câu trả lời không có nguồn.", result.Answer);
+        Assert.Equal([10], result.SourceProductIds);
     }
 
     [Fact]
