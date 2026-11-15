@@ -46,8 +46,8 @@ public sealed class RecommendationService : IRecommendationService
                     .Where(item => item is not null)
                     .Select(item => item!)
                     .OrderByDescending(item => item.Score)
-                    .ThenByDescending(item => item.Product.Reviews.Count > 0
-                        ? item.Product.Reviews.Average(review => review.Rating) : 0)
+                    .ThenByDescending(item => item.Product.AverageRating)
+                    .ThenByDescending(item => item.Product.ReviewCount)
                     .ThenBy(item => item.Product.Id)
                     .Take(limit)
                     .ToArray();
@@ -126,8 +126,8 @@ public sealed class RecommendationService : IRecommendationService
             .Where(item => item is not null && item.Score > 0)
             .Select(item => item!)
             .OrderByDescending(item => item.Score)
-            .ThenByDescending(item => item.Product.Reviews.Count > 0
-                ? item.Product.Reviews.Average(review => review.Rating) : 0)
+            .ThenByDescending(item => item.Product.AverageRating)
+            .ThenByDescending(item => item.Product.ReviewCount)
             .ThenBy(item => item.Product.Id)
             .Take(limit)
             .ToArray();
