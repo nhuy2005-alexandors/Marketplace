@@ -39,6 +39,15 @@ public sealed class RfmServiceTests
             Item(106, product, seller.Id, FulfillmentStatus.Cancelled));
         partialCancelled.Items.Last().UnitPrice = 50m;
         db.Orders.Add(partialCancelled);
+        db.Orders.Add(Order(106, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            asOf.AddDays(-1), 700m, true, false, false,
+            Item(107, product, seller.Id, FulfillmentStatus.Delivered)));
+        db.Orders.Add(Order(107, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            asOf.AddDays(-2), 800m, false, true, false,
+            Item(108, product, seller.Id, FulfillmentStatus.Delivered)));
+        db.Orders.Add(Order(108, customer.Id, OrderStatus.Delivered, PaymentStatus.Completed,
+            asOf.AddDays(-3), 900m, false, false, true,
+            Item(109, product, seller.Id, FulfillmentStatus.Delivered)));
         await db.SaveChangesAsync();
 
         var result = await new RfmService(db).GetCustomersAsync(1, 25, asOf);
@@ -101,18 +110,24 @@ public sealed class RfmServiceTests
     };
 
     private static Order Order(int id, int userId, OrderStatus status, PaymentStatus paymentStatus,
-        DateTime createdAt, decimal amount, params OrderItem[] items)
+        DateTime createdAt, decimal amount, params OrderItem[] items) =>
+        Order(id, userId, status, paymentStatus, createdAt, amount, false, false, false, items);
+
+    private static Order Order(int id, int userId, OrderStatus status, PaymentStatus paymentStatus,
+        DateTime createdAt, decimal amount, bool isDemo, bool requiresReconciliation, bool refundPending,
+        params OrderItem[] items)
     {
         var order = new Order
         {
             Id = id, UserId = userId, Status = status, ShippingAddress = "Test",
-            CreatedAt = createdAt, Items = items
+            CreatedAt = createdAt, Items = items, RefundPending = refundPending
         };
         foreach (var item in items) item.Order = order;
         order.Payment = new Payment
         {
             Id = id, OrderId = id, Order = order, Amount = amount,
-            Method = PaymentMethod.CreditCard, Status = paymentStatus, CreatedAt = createdAt
+            Method = PaymentMethod.CreditCard, Status = paymentStatus, CreatedAt = createdAt,
+            IsDemo = isDemo, RequiresReconciliation = requiresReconciliation
         };
         return order;
     }
