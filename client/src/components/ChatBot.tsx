@@ -262,7 +262,7 @@ export function ChatBot() {
                         {msg.result.type === "recommendation" && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-gradient-to-r from-indigo-100 to-sky-100 text-indigo-800 dark:from-indigo-950/80 dark:to-sky-950/80 dark:text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
                             <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                            Gợi ý cá nhân hóa (Đồng bộ Màn hình)
+                            Gợi ý cá nhân hóa
                           </span>
                         )}
                         {msg.result.type === "matched" && (
@@ -318,11 +318,7 @@ export function ChatBot() {
                               ? "Sản phẩm tìm thấy:"
                               : "Sản phẩm gợi ý tương tự:"}
                           </span>
-                          {msg.result?.type === "recommendation" && (
-                            <span className="text-[10px] text-indigo-500 font-normal lowercase">
-                              (đang có trên màn hình)
-                            </span>
-                          )}
+
                         </div>
 
                         <div className="grid grid-cols-1 gap-2">
