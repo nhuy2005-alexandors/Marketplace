@@ -26,8 +26,16 @@ public static class DependencyInjection
         services.AddOptions<RecommendationOptions>();
         services.AddScoped<IRecommendationService, RecommendationService>();
         services.AddScoped<IRfmService, RfmService>();
+        services.AddScoped<IRecommendationProvider, NullRecommendationProvider>();
 
         services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
         return services;
     }
+}
+
+internal sealed class NullRecommendationProvider : IRecommendationProvider
+{
+    public Task<IReadOnlyList<ECommerce.Application.DTOs.Catalog.ProductDto>> GetProductsAsync(
+        int? customerId, int limit, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<ECommerce.Application.DTOs.Catalog.ProductDto>>([]);
 }

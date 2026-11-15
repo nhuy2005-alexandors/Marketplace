@@ -1,4 +1,6 @@
 using ECommerce.Infrastructure.Persistence;
+using ECommerce.Infrastructure.Auth;
+using ECommerce.Infrastructure.AI;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -7,6 +9,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ECommerce.Tests.Integration;
 
@@ -49,6 +52,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 new HistoryRow(migrationId, typeof(AppDbContext).Assembly.GetName().Version!.ToString()));
             db.Database.ExecuteSqlRaw(insertScript);
         }
+        // Seed only the isolated SQLite test database; application startup never seeds.
+        DbSeeder.SeedAsync(db, new BCryptPasswordHasher()).GetAwaiter().GetResult();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -64,9 +69,18 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             foreach (var descriptor in toRemove)
                 services.Remove(descriptor);
 
+            services.RemoveAll<IEmbeddingCacheStore>();
+
             services.AddDbContext<AppDbContext>(opt =>
                 opt.UseSqlite(_connection)
                    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
+
+            // Integration tests must never discover a developer's repo-root .env and call Gemini.
+            services.PostConfigure<GeminiOptions>(options =>
+            {
+                options.ApiKey = string.Empty;
+                options.EmbeddingWarmupEnabled = false;
+            });
         });
     }
 

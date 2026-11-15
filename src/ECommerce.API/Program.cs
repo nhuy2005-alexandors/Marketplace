@@ -52,7 +52,12 @@ builder.Services.PostConfigure<ECommerce.Infrastructure.Payments.PaymentOptions>
     o.AllowDemo = builder.Environment.IsDevelopment());
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient(string.Empty, client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient("GeminiClient", client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
 builder.Services.AddControllers();
@@ -99,6 +104,7 @@ builder.Services.AddCors(options =>
 
 // Rate limiting: global per-IP fixed window + policy "auth" chặt cho login/register (chống brute-force).
 const string AuthPolicy = "auth";
+const string AiPolicy = "ai";
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -110,6 +116,10 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+    options.AddPolicy(AiPolicy, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 12, Window = TimeSpan.FromMinutes(1) }));
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -139,14 +149,6 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-}
-
-// Auto-migrate + seed khi khởi động (idempotent) — khỏi phải chạy 'ef database update' tay.
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-    await DbSeeder.SeedAsync(db, hasher);
 }
 
 app.UseCors(CorsPolicy);

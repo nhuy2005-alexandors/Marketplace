@@ -1,0 +1,12 @@
+{"id":"OWNER-DRAFT-001","query":"Một chiếc máy tính nhẹ để mình mang đi học mỗi ngày","scenario":"semantic-natural-paraphrase","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-002","query":"Tìm điện thoại của FictionBrand 07","scenario":"brand","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-003","query":"Laptop có RAM 32 GB","scenario":"typed-attribute-ram","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-004","query":"Điện thoại pin 5000 mAh trở lên","scenario":"typed-attribute-battery-capacity","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-005","query":"Máy tính có màn hình 15.6 inch","scenario":"typed-attribute-screen-size","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-006","query":"Tai nghe chống ồn chủ động ANC","scenario":"typed-attribute-anc","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-007","query":"Máy tính bảng dưới 300 USD","scenario":"price-with-category","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-008","query":"Sách học ngoại ngữ cho người mới bắt đầu","scenario":"semantic-natural-paraphrase","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-009","query":"Tai nghe của thương hiệu không có trong cửa hàng","scenario":"no-result-nonexistent-brand","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-010","query":"Máy tính có pin 99999 mAh","scenario":"no-result-nonexistent-condition","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-011","query":"Tìm sản phẩm của thương hiệu FictionBrand 99","scenario":"no-result-nonexistent-brand","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
+{"id":"OWNER-DRAFT-012","query":"Hôm nay thời tiết ở Hà Nội thế nào?","scenario":"no-result-out-of-scope","expected_product_ids":[],"owner_confirmed":false,"confirmed_by":null,"confirmed_at":null}
