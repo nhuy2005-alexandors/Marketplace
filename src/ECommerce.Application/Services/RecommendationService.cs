@@ -41,6 +41,7 @@ public sealed class RecommendationService : IRecommendationService
             if (profile.OrderCount > 0)
             {
                 var personalized = catalog
+                    .Where(product => !profile.PurchasedProductIds.Contains(product.Id))
                     .Select(product => ScorePersonalized(product, profile))
                     .Where(item => item is not null)
                     .Select(item => item!)
