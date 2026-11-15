@@ -151,6 +151,28 @@ public sealed class SemanticSearchServiceTests
     }
 
     [Fact]
+    public async Task WarmUpAsync_KeepsEarlierSuccessfulBatchesWhenLaterBatchFails()
+    {
+        using var db = TestDb.Create();
+        var category = new Category { Id = 1, Name = "Audio" };
+        var seller = Seller(2, SellerStatus.Approved);
+        db.Users.Add(seller);
+        db.Categories.Add(category);
+        db.Products.AddRange(Enumerable.Range(1, 33)
+            .Select(id => Product(id, $"Audio product {id}", "Portable sound device", category, seller)));
+        await db.SaveChangesAsync();
+
+        var cache = new EmbeddingCacheStore();
+        var embeddings = new FakeEmbeddings(failOnCall: 2);
+        var service = Service(db, embeddings, cache);
+
+        await service.WarmUpAsync();
+
+        Assert.Equal(32, cache.Count);
+        Assert.Equal(2, embeddings.CallCount);
+    }
+
+    [Fact]
     public async Task WarmUpAsync_CachesProductEmbeddingsForSubsequentHybridRetrieval()
     {
         using var db = TestDb.Create();
@@ -215,7 +237,7 @@ public sealed class SemanticSearchServiceTests
         AttributeValues = []
     };
 
-    private sealed class FakeEmbeddings(bool returnNull = false) : IEmbeddingProvider
+    private sealed class FakeEmbeddings(bool returnNull = false, int? failOnCall = null) : IEmbeddingProvider
     {
         public int CallCount { get; private set; }
         public List<string> TaskTypes { get; } = [];
@@ -227,7 +249,7 @@ public sealed class SemanticSearchServiceTests
         {
             CallCount++;
             TaskTypes.Add(taskType);
-            if (returnNull)
+            if (returnNull || CallCount == failOnCall)
                 return Task.FromResult<IReadOnlyList<float[]>?>(null);
 
             IReadOnlyList<float[]> vectors = texts.Select(_ => new[] { 1f, 0f }).ToArray();
