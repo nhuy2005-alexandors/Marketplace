@@ -68,4 +68,21 @@ public sealed class AssistantContextualizerTests
         Assert.True(result.Query.Length <= 1000);
         Assert.True(result.Query.EndsWith(query, StringComparison.Ordinal));
     }
+
+    [Theory]
+    [InlineData("Can you recommend a monitor?")]
+    [InlineData("I want to buy a monitor")]
+    public void Contextualize_NewTopicContainingItInsideAnotherWordDoesNotInheritPreviousSubject(string query)
+    {
+        var turns = new[]
+        {
+            new AssistantConversationTurn("user", "Tìm điện thoại Samsung"),
+            new AssistantConversationTurn("assistant", "Có Samsung.")
+        };
+
+        var result = AssistantContextualizer.Contextualize(query, turns);
+
+        Assert.Equal(query, result.Query);
+    }
+
 }

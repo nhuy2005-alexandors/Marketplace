@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ECommerce.Application.DTOs.AI;
 
 namespace ECommerce.Infrastructure.AI;
@@ -66,7 +67,11 @@ public static class AssistantContextualizer
     private static bool LooksLikeFollowUp(string query)
     {
         var normalized = Normalize(query);
-        return FollowUpCues.Any(cue => normalized.Contains(Normalize(cue), StringComparison.Ordinal));
+        return FollowUpCues.Any(cue =>
+            Regex.IsMatch(
+                normalized,
+                $@"(?<![a-z0-9]){Regex.Escape(Normalize(cue))}(?![a-z0-9])",
+                RegexOptions.CultureInvariant));
     }
 
     private static bool StartsNewTopic(string query)
