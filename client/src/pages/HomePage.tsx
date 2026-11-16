@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Flame, Headphones, PackageCheck, ShieldCheck, Shirt, ShoppingBag, Sparkles, Star, Tag, Truck } from "lucide-react";
-import { useActiveCoupons, useCategories, useProducts } from "../api/hooks";
+import { useActiveCoupons, useCategories, useProducts, useRecommendations } from "../api/hooks";
+import { RecommendationSection } from "../components/RecommendationSection";
 import { ProductCard } from "../components/ProductCard";
 import { HeroBanners } from "../components/home/HeroBanners";
 import { VoucherStrip } from "../components/home/VoucherStrip";
@@ -32,6 +33,7 @@ function CategoryCircle({ category, index }: { category: Category; index: number
 export function HomePage() {
   const { data: categories } = useCategories();
   const { data: coupons } = useActiveCoupons();
+  const { data: recommendations } = useRecommendations(10);
   const { data: featured, isLoading } = useProducts({ page: 1, pageSize: 10, sortBy: "price", desc: true });
   const { data: topRated } = useProducts({ page: 1, pageSize: 5, sortBy: "rating", desc: true });
   const { data: newest } = useProducts({ page: 1, pageSize: 10, sortBy: "createdAt", desc: true });
@@ -78,6 +80,8 @@ export function HomePage() {
       )}
 
       <FlashSale products={flashProducts} />
+
+      {recommendations && <RecommendationSection data={recommendations} />}
 
       {topRated && <ProductSection title="Được yêu thích nhất" icon={Star} products={topRated.items} to="/products?sortBy=rating&desc=true" />}
 

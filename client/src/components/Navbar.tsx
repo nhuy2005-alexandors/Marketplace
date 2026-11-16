@@ -41,6 +41,7 @@ export function Navbar() {
       { to: "/admin/coupons", label: "Mã giảm giá" },
       { to: "/admin/sellers", label: "Duyệt seller" },
       { to: "/admin/refunds", label: "Hoàn tiền" },
+      { to: "/admin/rfm", label: "Phân nhóm RFM" },
     ];
     if (user?.role === "Seller") return [
       { to: "/seller", label: "Dashboard", end: true },
@@ -118,6 +119,7 @@ export function Navbar() {
               ))}
           {user?.role === "Customer" && <NavLink to="/orders" className={navClass}>Đơn hàng</NavLink>}
           {user?.role === "Customer" && <NavLink to="/wishlist" className={navClass}>Yêu thích</NavLink>}
+          <NavLink to="/assistant" className={navClass}>Trợ lý AI</NavLink>
         </div>
       </div>
     </nav>

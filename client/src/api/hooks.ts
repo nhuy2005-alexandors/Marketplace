@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
-  AuthResponse, AttributeDefinition, Brand, Cart, Category, Coupon, CouponPreview, Dashboard,
-  Order, Paged, PayResult, OrderSplit, Product, ProductAttributeFilter, ProductAttributeInput, Refund, Review,
-  SellerApplication, SellerShop, User, WishlistItem,
+  AssistantChatRequest, AssistantChatResponse, AuthResponse, AttributeDefinition, Brand, Cart, Category, Coupon, CouponPreview, Dashboard,
+  Order, Paged, PayResult, OrderSplit, Product, ProductAttributeFilter, ProductAttributeInput, RecommendationResponse, Refund, Review,
+  RfmCustomerPage, SellerApplication, SellerShop, User, WishlistItem,
 } from "../types";
 import { useAuth } from "../store/auth";
 
@@ -274,7 +274,12 @@ export function useCreateReview(productId: number) {
 
 // ---- Cart ----
 export function useCart() {
-  return useQuery({ queryKey: ["cart"], queryFn: () => api.get<Cart>("/cart").then((r) => r.data) });
+  const userId = useAuth((s) => s.user?.id ?? null);
+  return useQuery({
+    queryKey: ["cart", userId],
+    queryFn: () => api.get<Cart>("/cart").then((r) => r.data),
+    enabled: userId !== null,
+  });
 }
 
 export function useAddToCart() {
@@ -305,9 +310,11 @@ export function useRemoveCartItem() {
 
 // ---- Orders ----
 export function useOrders(page = 1, pageSize = 10) {
+  const userId = useAuth((s) => s.user?.id ?? null);
   return useQuery({
-    queryKey: ["orders", page, pageSize],
+    queryKey: userId === null ? ["orders", page, pageSize] : ["orders", page, pageSize, userId],
     queryFn: () => api.get<Paged<Order>>("/orders", { params: { page, pageSize } }).then((r) => r.data),
+    enabled: userId !== null,
   });
 }
 
@@ -474,9 +481,11 @@ export function useRejectRefund() {
 
 // ---- Wishlist ----
 export function useWishlist() {
+  const userId = useAuth((s) => s.user?.id ?? null);
   return useQuery({
-    queryKey: ["wishlist"],
+    queryKey: ["wishlist", userId],
     queryFn: () => api.get<WishlistItem[]>("/wishlist").then((r) => r.data),
+    enabled: userId !== null,
   });
 }
 
@@ -553,5 +562,48 @@ export function useMe() {
       return user;
     },
     enabled: !!token,
+  });
+}
+
+// ---- AI ----
+export function useAssistantChat() {
+  return useMutation({
+    mutationFn: ({ body, signal }: { body: AssistantChatRequest; signal?: AbortSignal }) =>
+      api.post<AssistantChatResponse>("/assistant/chat", body, { signal }).then((r) => r.data),
+  });
+}
+
+export function useRecommendations(take = 10) {
+  const userId = useAuth((s) => s.user?.id ?? null);
+  return useQuery({
+    queryKey: ["recommendations", userId, take],
+    queryFn: () =>
+      api.get<RecommendationResponse>("/recommendations", { params: { take } }).then((r) => r.data),
+    staleTime: 60_000,
+  });
+}
+
+export function useSimilarProducts(productId: number, take = 8) {
+  const userId = useAuth((s) => s.user?.id ?? null);
+  return useQuery({
+    queryKey: ["similar-products", userId, productId, take],
+    queryFn: () =>
+      api.get<RecommendationResponse>("/recommendations/products/" + productId + "/similar", {
+        params: { take },
+      }).then((r) => r.data),
+    enabled: Number.isInteger(productId) && productId > 0,
+    staleTime: 60_000,
+  });
+}
+
+export function useRfmCustomers(page = 1, pageSize = 25, asOfUtc?: string) {
+  const adminId = useAuth((s) => s.user?.role === "Admin" ? s.user.id : null);
+  return useQuery({
+    queryKey: ["rfm-customers", adminId, page, pageSize, asOfUtc ?? "now"],
+    queryFn: () =>
+      api.get<RfmCustomerPage>("/rfm/customers", {
+        params: { page, pageSize, ...(asOfUtc ? { asOfUtc } : {}) },
+      }).then((r) => r.data),
+    enabled: adminId !== null,
   });
 }
