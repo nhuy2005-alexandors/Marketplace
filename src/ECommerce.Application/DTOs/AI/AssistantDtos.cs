@@ -49,7 +49,8 @@ public sealed record AssistantTypedConstraint(
     string? ValueText = null,
     string? Unit = null,
     int? BrandId = null,
-    IReadOnlyList<int>? AttributeDefinitionIds = null);
+    IReadOnlyList<int>? AttributeDefinitionIds = null,
+    int? CategoryId = null);
 
 public sealed record AssistantQueryAnalysis(
     IReadOnlyList<AssistantTypedConstraint> Constraints,

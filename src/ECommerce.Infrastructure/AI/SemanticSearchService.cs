@@ -153,6 +153,9 @@ public sealed class SemanticSearchService : ISemanticSearchService
     {
         var dbQuery = FilteredProducts(filters, constraints);
         if (dbQuery is null) return [];
+        // Category aliases resolve to SQL category names before multilingual retrieval.
+        foreach (var category in constraints.Where(c => c.CategoryId.HasValue && !string.IsNullOrWhiteSpace(c.ValueText)))
+            query += " " + category.ValueText;
         if (RetrievalScoring.TryFindSkuCandidate(query, out var skuCandidate))
         {
             var hasSkuCue = RetrievalScoring.HasNearbySkuCue(query, skuCandidate);
@@ -315,6 +318,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
         if (filters?.InStockOnly == true) dbQuery = dbQuery.Where(p => p.Stock > 0);
         foreach (var constraint in constraints)
         {
+            if (constraint.CategoryId is int requestedCategoryId)
+            {
+                dbQuery = dbQuery.Where(product => product.CategoryId == requestedCategoryId);
+                continue;
+            }
             if (constraint.BrandId is int brandId)
             {
                 if (brandId <= 0) return null;

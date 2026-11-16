@@ -33,6 +33,7 @@ public sealed class AssistantDomainOptions
 {
     public const string SectionName = "AssistantDomain";
     public string[] SupportedAttributeCodes { get; set; } = [];
+    public Dictionary<string, string[]> CategoryAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string[]> AttributeAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, Dictionary<string, string[]>> ValueAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string[]> UnitAliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);

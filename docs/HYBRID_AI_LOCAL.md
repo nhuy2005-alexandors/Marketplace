@@ -69,6 +69,12 @@ retrieval metadata, typed constraints and context action. Hard filters run in
 SQL before recommendation ranking or retrieval. Natural price budgets use USD;
 the existing payment conversion policy remains 25,637 VND per USD.
 
+Vietnamese category requests such as `tìm sách cho tao` resolve through
+`AssistantDomain:CategoryAliases` to categories actually present in SQL. Category
+filters apply before ranking. Overlapping phrases prefer the specific mention
+(`máy tính bảng`); multiple categories or supported direct negation ask for
+clarification instead of silently choosing a category.
+
 Gemini selects and orders existing candidate IDs. The backend renders product
 names, prices, stock and structured attributes from current SQL DTOs. Unknown,
 mixed or empty model selections use the labelled backend catalog fallback;

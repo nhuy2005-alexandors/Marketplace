@@ -1,5 +1,15 @@
 # Active objective — APPROVED Hybrid AI Integration, 2026-11-16
 
+## VERIFIED correction — Vietnamese category requests, 2026-11-16
+
+- Owner screenshot reproduced: `tìm sách cho tao` returned no-evidence despite60Books&Learningproducts. Strict pre-retrieval gate rejected the untranslated category before semantic search. Earlier demo acceptance missed this common Vietnamese query; previous broad assistant readiness does not cover arbitrary natural-language requests.
+- Targeted fix: CategoryAliases in existing AssistantDomain options/config for8currentSQLcategorynames; infer only IDs of categories actually present; carry CategoryId in internal typedconstraint and apply SQLfilter before retrieval/recommendation. Expand retrieval with SQLcategoryname, preserving original query and hard budgets; no model may invent catalog IDs/facts.
+- Alias overlap is resolved by mention containment (`máy tính bảng` outranks contained `máy tính`), not longest across independent categories. Multiple categories or supported direct negation (`đừng tìm sách`, `tôi không muốn tìm sách`) return needs_clarification rather than a positive product filter.
+- Actual RED->GREEN:9Vietnamesequeryregressions initially9FAIL; tablet-overlap1FAIL; reviewnegation/multicategory2FAIL; missingmuonnegation1FAIL. Latest fullsuite351PASS/0FAIL/3guardedSQLSKIP(total354), assistant-vietnamese-verified.trx. The3SQLfacts were separately3PASS in priorauthorizeddisposable run; not rerun for thisAI-onlyfix.
+- Actual live acceptance10/10: screenshotquery,unaccentedbudget,bookrecommendation,followup,computer,tablet,clothing,home,2clarifications. Browser exactscreenshotquery rendered4Books&Learningcards withactualGemini/hybrid; no mockserver. Postreviewlive rechecks exactquery and `tôi không muốn tìm sách` on finalbinary. Model responses remain variable/occasionallyslow; thisfix does not claim full conversational fluency orlatencyoptimization.
+- Source scope7files pluscheckpoint/docs only; Domain/Persistence/migrations/Order/Payment/Refund untouched. Original26pinnedbytes preserved. Cache1395vectors SHA51f62d8bfda768aee9e69c77d05b4c4f5b4bdcdf8b4c6ac9907c1a12de14ff66 unchanged. No DBmutation,migration,reseed,ornewDB issued bythiscorrection. Ownercontinuedtesting maychangecommercecounts; currentSQLreadbackOrders5011Payments4710Products500Refunds1Migrations16 is an observation, not attributed tosourcefix.
+- Branch codex/marketplace-hybrid-ai-20261116, base70733428dad7aa8697f3f9f7dcde10dea8e626a3; correctioncommit recorded in external evidence COMMIT.json afterverifiedlocalcommit. No push/merge. Evidence C:/Users/HUY/Documents/Marketplace-Local-Completion/20261116/assistant-vietnamese-142923/ . API5215restartedexplicitprivateconfig; frontend5173kept. Usercanresubmitthequeryintheexistingassistantpage.
+
 ## VERIFIED — local demo integration accepted, 2026-11-16
 
 - CURRENT STATE: Hybrid AI integration and bounded local demo acceptance completed. Earlier quota-blocked/current-progress sections below are HISTORICAL and SUPERSEDED by this checkpoint. No remote publish/merge.

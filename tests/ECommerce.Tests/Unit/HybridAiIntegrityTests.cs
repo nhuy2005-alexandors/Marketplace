@@ -9,12 +9,87 @@ using ECommerce.Infrastructure.AI;
 using ECommerce.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace ECommerce.Tests.Unit;
 
 public sealed class HybridAiIntegrityTests
 {
     private static readonly DateTime Cutoff = new(2026, 11, 16, 0, 0, 0, DateTimeKind.Utc);
+
+    [Theory]
+    [InlineData("tìm sách cho tao", "Books & Learning")]
+    [InlineData("tim sach cho tao", "Books & Learning")]
+    [InlineData("tìm máy tính cho tôi", "Computers & Laptops")]
+    [InlineData("tìm điện thoại", "Smartphones & Tablets")]
+    [InlineData("tìm tai nghe", "Audio & Wearables")]
+    [InlineData("tìm quần áo", "Fashion & Accessories")]
+    [InlineData("tìm đồ gia dụng", "Home & Living")]
+    [InlineData("tìm đồ thể thao", "Sports & Outdoors")]
+    [InlineData("tìm phụ kiện chơi game", "Gaming & Accessories")]
+    public async Task Vietnamese_category_requests_retrieve_the_actual_category_without_an_English_catalog_word(string query, string categoryName)
+    {
+        using var db = TestDb.Create();
+        await Seed(db);
+        db.Categories.Add(new Category { Id = 77, Name = categoryName, CreatedAt = Cutoff.AddDays(-30) });
+        db.Products.Add(new Product { Id = 88, Sku = "SYNTH-88", Name = "Synthetic catalog item", Description = "Catalog fixture",
+            CategoryId = 77, SellerId = 2, Price = 50, Stock = 5, CreatedAt = Cutoff.AddDays(-20) });
+        await db.SaveChangesAsync();
+        var domain = LocalDomainOptions();
+        var options = Options.Create(new GeminiOptions { GenerationEnabled = false, StrictEvidenceEnabled = true,
+            ContextualizerV2Enabled = true, EmbeddingBatchDelaySeconds = 0 });
+        var search = new SemanticSearchService(db, new FakeEmbeddings(), NullLogger<SemanticSearchService>.Instance,
+            geminiOptions: options, domainOptions: domain);
+        var service = new AssistantService(search, new FakeAnswer(null), new NoRecommendations(),
+            NullLogger<AssistantService>.Instance, geminiOptions: options, domainOptions: domain);
+
+        var result = await service.ChatAsync(new(query), null);
+        Assert.Equal(88, Assert.Single(result.Products).Id);
+        Assert.True(result.Retrieval.HasEvidence);
+        Assert.Contains(result.Constraints!, c => c.Field == "Category" && c.Value == categoryName);
+        Assert.All(await search.FindEligibleProductIdsAsync(null, (await search.AnalyzeQueryAsync(query)).Constraints), id => Assert.Equal(88, id));
+    }
+
+    private static IOptions<AssistantDomainOptions> LocalDomainOptions()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "ECommerce.sln"))) directory = directory.Parent;
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory!.FullName, "src", "ECommerce.API", "appsettings.json")));
+        return Options.Create(json.RootElement.GetProperty("AssistantDomain").Deserialize<AssistantDomainOptions>()!);
+    }
+
+    [Fact]
+    public void Longer_category_phrase_resolves_tablet_without_matching_computer_prefix()
+    {
+        var categories = new[] { new Category { Id = 1, Name = "Computers & Laptops" },
+            new Category { Id = 2, Name = "Smartphones & Tablets" } };
+        var analysis = AssistantQueryAnalyzer.Analyze("tìm máy tính bảng", categories, [], [], [], [], LocalDomainOptions().Value);
+        Assert.Equal("Smartphones & Tablets", Assert.Single(analysis.Constraints).ValueText);
+    }
+
+    [Theory]
+    [InlineData("đừng tìm sách")]
+    [InlineData("tôi không muốn tìm sách")]
+    [InlineData("tìm sách và tai nghe")]
+    public async Task Negated_or_multiple_categories_ask_for_clarification_instead_of_assuming_a_category(string query)
+    {
+        using var db = TestDb.Create();
+        await Seed(db);
+        (await db.Categories.FindAsync(1))!.Name = "Audio & Wearables";
+        db.Categories.Add(new Category { Id = 77, Name = "Books & Learning" });
+        db.Products.Add(new Product { Id = 88, Sku = "SYNTH-88", Name = "Catalog book", CategoryId = 77,
+            SellerId = 2, Price = 50, Stock = 5 });
+        await db.SaveChangesAsync();
+        var domain = LocalDomainOptions();
+        var options = Options.Create(new GeminiOptions { GenerationEnabled = false, StrictEvidenceEnabled = true, ContextualizerV2Enabled = true });
+        var search = new SemanticSearchService(db, new FakeEmbeddings(), NullLogger<SemanticSearchService>.Instance,
+            geminiOptions: options, domainOptions: domain);
+        var service = new AssistantService(search, new FakeAnswer(null), new NoRecommendations(),
+            NullLogger<AssistantService>.Instance, geminiOptions: options, domainOptions: domain);
+        var response = await service.ChatAsync(new(query), null);
+        Assert.Empty(response.Products);
+        Assert.Equal("needs_clarification", response.ContextAction);
+    }
 
     [Theory]
     [InlineData("tai nghe dưới 100 USD", 100)]

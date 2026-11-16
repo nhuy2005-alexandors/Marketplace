@@ -64,6 +64,9 @@ public sealed class AssistantService : IAssistantService
             return NoEvidence(request.Conversation?.ConversationId, filters: filters);
         if (contextualQuery != query && (_geminiOptions.StrictEvidenceEnabled || _geminiOptions.ContextualizerV2Enabled))
             analysis = await _search.AnalyzeQueryAsync(contextualQuery, ct);
+        if (analysis.UnsupportedConstraints.Contains("category-clarification"))
+            return NoEvidence(request.Conversation?.ConversationId, contextAction: "needs_clarification", filters: filters) with
+            { Answer = "Bạn muốn tìm ở danh mục nào? Hãy chọn một loại sản phẩm để mình lọc đúng yêu cầu nhé." };
         var constraints = _geminiOptions.StrictEvidenceEnabled ? analysis.Constraints : Array.Empty<AssistantTypedConstraint>();
         var missingAttribute = analysis.UnsupportedConstraints.FirstOrDefault(value => value.StartsWith("context-attribute:", StringComparison.Ordinal));
         var unsupportedConstraint = analysis.UnsupportedConstraints.Any(value => !value.StartsWith("context-attribute:", StringComparison.Ordinal));

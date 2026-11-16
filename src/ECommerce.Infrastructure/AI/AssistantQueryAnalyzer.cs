@@ -21,6 +21,24 @@ public static partial class AssistantQueryAnalyzer
         var supportedDefinitions = definitions.Where(definition => supportedCodes.Contains(definition.Code)).ToArray();
         var matchedDefinitions = supportedDefinitions.Where(definition => HasAttributeCue(normalized, definition, options)).ToArray();
 
+        var categoryMentions = categories.SelectMany(category => new[] { category.Name }
+            .Concat(GetAliases(options.CategoryAliases, category.Name)).Select(RetrievalScoring.Normalize)
+            .Where(alias => alias.Length > 0).Distinct()
+            .SelectMany(alias => Regex.Matches(normalized, $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(alias)}(?![\p{{L}}\p{{N}}])")
+                .Select(match => new { Category = category, match.Index, match.Length }))).ToArray();
+        // Prefer a longer phrase only when it contains the shorter mention (e.g. tablet vs computer).
+        var specificMentions = categoryMentions.Where(mention => !categoryMentions.Any(other =>
+            other.Length > mention.Length && other.Index <= mention.Index &&
+            other.Index + other.Length >= mention.Index + mention.Length)).ToArray();
+        var matchedCategories = specificMentions.Select(mention => mention.Category).DistinctBy(category => category.Id).ToArray();
+        var negatedCategory = specificMentions.Any(mention => Regex.IsMatch(normalized[..mention.Index],
+            @"\b(?:khong|dung|ngoai tru|not|no|don t)(?:\s+(?:muon|tim|mua|chon|can|thich|lay|find|want|show)){0,3}\s*$"));
+        if (matchedCategories.Length > 1 || negatedCategory)
+            unsupported.Add("category-clarification");
+        else if (matchedCategories.Length == 1)
+            constraints.Add(new AssistantTypedConstraint(null, "Category", 3, "equals",
+                ValueText: matchedCategories[0].Name, CategoryId: matchedCategories[0].Id));
+
         var knownBrand = brands.FirstOrDefault(brand => ContainsPhrase(normalized, brand.Name));
         if (knownBrand is not null)
             constraints.Add(new AssistantTypedConstraint(null, "Brand", 3, "equals", ValueText: knownBrand.Name, BrandId: knownBrand.Id));
@@ -110,13 +128,13 @@ public static partial class AssistantQueryAnalyzer
             .Concat(products.SelectMany(p => new[] { p.Name, p.Sku }))
             .Concat(brands.Select(b => b.Name))
             .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
-        var coalesced = constraints.GroupBy(c => $"{c.Field}:{c.DataType}:{c.BrandId}:{c.Operator}:{c.ValueNumber}:{c.ValueBoolean}:{c.ValueText}:{c.Unit}")
+        var coalesced = constraints.GroupBy(c => $"{c.Field}:{c.DataType}:{c.CategoryId}:{c.BrandId}:{c.Operator}:{c.ValueNumber}:{c.ValueBoolean}:{c.ValueText}:{c.Unit}")
             .Select(group => group.First() with { AttributeDefinitionIds = group.Where(c => c.AttributeDefinitionId.HasValue)
                 .SelectMany(c => c.AttributeDefinitionIds ?? [c.AttributeDefinitionId!.Value]).Distinct().ToArray() }).ToArray();
         return new AssistantQueryAnalysis(
             coalesced,
-            catalogTerms.Any(term => RetrievalScoring.LexicalScore(query, term!) > 0),
-            productTerms.Any(term => RetrievalScoring.LexicalScore(query, term!) > 0),
+            matchedCategories.Length > 0 || catalogTerms.Any(term => RetrievalScoring.LexicalScore(query, term!) > 0),
+            matchedCategories.Length > 0 || productTerms.Any(term => RetrievalScoring.LexicalScore(query, term!) > 0),
             unsupported.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
