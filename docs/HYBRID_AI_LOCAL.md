@@ -69,6 +69,11 @@ retrieval metadata, typed constraints and context action. Hard filters run in
 SQL before recommendation ranking or retrieval. Natural price budgets use USD;
 the existing payment conversion policy remains 25,637 VND per USD.
 
+Explicit USD budgets accept `$1000`, `1000$`, `1000 USD`, grouped `1,000$` /
+`1.000$`, and decimal `1,000.50 USD` / `1.000,50 USD`. `Trên` / `dưới` exclude
+the boundary price; `ít nhất` / `tối đa` and `từ ... đến ...` include it.
+Malformed or overflowing amounts are rejected rather than silently dropping the filter.
+
 Vietnamese category requests such as `tìm sách cho tao` resolve through
 `AssistantDomain:CategoryAliases` to categories actually present in SQL. Category
 filters apply before ranking. Overlapping phrases prefer the specific mention

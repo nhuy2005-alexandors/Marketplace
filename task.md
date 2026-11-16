@@ -1,5 +1,16 @@
 # Active objective — APPROVED Hybrid AI Integration, 2026-11-16
 
+## VERIFIED correction — USD price suffix and boundaries, 2026-11-16
+
+- Bounded independent source review completed: no concrete finding established in supported syntax. Reviewer read the actual parser diff, both merge callers and SQL predicates; tests/providers/DB/browser were not independently rerun. Root read the verdict and actual diff. The untested SQL maximum-price boundary is outside this screenshot acceptance; no claim is made for that edge.
+- Recovery check: current branch/HEAD and actual diff re-read; backend rerun 367 PASS / 0 FAIL / 3 guarded SQL SKIP. The exact screenshot query was rerun against the running API and returned 1784.03 / 1100.40 / 1252.80 / 1165.72 USD, all above 1000. Frontend HTTP 200; hybrid retrieval active. Original 26 file hashes and embedding cache hash rechecked unchanged. No persistent SQL mutation or remote publication.
+- Owner screenshot reproduced on base3feef1da1b3cfb2bcc777324e45a57d4d9f20a7c: `laptop giá trên 1000$` returned680.93/637.39/376.13USD becausepriceparseracceptedprefix$ andsuffixUSD butnotsuffix$. Thiswasanactualhardfilterbug,notamodelfactualchange.
+- CorrectedonlyAssistantQueryFilters productionlogic: currencybefore/afternumber; US/Vietnamese grouping anddecimalnotation; strictabove/below useonecentoffset againstexistinginclusiveAPIbounds becauseSQLPriceisdecimal18,2; inclusiveatleast/atmost/rangespreserved. Malformednumericformat/overflowthrows existingDomainException ->HTTP400 insteadofzero/unfilteredsearch. NoDTO/schema/UI/paymentchange.
+- ValidRED19FAIL4PASS onoriginalparser(with correctedtestfixtures); fixedfullsuite367PASS0FAIL3guardedSQLSKIP(total370). Aninitialtestdrafthad4nullableDoubleInlineData typeerrors; replacedexpectedvalueswithexactdecimalstrings andreranRED. Testsverify999.99/1000/1000.01 actualservicefilterboundaries. Existingunder30testexpectationchanged29.99 intentionallyforstrictsemantics,notdisabled.
+- Actualfinal7/7API/SQLlivePASS: exactscreenshotquery,below1000$,1.000$grouping,1000$-1500$range,rankedrecommendation,carriedfollowup,malformedamount400. All returnedproductscorrectcategory1andSQLname/price/stock/SKU. Exactqueryandbrowsernowshow1784.03/1100.40/1252.80/1165.72USD—all>1000. Hybridreadytrue.
+- Original26bytes preserved,Domain/Persistence/Order/Payment/Refund/frontendunchanged; cache1395/SHA51f62d8bfda768aee9e69c77d05b4c4f5b4bdcdf8b4c6ac9907c1a12de14ff66 unchanged. No persistentDBwrites/newDB/migration/reseed/providerpayment.
+- Evidence C:/Users/HUY/Documents/Marketplace-Local-Completion/20261116/assistant-price-151647/ . Read-onlyboundedprice review runsbeforelocalcommit. Finalcommit/receiptinexternalCOMMIT.json. No push/merge; API5215andfrontend5173keptforOwnerresubmission. EarlierSQLdisposable3/3PASSretained; notrerunforpriceparserchange.
+
 ## VERIFIED correction — Vietnamese category requests, 2026-11-16
 
 - Owner screenshot reproduced: `tìm sách cho tao` returned no-evidence despite60Books&Learningproducts. Strict pre-retrieval gate rejected the untranslated category before semantic search. Earlier demo acceptance missed this common Vietnamese query; previous broad assistant readiness does not cover arbitrary natural-language requests.

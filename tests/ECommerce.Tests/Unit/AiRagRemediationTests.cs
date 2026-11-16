@@ -1179,7 +1179,7 @@ public sealed class AiRagRemediationTests
     {
         var filters = AssistantQueryFilters.Merge("headphones under $30", new AssistantChatFilters(MinPrice: 10, MaxPrice: 40));
         Assert.Equal(10, filters.MinPrice);
-        Assert.Equal(30, filters.MaxPrice);
+        Assert.Equal(29.99m, filters.MaxPrice);
 
         var range = AssistantQueryFilters.Merge("from $15 to $25", null);
         Assert.Equal(15, range.MinPrice);

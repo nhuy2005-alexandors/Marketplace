@@ -5,11 +5,13 @@ using ECommerce.Application.Options;
 using ECommerce.Application.Services;
 using ECommerce.Domain.Entities;
 using ECommerce.Domain.Enums;
+using ECommerce.Domain.Exceptions;
 using ECommerce.Infrastructure.AI;
 using ECommerce.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
+using System.Globalization;
 
 namespace ECommerce.Tests.Unit;
 
@@ -92,14 +94,58 @@ public sealed class HybridAiIntegrityTests
     }
 
     [Theory]
-    [InlineData("tai nghe dưới 100 USD", 100)]
-    [InlineData("tai nghe dưới $59.99", 59.99)]
+    [InlineData("tai nghe dưới 100 USD", 99.99)]
+    [InlineData("tai nghe dưới $59.99", 59.98)]
     [InlineData("headphones up to $100", 100)]
     [InlineData("headphones at most $100", 100)]
     [InlineData("headphones no more than $100", 100)]
     [InlineData("headphones maximum 100 USD", 100)]
     public void Vietnamese_budget_preserves_currency_and_decimal(string query, decimal maximum)
         => Assert.Equal(maximum, AssistantQueryFilters.Merge(query, null).MaxPrice);
+
+    [Theory]
+    [InlineData("laptop giá trên 1000$", "1000.01", null)]
+    [InlineData("laptop giá trên $1000", "1000.01", null)]
+    [InlineData("laptop trên 1.000$", "1000.01", null)]
+    [InlineData("laptop trên 1,000$", "1000.01", null)]
+    [InlineData("laptop trên 1,000.50 USD", "1000.51", null)]
+    [InlineData("laptop trên 1.000,50$", "1000.51", null)]
+    [InlineData("laptop dưới 1000$", null, "999.99")]
+    [InlineData("laptop tối đa 1000$", null, "1000")]
+    [InlineData("laptop ít nhất 1000$", "1000", null)]
+    [InlineData("laptop từ 1000$ đến 1500$", "1000", "1500")]
+    [InlineData("laptop từ 1.000$ đến 1.500$", "1000", "1500")]
+    public void Price_bounds_accept_currency_order_grouping_and_strict_comparators(string query, string? minimum, string? maximum)
+    {
+        var filters = AssistantQueryFilters.Merge(query, null);
+        Assert.Equal(minimum is null ? null : (decimal?)decimal.Parse(minimum, CultureInfo.InvariantCulture), filters.MinPrice);
+        Assert.Equal(maximum is null ? null : (decimal?)decimal.Parse(maximum, CultureInfo.InvariantCulture), filters.MaxPrice);
+    }
+
+    [Theory]
+    [InlineData("tai nghe giá trên 1000$", "1000.01")]
+    [InlineData("tai nghe giá dưới 1000$", "999.99")]
+    public async Task Assistant_price_filters_exclude_the_boundary_and_the_wrong_side(string query, string expectedPrice)
+    {
+        using var db = TestDb.Create();
+        await Seed(db); // Product10 is exactly1000, so neither strict bound may return it.
+        foreach (var (id, price) in new[] { (11, 999.99m), (12, 1000.01m) })
+            db.Products.Add(new Product { Id = id, Sku = $"SYNTH-{id}", Name = "Tai nghe", CategoryId = 1,
+                SellerId = 2, Price = price, Stock = 5, CreatedAt = Cutoff.AddDays(-20) });
+        await db.SaveChangesAsync();
+        var options = Options.Create(new GeminiOptions { GenerationEnabled = false, StrictEvidenceEnabled = true, EmbeddingBatchDelaySeconds = 0 });
+        var search = new SemanticSearchService(db, new FakeEmbeddings(), NullLogger<SemanticSearchService>.Instance, geminiOptions: options);
+        var assistant = new AssistantService(search, new FakeAnswer(null), new NoRecommendations(), NullLogger<AssistantService>.Instance, geminiOptions: options);
+        var result = await assistant.ChatAsync(new(query), null);
+        Assert.Equal(decimal.Parse(expectedPrice, CultureInfo.InvariantCulture), Assert.Single(result.Products).Price);
+    }
+
+    [Theory]
+    [InlineData("laptop trên $1..000")]
+    [InlineData("laptop trên 1000.123$")]
+    [InlineData("laptop trên $999999999999999999999999999999999")]
+    public void Invalid_or_overflowing_price_does_not_silently_become_zero_or_unfiltered(string query)
+        => Assert.Throws<DomainException>(() => AssistantQueryFilters.Merge(query, null));
 
     [Theory]
     [InlineData("RAM at least 16 GB and storage at most 512 GB")]
