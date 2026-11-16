@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<IPaymentProvider, MockPaymentProvider>();
         services.AddScoped<IPaymentProvider, CodPaymentProvider>();
         services.AddScoped<IPaymentProvider, MoMoProvider>();
+        services.AddScoped<IPaymentProvider, VnpayProvider>();
         services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
 
         services.AddScoped<IFileStorage, LocalFileStorage>();

@@ -331,12 +331,20 @@ export function useCheckout() {
   });
 }
 
-// method: mock | cod | momo. Trả requiresRedirect=true kèm redirectUrl khi cần chuyển sang cổng.
+// method: mock | cod | momo | vnpay. Trả requiresRedirect=true kèm redirectUrl khi cần chuyển sang cổng.
 export function usePayOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, method, returnUrl }: { id: number; method: string; returnUrl?: string }) =>
       api.post<PayResult>(`/orders/${id}/pay`, { method, returnUrl }).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+  });
+}
+
+export function useQueryVnpayPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<Order>(`/payments/vnpay/orders/${id}/query`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
   });
 }

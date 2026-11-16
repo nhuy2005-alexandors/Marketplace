@@ -76,8 +76,9 @@ public interface IOrderService
 
 public interface IPaymentService
 {
-    Task<Result<PayResultDto>> InitiateAsync(int userId, int orderId, PayOrderRequest request, CancellationToken ct = default);
+    Task<Result<PayResultDto>> InitiateAsync(int userId, int orderId, PayOrderRequest request, CancellationToken ct = default, string clientIp = "127.0.0.1");
     Task<Result<OrderDto>> ConfirmAsync(string provider, IReadOnlyDictionary<string, string> callbackData, CancellationToken ct = default);
+    Task<Result<OrderDto>> QueryAsync(int userId, bool isAdmin, int orderId, CancellationToken ct = default);
 }
 
 public interface ICouponService

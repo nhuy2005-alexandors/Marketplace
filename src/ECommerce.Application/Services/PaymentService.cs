@@ -9,10 +9,10 @@ namespace ECommerce.Application.Services;
 
 public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers) : IPaymentService
 {
-    public async Task<Result<PayResultDto>> InitiateAsync(int userId, int orderId, PayOrderRequest request, CancellationToken ct = default)
+    public async Task<Result<PayResultDto>> InitiateAsync(int userId, int orderId, PayOrderRequest request, CancellationToken ct = default, string clientIp = "127.0.0.1")
     {
         var key = (request.Method ?? "").Trim().ToLowerInvariant();
-        if (key is not ("mock" or "cod" or "momo"))
+        if (key is not ("mock" or "cod" or "momo" or "vnpay"))
             return Result.Fail<PayResultDto>("Invalid payment method.");
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payment).FirstOrDefaultAsync(o => o.Id == orderId, ct);
         if (order is null) return Result.Fail<PayResultDto>("Order not found.", ErrorType.NotFound);
@@ -24,15 +24,17 @@ public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers)
             return Result.Fail<PayResultDto>("Order cannot start another payment attempt.", ErrorType.Conflict);
 
         var provider = providers.Resolve(key);
-        var reference = $"{order.Id}-{Guid.NewGuid():N}";
+        var reference = key == "vnpay"
+            ? $"{order.Id}x{DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture)}x{Guid.NewGuid():N}"
+            : $"{order.Id}-{Guid.NewGuid():N}";
         // The redirect endpoint is server-owned. Never let a client choose where the
         // payment provider sends its signed return payload.
-        var context = new PaymentContext(order.Id, order.Total, string.Empty, "0.0.0.0", reference);
+        var context = new PaymentContext(order.Id, order.Total, string.Empty, clientIp, reference);
         var quote = provider.Quote(context);
         if (quote.Error is not null) return Result.Fail<PayResultDto>(quote.Error, ErrorType.Conflict);
         var payment = order.Payment ?? new Payment { OrderId = order.Id };
         payment.Amount = order.Total;
-        payment.Method = key switch { "cod" => PaymentMethod.CashOnDelivery, "momo" => PaymentMethod.EWallet, _ => PaymentMethod.CreditCard };
+        payment.Method = key switch { "cod" => PaymentMethod.CashOnDelivery, "momo" or "vnpay" => PaymentMethod.EWallet, _ => PaymentMethod.CreditCard };
         payment.ProviderKey = key;
         payment.ProviderReference = reference;
         payment.ProviderAmount = quote.Amount;
@@ -69,7 +71,7 @@ public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers)
             payment.RequiresReconciliation = order.Status != OrderStatus.Pending || order.RefundPending;
             if (!payment.RequiresReconciliation) order.ChangeStatus(OrderStatus.Paid);
         }
-        else if (key == "momo" && (string.IsNullOrEmpty(init.RedirectUrl) || init.TransactionId != reference ||
+        else if (key is "momo" or "vnpay" && (string.IsNullOrEmpty(init.RedirectUrl) || init.TransactionId != reference ||
                  init.ProviderAmount != quote.Amount || init.ProviderCurrency != quote.Currency))
         {
             payment.Status = PaymentStatus.Failed;
@@ -87,18 +89,40 @@ public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers)
     public async Task<Result<OrderDto>> ConfirmAsync(string provider, IReadOnlyDictionary<string,string> data, CancellationToken ct = default)
     {
         // Demo/COD never accept public callbacks, even in Development.
-        if (!string.Equals(provider, "momo", StringComparison.OrdinalIgnoreCase))
+        var key = provider.ToLowerInvariant();
+        if (key is not ("momo" or "vnpay"))
             return Result.Fail<OrderDto>("Unsupported callback provider.");
-        var verified = await providers.Resolve("momo").VerifyAsync(data, ct);
+        var verified = await providers.Resolve(key).VerifyAsync(data, ct);
+        return await ApplyVerifiedAsync(key, verified, ct);
+    }
+
+    public async Task<Result<OrderDto>> QueryAsync(int userId, bool isAdmin, int orderId, CancellationToken ct = default)
+    {
+        var order = await db.Orders.Include(o => o.Payment).FirstOrDefaultAsync(o => o.Id == orderId, ct);
+        if (order is null) return Result.Fail<OrderDto>("Order not found.", ErrorType.NotFound);
+        if (!isAdmin && order.UserId != userId) return Result.Fail<OrderDto>("Access denied.", ErrorType.Forbidden);
+        if (order.Payment?.ProviderKey != "vnpay" || string.IsNullOrEmpty(order.Payment.ProviderReference) ||
+            providers.Resolve("vnpay") is not IPaymentQueryProvider query)
+            return Result.Fail<OrderDto>("The order has no VNPAY payment attempt to query.", ErrorType.Conflict);
+        var verified = await query.QueryAsync(order.Payment.ProviderReference, ct);
+        if (verified.OrderId != orderId && verified.Authenticated)
+            return Result.Fail<OrderDto>("VNPAY query identified a different order.", ErrorType.Conflict);
+        return await ApplyVerifiedAsync("vnpay", verified, ct);
+    }
+
+    private async Task<Result<OrderDto>> ApplyVerifiedAsync(string provider, PaymentVerifyResult verified, CancellationToken ct)
+    {
         if (!verified.Authenticated)
             return Result.Fail<OrderDto>(verified.Error ?? "Invalid provider authentication.");
+        if (!verified.IsFinal)
+            return Result.Fail<OrderDto>(verified.Error ?? "Payment is not final.", ErrorType.Conflict);
         var order = await db.Orders.Include(o => o.Items).Include(o => o.Payment).FirstOrDefaultAsync(o => o.Id == verified.OrderId, ct);
         if (order is null) return Result.Fail<OrderDto>("Order not found.", ErrorType.NotFound);
         var payment = order.Payment;
         // Pre-cutover MoMo stored the request ID in TransactionId and had no
         // frozen provider quote. A matching signed capture is money evidence,
         // not permission to infer historical FX or activate fulfillment.
-        if (payment is { Method: PaymentMethod.EWallet, ProviderReference: null, ProviderKey: null } &&
+        if (provider == "momo" && payment is { Method: PaymentMethod.EWallet, ProviderReference: null, ProviderKey: null } &&
             payment.Status is PaymentStatus.Pending or PaymentStatus.Failed &&
             !string.IsNullOrEmpty(payment.TransactionId) && payment.TransactionId == verified.RequestId &&
             verified.Success && !string.IsNullOrWhiteSpace(verified.TransactionId) &&
@@ -120,17 +144,20 @@ public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers)
             catch (DbUpdateException) { return Result.Fail<OrderDto>("Legacy capture reconciliation conflicted. Retry the callback.", ErrorType.Conflict); }
             return Result.Ok(order.ToDto());
         }
-        if (payment is null || payment.Method != PaymentMethod.EWallet || payment.ProviderKey != "momo" ||
+        if (payment is null || payment.Method != PaymentMethod.EWallet || payment.ProviderKey != provider ||
             string.IsNullOrEmpty(payment.ProviderReference) || payment.ProviderReference != verified.RequestId)
             return Result.Fail<OrderDto>("Callback does not match the stored payment attempt.", ErrorType.Conflict);
 
         var quoteMatches = payment.ProviderAmount is not null && payment.ProviderAmount == verified.Amount &&
             payment.ProviderCurrency == "VND" && verified.Currency == "VND" && payment.Amount == order.Total;
-        var conflictingCapture = payment.Status is PaymentStatus.Completed or PaymentStatus.Refunded &&
-            payment.TransactionId != verified.TransactionId;
+        var reusedCapture = verified.Success && await db.Payments.AsNoTracking().AnyAsync(p =>
+            p.Id != payment.Id && p.ProviderKey == provider && p.TransactionId == verified.TransactionId, ct);
+        var conflictingCapture = (payment.Status is PaymentStatus.Completed or PaymentStatus.Refunded &&
+            payment.TransactionId != verified.TransactionId) || reusedCapture ||
+            (provider == "vnpay" && payment.Status == PaymentStatus.Failed);
         if (verified.Success && (!quoteMatches || conflictingCapture))
         {
-            if (verified.Amount is null or <= 0 || verified.Amount > 50_000_000 || verified.Currency?.Length != 3 ||
+            if (verified.Amount is null or <= 0 || verified.Amount > (provider == "vnpay" ? 9_999_999_999m : 50_000_000m) || verified.Currency?.Length != 3 ||
                 string.IsNullOrWhiteSpace(verified.TransactionId) || verified.TransactionId.Length > 100)
                 return Result.Fail<OrderDto>("Invalid capture fields.");
             if (payment.RequiresReconciliation && payment.ReconciliationReference == verified.TransactionId &&
@@ -142,7 +169,7 @@ public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers)
             payment.ReconciliationAmount = verified.Amount;
             payment.ReconciliationCurrency = verified.Currency;
             payment.ReconciliationReference = verified.TransactionId;
-            if (payment.Status is not (PaymentStatus.Completed or PaymentStatus.Refunded))
+            if (!reusedCapture && payment.Status is not (PaymentStatus.Completed or PaymentStatus.Refunded))
             {
                 payment.Status = PaymentStatus.Completed;
                 payment.TransactionId = verified.TransactionId;
@@ -186,7 +213,18 @@ public class PaymentService(IAppDbContext db, IPaymentProviderFactory providers)
         OrderLifecycle.Touch(db, order);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Result.Fail<OrderDto>("Payment changed concurrently. Retry the callback.", ErrorType.Conflict); }
-        catch (DbUpdateException) { return Result.Fail<OrderDto>("Payment capture could not be committed; reconcile the provider reference.", ErrorType.Conflict); }
+        catch (DbUpdateException)
+        {
+            // A concurrent capture can win the provider transaction ID after our earlier check.
+            if (verified.Success && await db.Payments.AsNoTracking().AnyAsync(p =>
+                p.Id != payment.Id && p.ProviderKey == provider && p.TransactionId == verified.TransactionId, ct))
+            {
+                await db.Entry(payment).ReloadAsync(ct);
+                await db.Entry(order).ReloadAsync(ct);
+                return await ApplyVerifiedAsync(provider, verified, ct);
+            }
+            return Result.Fail<OrderDto>("Payment capture could not be committed; reconcile the provider reference.", ErrorType.Conflict);
+        }
         return Result.Ok(order.ToDto());
     }
 }

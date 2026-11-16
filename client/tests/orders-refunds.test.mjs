@@ -6,16 +6,26 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createServer } from 'vite';
 
-async function renderOrders(prepare) {
+async function renderOrders(prepare, initialEntry = '/orders') {
   const vite = await createServer({ configFile: 'vite.config.ts', server: { middlewareMode: true, hmr: false }, appType: 'custom' });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false } } });
   try {
     const { OrdersPage } = await vite.ssrLoadModule('/src/pages/OrdersPage.tsx');
     prepare(client);
     return renderToStaticMarkup(React.createElement(QueryClientProvider, { client },
-      React.createElement(MemoryRouter, null, React.createElement(OrdersPage))));
+      React.createElement(MemoryRouter, { initialEntries: [initialEntry] }, React.createElement(OrdersPage))));
   } finally { client.clear(); await vite.close(); }
 }
+
+test('VNPAY browser return displays pending verification instead of payment success', async () => {
+  const html = await renderOrders(client => {
+    client.setQueryData(['orders', 1, 5], { items: [], page: 1, totalPages: 1 });
+    client.setQueryData(['refunds', 'mine', 1, 100, []], { items: [], page: 1, totalPages: 1 });
+  }, '/orders?payment=pending&orderId=123');
+  assert.match(html, /Kết quả thanh toán VNPAY được xác minh/);
+  assert.match(html, /Kiểm tra với VNPAY/);
+  assert.doesNotMatch(html, /Thanh toán thành công!/);
+});
 
 test('customer receives an error and retry control when orders fail to load', async () => {
   const html = await renderOrders(client => {

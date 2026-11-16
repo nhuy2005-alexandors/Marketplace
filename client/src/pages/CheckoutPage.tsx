@@ -80,7 +80,8 @@ export function CheckoutPage() {
                 className="mt-1"
               >
                 <option value="mock">Thẻ demo (hoàn tất ngay)</option>
-                <option value="momo">Ví MoMo</option>
+                <option value="vnpay">VNPAY Sandbox</option>
+                <option value="momo" disabled>Ví MoMo (tạm ngừng)</option>
                 <option value="cod">Thanh toán khi nhận hàng</option>
               </Select>
             </div>

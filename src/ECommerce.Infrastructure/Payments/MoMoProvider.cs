@@ -86,6 +86,9 @@ public class MoMoProvider : IPaymentProvider
                 Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
             };
             using var res = await Http.SendAsync(req, ct);
+            if (!res.IsSuccessStatusCode)
+                return new PaymentInitResult(false, null, "",
+                    $"MoMo gateway returned HTTP {(int)res.StatusCode}. Payment initiation was not confirmed; do not retry this attempt.");
             var json = await res.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -102,6 +105,11 @@ public class MoMoProvider : IPaymentProvider
                 return new PaymentInitResult(false, null, "", "MoMo không trả về payUrl.");
 
             return new PaymentInitResult(false, payUrl, requestId, null, amountVnd, "VND");
+        }
+        catch (JsonException)
+        {
+            return new PaymentInitResult(false, null, "",
+                "MoMo gateway returned an invalid JSON response. Payment initiation was not confirmed; do not retry this attempt.");
         }
         catch (Exception ex)
         {

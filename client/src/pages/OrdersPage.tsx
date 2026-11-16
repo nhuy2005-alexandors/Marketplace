@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Package } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
-import { useCancelOrder, useMyRefunds, useOrders, useRequestRefund, useUpdateOrderStatus } from "../api/hooks";
+import { useCancelOrder, useMyRefunds, useOrders, useQueryVnpayPayment, useRequestRefund, useUpdateOrderStatus } from "../api/hooks";
 import { useAuth } from "../store/auth";
 import { apiError } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
@@ -19,6 +19,9 @@ export function OrdersPage() {
   const [page, setPage] = useState(1);
   const [params] = useSearchParams();
   const paymentResult = params.get("payment"); // success | failed (redirect từ MoMo)
+  const returnedOrderId = Number(params.get("orderId"));
+  const queryVnpay = useQueryVnpayPayment();
+  const [queryError, setQueryError] = useState("");
   const { data, isLoading, isError, refetch } = useOrders(page, 5);
   const isAdmin = useAuth((s) => s.user?.role === "Admin");
   const refunds = useMyRefunds(1, 100, !isAdmin && !!data, data?.items.map(o => o.id));
@@ -57,6 +60,15 @@ export function OrdersPage() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 animate-fade-in">
       <PageHeader title={isAdmin ? "Tất cả đơn hàng" : "Đơn hàng của tôi"} />
+      {paymentResult === "pending" && <div role="status" className="mb-4 space-y-2">
+        <p>Kết quả thanh toán VNPAY được xác minh qua IPN hoặc truy vấn. Xem trạng thái đơn bên dưới.</p>
+        {Number.isSafeInteger(returnedOrderId) && returnedOrderId > 0 && <Button disabled={queryVnpay.isPending} onClick={() => {
+          setQueryError("");
+          queryVnpay.mutate(returnedOrderId, { onError: error => setQueryError(apiError(error)) });
+        }}>Kiểm tra với VNPAY</Button>}
+        <Button variant="ghost" onClick={() => { void refetch(); }}>Tải lại đơn hàng</Button>
+        {queryError && <p role="alert">{queryError}</p>}
+      </div>}
       {paymentResult === "reconciliation" && <div role="alert">Đã ghi nhận thanh toán nhưng đơn cần đối soát. Vui lòng liên hệ hỗ trợ.</div>}
 
       {paymentResult === "success" && (
