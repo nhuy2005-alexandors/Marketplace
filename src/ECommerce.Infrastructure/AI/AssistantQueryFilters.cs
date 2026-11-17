@@ -7,6 +7,7 @@ namespace ECommerce.Infrastructure.AI;
 
 public static partial class AssistantQueryFilters
 {
+    private const decimal SqlPriceMax = 9999999999999999.99m;
     private const string Number = @"[0-9]+(?:[.,]+[0-9]+)*";
     private const string Amount = @"(?:\$\s*(?<dollar>" + Number + @")|(?<usd>" + Number + @")\s*(?:usd\b|dollars?\b|\$))";
     private const string Amount2 = @"(?:\$\s*(?<dollar2>" + Number + @")|(?<usd2>" + Number + @")\s*(?:usd\b|dollars?\b|\$))";
@@ -36,7 +37,17 @@ public static partial class AssistantQueryFilters
             var max = MaxPricePattern().Match(query);
             if (max.Success) queryMax = Parse(max.Groups["dollar"].Success ? max.Groups["dollar"].Value : max.Groups["usd"].Value) - (max.Groups["strict"].Success ? 0.01m : 0);
             var min = MinPricePattern().Match(query);
-            if (min.Success) queryMin = Parse(min.Groups["dollar"].Success ? min.Groups["dollar"].Value : min.Groups["usd"].Value) + (min.Groups["strict"].Success ? 0.01m : 0);
+            if (min.Success)
+            {
+                var amount = Parse(min.Groups["dollar"].Success ? min.Groups["dollar"].Value : min.Groups["usd"].Value);
+                if (min.Groups["strict"].Success && amount >= SqlPriceMax)
+                {
+                    // Contradictory bounds short-circuit before SQL receives an unrepresentable decimal(18,2) minimum.
+                    queryMin = SqlPriceMax;
+                    queryMax = SqlPriceMax - 0.01m;
+                }
+                else queryMin = amount + (min.Groups["strict"].Success ? 0.01m : 0);
+            }
         }
 
         var filters = explicitFilters ?? new AssistantChatFilters();
@@ -54,7 +65,7 @@ public static partial class AssistantQueryFilters
         else if (Regex.IsMatch(value, @"^[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?$")) normalized = value.Replace(".", "").Replace(',', '.');
         else if (Regex.IsMatch(value, @"^[0-9]+(?:[.,][0-9]{1,2})?$")) normalized = value.Replace(',', '.');
         else throw new DomainException("Giá USD chưa rõ định dạng. Ví dụ: 1000$, 1,000.50 USD hoặc 1.000,50 USD.");
-        if (!decimal.TryParse(normalized, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount) || amount > 9999999999999999.99m)
+        if (!decimal.TryParse(normalized, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount) || amount > SqlPriceMax)
             throw new DomainException("Giá USD vượt phạm vi được hỗ trợ.");
         return amount;
     }

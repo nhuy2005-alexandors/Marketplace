@@ -147,6 +147,16 @@ public sealed class HybridAiIntegrityTests
     public void Invalid_or_overflowing_price_does_not_silently_become_zero_or_unfiltered(string query)
         => Assert.Throws<DomainException>(() => AssistantQueryFilters.Merge(query, null));
 
+    [Fact]
+    public void Strict_price_at_sql_decimal_maximum_short_circuits_without_overflow()
+    {
+        var filters = AssistantQueryFilters.Merge("laptop trên 9999999999999999.99$", null);
+
+        Assert.True(filters.MinPrice > filters.MaxPrice);
+        Assert.Equal(9999999999999999.99m, filters.MinPrice);
+        Assert.Equal(9999999999999999.98m, filters.MaxPrice);
+    }
+
     [Theory]
     [InlineData("RAM at least 16 GB and storage at most 512 GB")]
     [InlineData("at least 16 GB RAM and at most 512 GB storage")]

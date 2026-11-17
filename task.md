@@ -2,14 +2,13 @@
 
 ## VERIFIED correction — USD price suffix and boundaries, 2026-11-16
 
-- Bounded independent source review completed: no concrete finding established in supported syntax. Reviewer read the actual parser diff, both merge callers and SQL predicates; tests/providers/DB/browser were not independently rerun. Root read the verdict and actual diff. The untested SQL maximum-price boundary is outside this screenshot acceptance; no claim is made for that edge.
-- Recovery check: current branch/HEAD and actual diff re-read; backend rerun 367 PASS / 0 FAIL / 3 guarded SQL SKIP. The exact screenshot query was rerun against the running API and returned 1784.03 / 1100.40 / 1252.80 / 1165.72 USD, all above 1000. Frontend HTTP 200; hybrid retrieval active. Original 26 file hashes and embedding cache hash rechecked unchanged. No persistent SQL mutation or remote publication.
-- Owner screenshot reproduced on base3feef1da1b3cfb2bcc777324e45a57d4d9f20a7c: `laptop giá trên 1000$` returned680.93/637.39/376.13USD becausepriceparseracceptedprefix$ andsuffixUSD butnotsuffix$. Thiswasanactualhardfilterbug,notamodelfactualchange.
-- CorrectedonlyAssistantQueryFilters productionlogic: currencybefore/afternumber; US/Vietnamese grouping anddecimalnotation; strictabove/below useonecentoffset againstexistinginclusiveAPIbounds becauseSQLPriceisdecimal18,2; inclusiveatleast/atmost/rangespreserved. Malformednumericformat/overflowthrows existingDomainException ->HTTP400 insteadofzero/unfilteredsearch. NoDTO/schema/UI/paymentchange.
-- ValidRED19FAIL4PASS onoriginalparser(with correctedtestfixtures); fixedfullsuite367PASS0FAIL3guardedSQLSKIP(total370). Aninitialtestdrafthad4nullableDoubleInlineData typeerrors; replacedexpectedvalueswithexactdecimalstrings andreranRED. Testsverify999.99/1000/1000.01 actualservicefilterboundaries. Existingunder30testexpectationchanged29.99 intentionallyforstrictsemantics,notdisabled.
-- Actualfinal7/7API/SQLlivePASS: exactscreenshotquery,below1000$,1.000$grouping,1000$-1500$range,rankedrecommendation,carriedfollowup,malformedamount400. All returnedproductscorrectcategory1andSQLname/price/stock/SKU. Exactqueryandbrowsernowshow1784.03/1100.40/1252.80/1165.72USD—all>1000. Hybridreadytrue.
-- Original26bytes preserved,Domain/Persistence/Order/Payment/Refund/frontendunchanged; cache1395/SHA51f62d8bfda768aee9e69c77d05b4c4f5b4bdcdf8b4c6ac9907c1a12de14ff66 unchanged. No persistentDBwrites/newDB/migration/reseed/providerpayment.
-- Evidence C:/Users/HUY/Documents/Marketplace-Local-Completion/20261116/assistant-price-151647/ . Read-onlyboundedprice review runsbeforelocalcommit. Finalcommit/receiptinexternalCOMMIT.json. No push/merge; API5215andfrontend5173keptforOwnerresubmission. EarlierSQLdisposable3/3PASSretained; notrerunforpriceparserchange.
+- Bounded source review found no concrete issue in the supported syntax. The reviewer read the parser diff, merge callers and SQL predicates; provider, database and browser checks were not independently rerun.
+- Recovery check: backend 367 PASS, 0 FAIL, 3 guarded SQL SKIP. The exact query returned 1784.03, 1100.40, 1252.80 and 1165.72 USD, all above 1000. Frontend HTTP 200 and hybrid retrieval were observed.
+- Root cause: the old parser accepted a leading `$` and trailing `USD`, but ignored a trailing `$`. The fix accepts both positions, US/Vietnamese grouping, decimals and strict boundaries.
+- Malformed amounts and overflow throw DomainException and become HTTP 400. Strict `above`/`below` uses a one-cent offset against SQL decimal(18,2); the SQL-maximum edge is covered by a contradictory-bound short circuit.
+- Tests: valid RED 19 FAIL/4 PASS on the old parser; fixed suite 368 PASS/0 FAIL/3 guarded SQL SKIP (371 total), including the SQL-maximum strict-boundary regression. Live API/SQL matrix 7/7 PASS, including the screenshot query, grouping, range, recommendation follow-up and malformed amount.
+- Original 26 files, commerce/domain/persistence/order/payment/refund/frontend source and embedding cache were preserved. No database write, migration, reseed, new database or remote publication was part of the source fix.
+- Evidence: `C:/Users/HUY/Documents/Marketplace-Local-Completion/20261116/assistant-price-151647/`. No push or merge was made before this request.
 
 ## VERIFIED correction — Vietnamese category requests, 2026-11-16
 
