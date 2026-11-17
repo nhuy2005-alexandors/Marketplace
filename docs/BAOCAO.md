@@ -1,7 +1,7 @@
 # BÁO CÁO DỰ ÁN MARKETPLACE
 ## Cơ sở dữ liệu và các chức năng nghiệp vụ
 
-> **Trạng thái tài liệu:** Bản nội dung chuẩn hóa theo source hiện tại. Trước khi nộp cần chèn ảnh chụp thật từ ứng dụng local và cập nhật kết quả nghiệm thu cuối cùng. Không sử dụng ảnh mock hoặc số liệu chưa được xác minh.
+Báo cáo nghiệm thu local ngày 17 tháng 11 năm 2026. Source xuất phát từ commit `53dfd0bbd4ef676c7fe14d16685e26048d1c51a5` trên branch `codex/marketplace-course-db-completion-20261117`, kèm hai sửa lỗi được phát hiện khi chạy kiểm thử. Ảnh trong báo cáo được chụp từ trình duyệt gọi API và SQL Server thật; không dùng mock server.
 
 ## 1. Giới thiệu
 
@@ -29,26 +29,83 @@ Mục tiêu của dự án là vận dụng SQL Server vào một ứng dụng c
 | Admin | Dashboard toàn sàn, quản lý catalog/brand/attributes, duyệt seller, quản lý đơn và xử lý yêu cầu hoàn tiền |
 | AI | Shopping Assistant dựa trên catalog, gợi ý sản phẩm và phân loại khách hàng RFM |
 
-### 3.1 Ảnh giao diện cần chèn vào bản nộp
+### 3.1 Giao diện nghiệm thu trên ứng dụng thật
 
-Chụp trực tiếp từ ứng dụng local sau khi chạy đúng database và tài khoản demo. Mỗi ảnh cần có chú thích vai trò và chức năng đang minh họa.
+Mười hai ảnh dưới đây được chụp bằng trình duyệt Chrome trên localhost. Các tài khoản sử dụng là tài khoản phát triển có sẵn. Lần nghiệm thu không tạo giao dịch thanh toán hoặc yêu cầu hoàn tiền mới.
 
-| Hình | Nội dung cần chụp | Trạng thái |
-|---|---|---|
-| 1 | Trang chủ và danh sách sản phẩm | Chờ ảnh local |
-| 2 | Tìm kiếm, lọc sản phẩm và trang chi tiết | Chờ ảnh local |
-| 3 | Giỏ hàng và checkout | Chờ ảnh local |
-| 4 | Kết quả thanh toán và chi tiết đơn hàng | Chờ ảnh local |
-| 5 | Lịch sử đơn hàng và yêu cầu hoàn tiền của Customer | Chờ ảnh local |
-| 6 | Seller dashboard và danh sách đơn hàng | Chờ ảnh local |
-| 7 | Seller quản lý sản phẩm và cập nhật fulfillment | Chờ ảnh local |
-| 8 | Admin dashboard: thống kê trạng thái đơn và sản phẩm bán chạy | Chờ ảnh local |
-| 9 | Admin quản lý sản phẩm, brand và thuộc tính catalog | Chờ ảnh local |
-| 10 | Admin quản lý refund và màn hình RFM | Chờ ảnh local |
-| 11 | AI Shopping Assistant trả lời dựa trên sản phẩm trong catalog | Chờ ảnh local |
-| 12 | Khu vực recommendation / sản phẩm tương tự | Chờ ảnh local |
+#### Hình 1 Trang chủ Marketplace hiển thị catalog và danh mục từ SQL Server.
 
-Không chụp màn hình chứa API key, access token, thông tin thanh toán nhạy cảm hoặc dữ liệu cá nhân không cần thiết.
+![Hình 1](images/course-20261117/01-home.png)
+
+Hình 1. Trang chủ Marketplace hiển thị catalog và danh mục từ SQL Server.
+
+#### Hình 2 Chi tiết sản phẩm, thuộc tính cấu trúc và sản phẩm tương tự.
+
+![Hình 2](images/course-20261117/02-product.png)
+
+Hình 2. Chi tiết sản phẩm, thuộc tính cấu trúc và sản phẩm tương tự.
+
+#### Hình 3 Khách hàng xem giỏ hàng hiện có, không tạo đơn mới trong lần nghiệm thu này.
+
+![Hình 3](images/course-20261117/03-customer-cart.png)
+
+Hình 3. Khách hàng xem giỏ hàng hiện có, không tạo đơn mới trong lần nghiệm thu này.
+
+#### Hình 4 Giao diện checkout và lựa chọn thanh toán của khách hàng.
+
+![Hình 4](images/course-20261117/04-customer-checkout.png)
+
+Hình 4. Giao diện checkout và lựa chọn thanh toán của khách hàng.
+
+#### Hình 5 Khách hàng xem lịch sử đơn hàng và trạng thái hoàn tiền.
+
+![Hình 5](images/course-20261117/05-customer-orders.png)
+
+Hình 5. Khách hàng xem lịch sử đơn hàng và trạng thái hoàn tiền.
+
+#### Hình 6 Dashboard người bán được giới hạn theo SellerId.
+
+![Hình 6](images/course-20261117/06-seller-dashboard.png)
+
+Hình 6. Dashboard người bán được giới hạn theo SellerId.
+
+#### Hình 7 Người bán chỉ thấy các mặt hàng thuộc phạm vi cửa hàng mình.
+
+![Hình 7](images/course-20261117/07-seller-orders.png)
+
+Hình 7. Người bán chỉ thấy các mặt hàng thuộc phạm vi cửa hàng mình.
+
+#### Hình 8 Dashboard quản trị: Đơn theo trạng thái và Top sản phẩm bán chạy nhận kết quả từ hai Stored Procedures.
+
+![Hình 8](images/course-20261117/08-admin-dashboard.png)
+
+Hình 8. Dashboard quản trị: Đơn theo trạng thái và Top sản phẩm bán chạy nhận kết quả từ hai Stored Procedures.
+
+#### Hình 9 Quản trị catalog, thương hiệu và thuộc tính sản phẩm.
+
+![Hình 9](images/course-20261117/09-admin-catalog.png)
+
+Hình 9. Quản trị catalog, thương hiệu và thuộc tính sản phẩm.
+
+#### Hình 10 Quản trị theo dõi yêu cầu hoàn tiền và trạng thái xử lý.
+
+![Hình 10](images/course-20261117/10-admin-refunds.png)
+
+Hình 10. Quản trị theo dõi yêu cầu hoàn tiền và trạng thái xử lý.
+
+#### Hình 11 Phân loại khách hàng theo Recency, Frequency và Monetary từ giao dịch hợp lệ.
+
+![Hình 11](images/course-20261117/11-admin-rfm.png)
+
+Hình 11. Phân loại khách hàng theo Recency, Frequency và Monetary từ giao dịch hợp lệ.
+
+#### Hình 12 Shopping Assistant trả lời từ catalog SQL, giữ điều kiện giá trên 1000 USD và công bố chế độ retrieval thực tế.
+
+![Hình 12](images/course-20261117/12-ai-assistant.png)
+
+Hình 12. Shopping Assistant trả lời từ catalog SQL, giữ điều kiện giá trên 1000 USD và công bố chế độ retrieval thực tế.
+
+Tài khoản Seller dùng cho ảnh đang có phạm vi dữ liệu rỗng; giao diện thể hiện đúng trạng thái không có đơn. Dashboard Admin có dữ liệu thật từ database phát triển: 5.011 đơn hàng, 500 sản phẩm và 1.002 khách hàng. Tên trong top bán chạy lấy từ snapshot OrderItem, có thể khác tên catalog hiện tại vì lịch sử giao dịch được giữ nguyên.
 
 ## 4. Thiết kế cơ sở dữ liệu
 
@@ -79,7 +136,7 @@ Các quan hệ chính:
 - Order có Payment theo quan hệ một-một và có thể có Refund.
 - OrderItem lưu snapshot tên sản phẩm, người bán và đơn giá tại thời điểm đặt hàng để bảo toàn lịch sử giao dịch.
 
-Toàn bộ schema được quản lý bằng EF Core migrations. Có 16 migrations trong baseline trước phần bổ sung phục vụ yêu cầu Stored Procedure; migration mới 20261117130000_AddDashboardStoredProcedures chỉ tạo Stored Procedure và cập nhật trigger, không thêm bảng/cột hoặc thay đổi dữ liệu nghiệp vụ. Migration mới phải được áp dụng và xác minh trên LocalDB trước khi đánh dấu hoàn tất.
+Toàn bộ schema được quản lý bằng EF Core migrations. Có 16 migrations trong baseline trước phần bổ sung phục vụ yêu cầu Stored Procedure; migration mới 20261117130000_AddDashboardStoredProcedures chỉ tạo Stored Procedure và cập nhật trigger, không thêm bảng/cột hoặc thay đổi dữ liệu nghiệp vụ. Migration này đã được áp dụng trước trên disposable LocalDB bằng SQL Server provider, sau đó trên clone đang dùng sau backup COPY_ONLY WITH CHECKSUM và RESTORE VERIFYONLY. Lịch sử hiện có 17 migration; EF không phát hiện pending model changes.
 
 ### 4.1 Khóa và ràng buộc toàn vẹn
 
@@ -196,19 +253,26 @@ AI là lớp khai thác dữ liệu trên database hiện hữu, không thay th�
 
 ## 11. Kiểm thử và nghiệm thu
 
-Bản báo cáo cuối phải cập nhật kết quả từ lần chạy trên branch và database local cuối cùng:
+Ngày nghiệm thu: 17 tháng 11 năm 2026. Hai lỗi thực tế được sửa: projection DTO của fallback dashboard không dịch được trên provider non-SQL Server; assertion của test SQL vẫn chờ Paid sau khi service đã chuyển đơn sang Shipped. Không sửa VNPAY, Payment, Refund hoặc các bảng/cột.
 
-| Hạng mục | Kết quả cuối |
+| Hạng mục | Kết quả đã quan sát |
 |---|---|
-| Backend build/unit tests | Cập nhật sau lần chạy cuối |
-| Frontend tests/build | Cập nhật sau lần chạy cuối |
-| SQL Server migration 17 | Cập nhật sau khi áp dụng trên disposable LocalDB |
-| Hai Stored Procedures | Cập nhật sau khi gọi qua DashboardService |
-| Trigger INSERT/UPDATE/DELETE | Cập nhật sau kiểm thử SQL Server |
-| Customer/Seller/Admin UI | Cập nhật sau browser smoke |
-| Gemini live | Cập nhật theo kết quả runtime thực tế |
+| Backend build | PASS, 0 warning và 0 error |
+| Backend test thường | 369 PASS, 0 FAIL, 3 SQL opt-in SKIP |
+| Frontend | 10 test PASS; production build và lint PASS |
+| Disposable LocalDB | 1 test SQL course PASS sau sửa; chạy đủ 17 migration bằng Microsoft.EntityFrameworkCore.SqlServer |
+| Stored Procedures | Cả hai được gọi qua DashboardService và API dashboard; bộ đếm SQL procedure có 4 lần thực thi mỗi procedure trong browser smoke |
+| Trigger INSERT | INSERT hợp lệ được lưu; INSERT sai ProductName với SellerId hợp lệ bị SQL 51006, không thêm dòng |
+| Trigger UPDATE | Snapshot bị sửa bị từ chối; cập nhật fulfillment Shipped hợp lệ được chấp nhận |
+| Trigger DELETE | Xóa OrderItem bị từ chối; dòng lịch sử vẫn tồn tại |
+| DB đang dùng | 17 migration; pending model changes false; hai procedure tồn tại; trigger đăng ký đủ INSERT UPDATE DELETE |
+| Bảo toàn dữ liệu | 16 bảng nghiệp vụ giữ nguyên row count và SHA-256 qua migration; không reset, reseed hoặc import |
+| Browser thật | 12 ảnh Guest Customer Seller Admin AI; 0 page error; dashboard HTTP 200 |
+| AI shopping | HTTP 200, lọc đúng 4 sản phẩm trên 1000 USD; lúc chụp sử dụng lexical-warming và fallback, không tuyên bố Gemini generation PASS |
 
-Không ghi PASS cho hạng mục chỉ mới có source code mà chưa được chạy. Không ghi SQL SKIP thành PASS.
+Backup trước migration được giữ riêng ngoài Git. SHA-256: `a27e191bc2c0026796dc68e4722f7cb0110ba454c77ab0b8b615af43b622921f`. RESTORE VERIFYONLY WITH CHECKSUM báo backup set hợp lệ. Không restore hoặc ghi đè database đang dùng.
+
+Hai test SQL lifecycle khác không được chạy lại trong lượt này. Kết quả 3/3 PASS ngày 16 tháng 11 là evidence lịch sử trên commit 7073342, không thay cho kết quả của HEAD hiện tại. Test SQL course mới đã thực sự chạy trên database disposable và fixture đã được dọn sau khi lưu kết quả. Việc đăng nhập qua UI có thể tạo RefreshTokens theo nghiệp vụ; không thay đổi đơn hàng, số tiền, tồn kho hay dữ liệu catalog.
 
 ## 12. Giới hạn hiện tại
 
@@ -221,4 +285,10 @@ Không ghi PASS cho hạng mục chỉ mới có source code mà chưa được 
 
 Marketplace áp dụng SQL Server cho dữ liệu người dùng, catalog, giỏ hàng, đơn hàng, thanh toán, hoàn tiền và đánh giá. EF Core quản lý CRUD và migration; index, foreign key, unique/check constraints bảo vệ tính toàn vẹn; transaction và RowVersion bảo vệ các luồng cập nhật quan trọng. Hai Stored Procedure phục vụ dashboard và trigger bảo vệ snapshot OrderItem. Các chức năng AI khai thác catalog và giao dịch hiện hữu để hỗ trợ tìm kiếm, đề xuất và phân loại khách hàng.
 
-Bản nộp cuối cần kèm ảnh giao diện thực tế, kết quả kiểm thử sau migration mới và minh chứng procedure/trigger được áp dụng trên SQL Server.
+Báo cáo này kèm 12 ảnh giao diện thật, kết quả kiểm thử và minh chứng hai procedure cùng ba sự kiện trigger trên SQL Server. Ứng dụng có thể mở để trình diễn ở http://localhost:5173; Swagger ở http://localhost:5215/swagger. AI vẫn công bố đúng chế độ fallback khi provider chưa sẵn sàng.
+
+## 14. Hướng dẫn trình diễn local
+
+API sử dụng file cấu hình local riêng và kết nối tường minh tới `(localdb)\MarketplaceRefundDev20261113 / ECommerceDb_Dev`. Không để key trong repository. Khởi động bằng `scripts/Start-LocalApi.ps1` với `-LocalConfigPath` trỏ tới file riêng và `-DotnetPath` trỏ SDK .NET 9 hiện có. Trong thư mục client, chạy `npm run dev -- --host localhost --port 5173 --strictPort`.
+
+Mở localhost bằng tài khoản phát triển đã có để trình diễn lần lượt catalog, giỏ hàng, checkout, đơn hàng, seller dashboard, admin dashboard, refund, RFM và trợ lý mua sắm. Không cần chạy seeder hoặc migration lại khi khởi động. PR số 8 giữ trạng thái Draft, chưa merge.

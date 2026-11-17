@@ -311,7 +311,18 @@ public class SqlServerLifecycleTests
 
         var dashboardQueries = new DashboardStoredProcedureQueries(db);
         var sellerStatuses = await dashboardQueries.GetOrderStatusSummaryAsync(item.SellerId);
-        Assert.Contains(sellerStatuses, row => row.Status == nameof(OrderStatus.Paid) && row.Count == 1);
+        Assert.Contains(sellerStatuses, row => row.Status == nameof(OrderStatus.Shipped) && row.Count == 1);
+
+        var insertFailure = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO dbo.OrderItems(OrderId, ProductId, SellerId, ProductName, UnitPrice, Quantity, Status, CreatedAt)
+            SELECT @orderId, p.Id, p.SellerId, N'Tampered snapshot', p.Price, 1, 0, SYSUTCDATETIME()
+            FROM dbo.Products p WHERE p.Id = @productId;
+            """,
+            new SqlParameter("@orderId", item.OrderId),
+            new SqlParameter("@productId", item.ProductId)));
+        Assert.Equal(51006, insertFailure.Number);
+        Assert.Equal(1, await db.OrderItems.CountAsync());
+        Console.WriteLine("ORDER_ITEM_INSERT_SNAPSHOT_TRIGGER PASS");
 
         var topProducts = await dashboardQueries.GetTopSellingProductsAsync(item.SellerId);
         Assert.Contains(topProducts, row =>

@@ -145,17 +145,23 @@ public sealed class DashboardStoredProcedureQueries(AppDbContext db) : IDashboar
         IQueryable<ECommerce.Domain.Entities.OrderItem> query,
         CancellationToken cancellationToken)
     {
-        return await query
+        var rows = await query
             .GroupBy(item => new { item.ProductId, item.ProductName })
-            .Select(group => new TopProductDto(
+            .Select(group => new
+            {
                 group.Key.ProductId,
                 group.Key.ProductName,
-                group.Sum(item => item.Quantity),
-                group.Sum(item => item.UnitPrice * item.Quantity)))
+                UnitsSold = group.Sum(item => item.Quantity),
+                Revenue = group.Sum(item => item.UnitPrice * item.Quantity)
+            })
             .OrderByDescending(product => product.UnitsSold)
             .ThenBy(product => product.ProductId)
             .Take(5)
             .ToListAsync(cancellationToken);
+
+        return rows
+            .Select(row => new TopProductDto(row.ProductId, row.ProductName, row.UnitsSold, row.Revenue))
+            .ToList();
     }
 
     private static void AddParameter(

@@ -1,5 +1,17 @@
 # Active objective — APPROVED Hybrid AI Integration, 2026-11-16
 
+## VERIFIED course deliverables completion — 2026-11-17
+
+- Course branch: `codex/marketplace-course-db-completion-20261117`, starting HEAD `53dfd0bbd4ef676c7fe14d16685e26048d1c51a5`. Existing worktrees preserved; no VNPAY, Payment, Refund, seeder or table/column changes.
+- Fixed two observed failures: fallback top-product projection was not translatable by the non-SQL Server provider; SQL test expected Paid after the seller service had changed the order to Shipped. Added an explicit INSERT snapshot rejection assertion (SQL 51006). Bounded source review found no remaining blocker.
+- Ordinary backend suite: 369 PASS, 0 FAIL, 3 opt-in SQL SKIP. Course SQL test separately PASS on a disposable named LocalDB with all 17 migrations, both procedures and INSERT/UPDATE/DELETE trigger coverage. The owned disposable database, files and instance were removed. Frontend: 10 tests PASS, build and lint PASS.
+- Existing `(localdb)\MarketplaceRefundDev20261113 / ECommerceDb_Dev` backed up with COPY_ONLY CHECKSUM, then RESTORE VERIFYONLY WITH CHECKSUM succeeded. Backup SHA-256 `a27e191bc2c0026796dc68e4722f7cb0110ba454c77ab0b8b615af43b622921f`. Backup remains outside Git.
+- Applied migration `20261117130000_AddDashboardStoredProcedures` using EF Core SQL Server provider and explicit database GUID guard. All 17 migration IDs applied, pending model changes false. Exact row counts and SHA-256 of all 16 business tables matched before/after migration. No reset, reseed or import. Browser logins only produce normal authentication state changes.
+- DashboardService and real API/browser called both procedures; SQL cached execution counts reached 4 each during capture. Trigger metadata includes INSERT, UPDATE and DELETE. Persistent counts remain 5011 orders, 4710 payments, 500 products and 1 refund.
+- Updated `docs/BAOCAO.md`, embedded 12 real screenshots under `docs/images/course-20261117`, and produced `docs/BAOCAO_MARKETPLACE.docx` (21 pages). The packaged LibreOffice renderer was unavailable; Microsoft Word rendered the actual DOCX to PDF and bundled PDFium generated page PNGs for visual QA. No fake screenshots or mock API.
+- Runtime kept at frontend `http://localhost:5173`, API `http://localhost:5215`. Seller fixture scope is empty; report says so. AI screenshot: HTTP 200 and four correct products above 1000 USD, lexical-warming/fallback; Gemini generation and completed semantic warmup are not claimed. VNPAY QueryDr99 and external refund limitations remain.
+- Evidence and backup: `C:/Users/HUY/Documents/Marketplace-Course-Completion/20261117/`. PR #8 remains Draft and must not be merged by this task. Final tested source SHA and artifact checksums are recorded in external completion metadata.
+
 ## VERIFIED correction — USD price suffix and boundaries, 2026-11-16
 
 - Bounded source review found no concrete issue in the supported syntax. The reviewer read the parser diff, merge callers and SQL predicates; provider, database and browser checks were not independently rerun.
