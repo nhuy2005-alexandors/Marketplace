@@ -8,8 +8,15 @@ namespace ECommerce.Application.Services;
 public class DashboardService : IDashboardService
 {
     private readonly IAppDbContext _db;
+    private readonly IDashboardStoredProcedureQueries? _dashboardQueries;
 
-    public DashboardService(IAppDbContext db) => _db = db;
+    public DashboardService(
+        IAppDbContext db,
+        IDashboardStoredProcedureQueries? dashboardQueries = null)
+    {
+        _db = db;
+        _dashboardQueries = dashboardQueries;
+    }
 
     public async Task<DashboardDto> GetAsync(int? sellerId = null, CancellationToken ct = default)
     {
@@ -47,36 +54,52 @@ public class DashboardService : IDashboardService
             ? await _db.Users.CountAsync(u => u.Role == UserRole.Customer, ct)
             : await _db.Orders.Where(o => o.Items.Any(i => i.SellerId == sellerId))
                 .Select(o => o.UserId).Distinct().CountAsync(ct);
-        var statusQuery = sellerId == null
-            ? _db.Orders
-            : _db.Orders.Where(o => o.Items.Any(i => i.SellerId == sellerId));
-        var byStatus = await statusQuery
-            .GroupBy(o => o.Status)
-            .Select(g => new { Status = g.Key, Count = g.Count() })
-            .ToListAsync(ct);
 
-        var soldList = paidOrders
-            .SelectMany(o => o.Items)
-            .Where(i => i.Status != FulfillmentStatus.Cancelled &&
-                        (sellerId == null || i.SellerId == sellerId.Value))
-            .ToList();
-        var topProducts = soldList
-            .GroupBy(oi => new { oi.ProductId, oi.ProductName })
-            .Select(g => new TopProductDto(
-                g.Key.ProductId,
-                g.Key.ProductName,
-                g.Sum(x => x.Quantity),
-                g.Sum(x => x.UnitPrice * x.Quantity)))
-            .OrderByDescending(x => x.UnitsSold)
-            .Take(5)
-            .ToList();
+        IReadOnlyList<StatusCountDto> statusCounts;
+        IReadOnlyList<TopProductDto> topProducts;
+        if (_dashboardQueries is not null)
+        {
+            statusCounts = await _dashboardQueries.GetOrderStatusSummaryAsync(sellerId, ct);
+            topProducts = await _dashboardQueries.GetTopSellingProductsAsync(sellerId, ct);
+        }
+        else
+        {
+            // Retain the original EF query path for tests or hosts that do not register SQL Server procedures.
+            var statusQuery = sellerId == null
+                ? _db.Orders
+                : _db.Orders.Where(o => o.Items.Any(i => i.SellerId == sellerId));
+            var byStatus = await statusQuery
+                .GroupBy(o => o.Status)
+                .Select(g => new { Status = g.Key, Count = g.Count() })
+                .ToListAsync(ct);
+            statusCounts = byStatus
+                .Select(s => new StatusCountDto(s.Status.ToString(), s.Count))
+                .ToList();
+
+            var soldList = paidOrders
+                .SelectMany(o => o.Items)
+                .Where(i => i.Status != FulfillmentStatus.Cancelled &&
+                            (sellerId == null || i.SellerId == sellerId.Value))
+                .ToList();
+            topProducts = soldList
+                .GroupBy(oi => new { oi.ProductId, oi.ProductName })
+                .Select(g => new TopProductDto(
+                    g.Key.ProductId,
+                    g.Key.ProductName,
+                    g.Sum(x => x.Quantity),
+                    g.Sum(x => x.UnitPrice * x.Quantity)))
+                .OrderByDescending(x => x.UnitsSold)
+                .ThenBy(x => x.ProductId)
+                .Take(5)
+                .ToList();
+        }
 
         return new DashboardDto(
             revenue,
             totalOrders,
             totalProducts,
             totalCustomers,
-            byStatus.Select(s => new StatusCountDto(s.Status.ToString(), s.Count)).ToList(),
+            statusCounts,
             topProducts);
     }
 }

@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddScoped<IAssistantAnswerProvider>(sp => sp.GetRequiredService<GeminiAssistantProvider>());
         services.AddScoped<ISemanticSearchService, SemanticSearchService>();
         services.AddScoped<IAssistantService, AssistantService>();
+        services.AddScoped<IDashboardStoredProcedureQueries, DashboardStoredProcedureQueries>();
         services.AddScoped<IRecommendationProvider, RecommendationProviderAdapter>();
         services.AddHostedService<EmbeddingWarmupHostedService>();
 
