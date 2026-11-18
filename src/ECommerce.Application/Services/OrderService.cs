@@ -300,24 +300,12 @@ public class OrderService : IOrderService
             .ToList();
 
         var splits = new List<SellerSplitDto>(groups.Count);
-        var allocated = 0m;
+        var discountShares = SellerDiscountAllocation.ForOrder(order);
         for (var idx = 0; idx < groups.Count; idx++)
         {
             var g = groups[idx];
             var sellerSubtotal = g.Sum(i => i.Subtotal);
-            // Pro-rate coupon discount by seller subtotal share; last seller absorbs the
-            // rounding remainder so the per-seller shares sum back to the order discount exactly.
-            decimal discountShare;
-            if (idx == groups.Count - 1)
-                // Clamp [0, sellerSubtotal] để phần dư làm tròn không tạo giảm giá âm/vượt subtotal.
-                discountShare = Math.Clamp(order.DiscountAmount - allocated, 0m, sellerSubtotal);
-            else
-            {
-                discountShare = orderSubtotal > 0
-                    ? Math.Round(order.DiscountAmount * (sellerSubtotal / orderSubtotal), 2)
-                    : 0m;
-                allocated += discountShare;
-            }
+            var discountShare = discountShares[g.Key];
             splits.Add(new SellerSplitDto(
                 g.Key,
                 shopNames.TryGetValue(g.Key, out var n) ? n : $"Seller #{g.Key}",

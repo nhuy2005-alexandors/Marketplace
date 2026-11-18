@@ -51,7 +51,8 @@ public class OrdersController : ApiControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<PayResultDto>> Pay(int id, PayOrderRequest request, CancellationToken ct)
-        => ToResponse(await _payments.InitiateAsync(UserId, id, request, ct));
+        => ToResponse(await _payments.InitiateAsync(UserId, id, request, ct,
+            HttpContext.Connection.RemoteIpAddress?.ToString() ?? ""));
 
     [HttpPost("{id:int}/cancel")]
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]

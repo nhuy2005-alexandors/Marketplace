@@ -1,174 +1,294 @@
-# Báo cáo triển khai — MiniShop E-Commerce Platform
+# BÁO CÁO DỰ ÁN MARKETPLACE
+## Cơ sở dữ liệu và các chức năng nghiệp vụ
 
-**Ngày:** 2026-06-29
-**Phạm vi:** Xây dựng nền tảng thương mại điện tử full-stack theo chuẩn thiết kế phần mềm, gồm backend, frontend, tài liệu đặc tả, mở rộng tính năng, và chuyển đổi sang mô hình marketplace nhiều người bán.
+Báo cáo nghiệm thu local ngày 17 tháng 11 năm 2026. Source xuất phát từ commit `53dfd0bbd4ef676c7fe14d16685e26048d1c51a5` trên branch `codex/marketplace-course-db-completion-20261117`, kèm hai sửa lỗi được phát hiện khi chạy kiểm thử. Ảnh trong báo cáo được chụp từ trình duyệt gọi API và SQL Server thật; không dùng mock server.
 
----
+## 1. Giới thiệu
 
-## 1. Tổng quan
+Marketplace là website thương mại điện tử nhiều người bán. Khách hàng có thể tìm kiếm sản phẩm, quản lý giỏ hàng, đặt hàng, thanh toán và theo dõi đơn hàng. Người bán quản lý sản phẩm và xử lý các mặt hàng thuộc cửa hàng của mình. Quản trị viên quản lý toàn sàn, duyệt người bán, theo dõi đơn hàng, hoàn tiền và dữ liệu khách hàng.
 
-Dự án được thực hiện theo 3 giai đoạn:
+Mục tiêu của dự án là vận dụng SQL Server vào một ứng dụng có nghiệp vụ thực tế: thiết kế bảng và quan hệ, thực hiện CRUD, sử dụng transaction, index, constraint, stored procedure và trigger; đồng thời khai thác dữ liệu catalog và giao dịch cho chức năng AI.
 
-**Giai đoạn 1 — Nền tảng cốt lõi:** Xây dựng từ đầu một hệ thống e-commerce tối giản với kiến trúc phân lớp chuẩn (Clean Architecture), đủ 11 chức năng nghiệp vụ (yêu cầu tối thiểu 9, không tính CRUD), kèm bộ tài liệu đặc tả phần mềm (SRS + UML).
+## 2. Công nghệ và kiến trúc
 
-**Giai đoạn 2 — Mở rộng:** Bổ sung các hạng mục theo yêu cầu: thanh toán qua cổng thật (MoMo AIO v2 sandbox), hệ thống mã giảm giá, upload ảnh sản phẩm, phân trang đơn hàng, giao diện quản trị CRUD, và pipeline CI/CD.
+- Backend: ASP.NET Core 9, Entity Framework Core.
+- Database: Microsoft SQL Server LocalDB.
+- Frontend: React, TypeScript, Vite.
+- AI: hybrid semantic/lexical retrieval, recommendation ranking và RFM customer classification.
+- Kiến trúc backend phân lớp: Domain, Application, Infrastructure và API.
 
-**Giai đoạn 3 — Marketplace nhiều người bán:** Chuyển từ mô hình single-store (1 admin quản mọi thứ) sang marketplace: thêm vai trò **Seller**, mỗi seller tự đăng ký, quản sản phẩm/đơn/doanh thu riêng của cửa hàng mình; một đơn hàng có thể trộn sản phẩm từ nhiều seller (mỗi `OrderItem` gắn `SellerId`), seller chỉ thấy phần của mình. Admin vẫn quản toàn sàn.
+Ứng dụng chạy local. Database development được cấu hình tường minh qua connection string ECommerceDb_Dev; API không tự động migrate hoặc seed dữ liệu khi khởi động. Migration được áp dụng có chủ đích vào đúng database development.
 
-> **Ghi chú phạm vi:** Ứng dụng chạy trực tiếp trên máy (local) — backend qua `dotnet run` + SQL Server LocalDB, frontend qua `npm run dev`. Không dùng Docker.
+## 3. Các chức năng nghiệp vụ chính
 
----
+| Vai trò | Chức năng |
+|---|---|
+| Guest | Xem trang chủ, danh mục, tìm kiếm và xem chi tiết sản phẩm |
+| Customer | Đăng ký/đăng nhập, giỏ hàng, coupon, checkout, thanh toán, lịch sử đơn hàng, yêu cầu hoàn tiền, review và wishlist |
+| Seller | Dashboard riêng, quản lý sản phẩm, xem đơn có sản phẩm của mình và cập nhật trạng thái fulfillment theo từng mặt hàng |
+| Admin | Dashboard toàn sàn, quản lý catalog/brand/attributes, duyệt seller, quản lý đơn và xử lý yêu cầu hoàn tiền |
+| AI | Shopping Assistant dựa trên catalog, gợi ý sản phẩm và phân loại khách hàng RFM |
 
-## 2. Kiến trúc hệ thống
+### 3.1 Giao diện nghiệm thu trên ứng dụng thật
 
-### 2.1 Backend — ASP.NET Core 9 + EF Core, kiến trúc 4 lớp
+Mười hai ảnh dưới đây được chụp bằng trình duyệt Chrome trên localhost. Các tài khoản sử dụng là tài khoản phát triển có sẵn. Lần nghiệm thu không tạo giao dịch thanh toán hoặc yêu cầu hoàn tiền mới.
 
-```
-ECommerce.sln
-├── ECommerce.Domain          Entities thuần, enum, business rules (không phụ thuộc framework)
-├── ECommerce.Application     DTOs, service interfaces + implementations, validators, Result pattern
-├── ECommerce.Infrastructure  EF Core DbContext, JWT, payment providers, file storage, seed data
-└── ECommerce.API             Controllers, middleware, DI wiring, Swagger, JWT auth
-```
+#### Hình 1 Trang chủ Marketplace hiển thị catalog và danh mục từ SQL Server.
 
-Nguyên tắc phụ thuộc: `API → Application → Domain`, `Infrastructure → Application interfaces`. Domain không biết gì về EF Core hay HTTP — toàn bộ business logic (ví dụ máy trạng thái đơn hàng) là code thuần C#, test được độc lập không cần database thật.
+![Hình 1](images/course-20261117/01-home.png)
 
-### 2.2 Frontend — React 18 + Vite + TypeScript + TailwindCSS
+Hình 1. Trang chủ Marketplace hiển thị catalog và danh mục từ SQL Server.
 
-SPA với React Router (protected routes theo role), TanStack Query (cache + invalidation dữ liệu server), Zustand (auth state có persist localStorage), Axios (interceptor tự đính JWT + xử lý 401).
+#### Hình 2 Chi tiết sản phẩm, thuộc tính cấu trúc và sản phẩm tương tự.
 
-### 2.3 Cơ sở dữ liệu — SQL Server qua EF Core Migrations
+![Hình 2](images/course-20261117/02-product.png)
 
-Toàn bộ schema được quản lý qua 4 migration (`InitialCreate`, `AddCouponsAndDiscounts`, `AddSellerMarketplace`, `AddOrderItemFulfillment`), có thể chạy lại từ đầu trên máy sạch bằng `dotnet ef database update`.
+Hình 2. Chi tiết sản phẩm, thuộc tính cấu trúc và sản phẩm tương tự.
 
----
+#### Hình 3 Khách hàng xem giỏ hàng hiện có, không tạo đơn mới trong lần nghiệm thu này.
 
-## 3. Chức năng nghiệp vụ đã triển khai
+![Hình 3](images/course-20261117/03-customer-cart.png)
 
-| # | Chức năng | Mô tả kỹ thuật |
-|---|-----------|-----------------|
-| 1 | Đăng ký / Đăng nhập | JWT Bearer, mật khẩu hash BCrypt, claim chứa role |
-| 2 | Phân quyền RBAC | `[Authorize(Roles="Admin")]` theo policy, tách rõ Customer/Admin |
-| 3 | Tìm kiếm/lọc/phân trang sản phẩm | Query theo tên, danh mục, khoảng giá; sort; `PagedResult<T>` |
-| 4 | Giỏ hàng | Thêm/sửa/xóa item, validate tồn kho real-time |
-| 5 | Đặt hàng (Checkout) | Chuyển giỏ → đơn, trừ tồn kho nguyên tử, snapshot giá/tên sản phẩm vào OrderItem |
-| 6 | **Thanh toán đa cổng** | Abstraction `IPaymentProvider`: Mock, COD, **MoMo** (AIO v2 sandbox: gọi API tạo giao dịch, redirect payUrl, verify chữ ký HMAC-SHA256 qua callback + IPN) |
-| 7 | Vòng đời đơn hàng | State machine trong Domain (`Order.ChangeStatus`), chặn transition sai bằng exception → HTTP 409 |
-| 8 | Đánh giá sản phẩm | Rating 1–5 + comment, ràng buộc "verified purchase" (phải có đơn chứa SP, khác Cancelled), chống trùng |
-| 9 | Wishlist | Thêm/xóa sản phẩm yêu thích |
-| 10 | Dashboard quản trị | Doanh thu (từ Payment Completed), đơn theo trạng thái, top 5 SP bán chạy |
-| 11 | CRUD sản phẩm/danh mục | Đầy đủ Create/Update/Delete, ràng buộc không xóa Category còn Product |
-| 12 | **Mã giảm giá (Coupon)** | Percentage/FixedAmount, đơn tối thiểu, hạn dùng, giới hạn số lượt, validate trước khi checkout |
-| 13 | **Upload ảnh sản phẩm** | `IFormFile` → lưu local disk, trả URL, giới hạn định dạng + kích thước 5MB |
-| 14 | **Phân trang đơn hàng** | `GET /api/orders?page=&pageSize=` cho cả khách và admin |
+Hình 3. Khách hàng xem giỏ hàng hiện có, không tạo đơn mới trong lần nghiệm thu này.
 
----
+#### Hình 4 Giao diện checkout và lựa chọn thanh toán của khách hàng.
 
-## 4. Chi tiết kỹ thuật các hạng mục mở rộng
+![Hình 4](images/course-20261117/04-customer-checkout.png)
 
-### 4.1 Thanh toán đa cổng (MoMo)
+Hình 4. Giao diện checkout và lựa chọn thanh toán của khách hàng.
 
-Thiết kế theo pattern **Strategy + Factory**:
+#### Hình 5 Khách hàng xem lịch sử đơn hàng và trạng thái hoàn tiền.
 
-- `IPaymentProvider` — interface chung: `CreatePaymentAsync` (khởi tạo, trả redirect URL hoặc hoàn tất ngay) và `VerifyAsync` (xác minh callback).
-- `PaymentProviderFactory` — resolve provider theo key (`mock`/`cod`/`momo`) từ danh sách đăng ký DI.
-- `MoMoProvider` — tích hợp MoMo AIO v2 sandbox: POST `/v2/gateway/api/create` với chữ ký HMAC-SHA256, nhận `payUrl` để redirect khách; verify chữ ký khi khách quay lại qua `GET /api/payments/momo/callback` và IPN `POST /api/payments/momo/ipn`. Dùng `requestType = payWithMethod` để cổng hiện đủ QR ví + thẻ ATM nội địa + thẻ tín dụng. Quy đổi USD → VND (MoMo yêu cầu số tiền VND nguyên).
-- **Fallback demo:** Khi chưa cấu hình key MoMo và bật `AllowDemo`, provider tự chuyển sang chế độ hoàn tất ngay (không lỗi, không cần key) — cho phép demo luồng nhanh. Mặc định dùng test credentials sandbox công khai của MoMo nên chạy cổng thật ngay.
-- `PaymentService` được viết lại theo 2 method: `InitiateAsync` (khởi tạo, có thể trả redirect) và `ConfirmAsync` (xử lý callback, chốt `Order → Paid`).
+![Hình 5](images/course-20261117/05-customer-orders.png)
 
-Đã verify thật: pay qua `mock` hoàn tất ngay (status → Paid), pay qua `momo` trả về `payUrl` sandbox thật (`test-payment.momo.vn`) và redirect callback chốt đơn Paid đúng như thiết kế.
+Hình 5. Khách hàng xem lịch sử đơn hàng và trạng thái hoàn tiền.
 
-### 4.2 Mã giảm giá (Coupon)
+#### Hình 6 Dashboard người bán được giới hạn theo SellerId.
 
-- Entity `Coupon` trong Domain với logic tự chứa: `IsValidFor()` (check active, hết hạn, đơn tối thiểu, còn lượt) và `CalculateDiscount()`.
-- `Order` được bổ sung `CouponCode`, `DiscountAmount`; `Subtotal` (tổng trước giảm) và `Total` (sau giảm) tách riêng.
-- Flow: Customer nhập mã ở trang Checkout → gọi `POST /api/coupons/validate` để preview số tiền giảm → khi đặt hàng, `CheckoutRequest` mang theo `CouponCode`, `OrderService` validate lại lần 2 (chống race condition/hết lượt giữa lúc preview và khi đặt) rồi mới trừ giảm giá và tăng `TimesUsed`.
-- Admin có trang tạo/xóa coupon riêng.
-- Verify thật: coupon `WELCOME10` (giảm 10%) áp dụng đúng — đơn subtotal $199 → discount $19.9 → total $179.1.
+![Hình 6](images/course-20261117/06-seller-dashboard.png)
 
-### 4.3 Upload ảnh sản phẩm
+Hình 6. Dashboard người bán được giới hạn theo SellerId.
 
-- `IFileStorage.SaveImageAsync` (interface trong Application) — implementation `LocalFileStorage` lưu vào `wwwroot/uploads`, giới hạn định dạng ảnh hợp lệ, sinh tên file GUID tránh trùng/đè.
-- Endpoint `POST /api/products/upload-image` (Admin only, giới hạn 5MB) trả về URL tương đối, gán vào field `ImageUrl` khi tạo/sửa sản phẩm.
-- Frontend: input file trong trang Admin Products, preview ảnh ngay sau khi upload thành công.
-- `app.UseStaticFiles()` được thêm vào pipeline để serve file tĩnh qua URL `/uploads/...`.
+#### Hình 7 Người bán chỉ thấy các mặt hàng thuộc phạm vi cửa hàng mình.
 
-### 4.4 Phân trang đơn hàng
+![Hình 7](images/course-20261117/07-seller-orders.png)
 
-- `IOrderService.GetForUserAsync`/`GetAllAsync` đổi từ trả `List` sang trả `PagedResult<OrderDto>` (tái dùng pattern `PagedResult` đã có từ sản phẩm).
-- Controller nhận `page`, `pageSize` qua query string.
-- Frontend `OrdersPage` có control chuyển trang, giữ nguyên UI hiển thị breakdown subtotal/discount/total mới.
+Hình 7. Người bán chỉ thấy các mặt hàng thuộc phạm vi cửa hàng mình.
 
-### 4.5 Giao diện quản trị CRUD
+#### Hình 8 Dashboard quản trị: Đơn theo trạng thái và Top sản phẩm bán chạy nhận kết quả từ hai Stored Procedures.
 
-- Trang mới `AdminProductsPage`: form thêm/sửa sản phẩm (kèm chọn danh mục, upload ảnh preview), danh sách sản phẩm với nút Sửa/Xóa, panel quản lý danh mục (thêm/xóa) cạnh bên.
-- Trang mới `AdminCouponsPage`: form tạo coupon (loại giảm giá, giá trị, đơn tối thiểu, số lượt, hạn dùng), danh sách coupon hiện có kèm nút xóa.
-- Navbar bổ sung 2 link điều hướng cho Admin.
+![Hình 8](images/course-20261117/08-admin-dashboard.png)
 
-### 4.6 Auto-migrate khi khởi động
+Hình 8. Dashboard quản trị: Đơn theo trạng thái và Top sản phẩm bán chạy nhận kết quả từ hai Stored Procedures.
 
-`Program.cs` chạy migrate + seed database tự động mỗi lần khởi động (idempotent — seed chỉ chèn khi bảng rỗng). Nhờ vậy chỉ cần `dotnet run` là DB tự tạo schema + dữ liệu mẫu, không phải chạy `dotnet ef database update` thủ công.
+#### Hình 9 Quản trị catalog, thương hiệu và thuộc tính sản phẩm.
 
-### 4.7 CI/CD — GitHub Actions
+![Hình 9](images/course-20261117/09-admin-catalog.png)
 
-`.github/workflows/ci.yml` — 2 job chạy khi push/PR vào `main`/`master`:
-1. **backend** — `dotnet restore/build/test`, xuất kết quả test dạng `.trx` làm artifact.
-2. **frontend** — `npm ci`, `npm run build` (bao gồm type-check `tsc -b`).
+Hình 9. Quản trị catalog, thương hiệu và thuộc tính sản phẩm.
 
-### 4.8 Marketplace nhiều người bán
+#### Hình 10 Quản trị theo dõi yêu cầu hoàn tiền và trạng thái xử lý.
 
-- **Vai trò Seller** thêm vào `UserRole` enum; `User` có `ShopName`. Tự đăng ký qua `POST /api/auth/register-seller` (không cần Admin duyệt).
-- **Sở hữu sản phẩm:** `Product.SellerId` (FK → User). Product CRUD mở cho `Admin,Seller`; seller chỉ sửa/xóa sản phẩm của mình (`ProductService` kiểm tra `actorId == SellerId`, sai → 403). Admin sửa được mọi sản phẩm. Search hỗ trợ lọc `sellerId`.
-- **Đơn trộn nhiều seller:** mỗi `OrderItem` snapshot `SellerId` lúc checkout. Một đơn có thể chứa item của nhiều shop. `SellerOrderService.GetForSellerAsync` trả các đơn chứa item của seller, nhưng chỉ hiển thị item + doanh thu phần của seller đó.
-- **Dashboard scope:** `DashboardService.GetAsync(int? sellerId)` — `null` = toàn hệ thống (Admin), có giá trị = chỉ dữ liệu seller. `SellerController` (`/api/seller/dashboard`, `/api/seller/orders`) chỉ cho role Seller.
-- **Frontend:** đăng ký seller (thêm mode trong LoginPage), 3 trang seller (dashboard, quản lý SP của tôi, đơn hàng), điều hướng + protected route theo role. `ProductCard`/cart chỉ hiện cho Customer.
-- **Kiểm chứng thật (qua HTTP):** seller2 xóa SP của seller1 → 403; admin xóa → 200; đơn trộn TechZone + BookHaven → seller1 chỉ thấy "Wireless Headphones", seller2 chỉ thấy "Clean Code".
+![Hình 10](images/course-20261117/10-admin-refunds.png)
 
-YAML đã được validate cú pháp; các lệnh bên trong (`dotnet build/test`, `npm run build`) đều đã chạy thành công thật trong quá trình phát triển.
+Hình 10. Quản trị theo dõi yêu cầu hoàn tiền và trạng thái xử lý.
 
----
+#### Hình 11 Phân loại khách hàng theo Recency, Frequency và Monetary từ giao dịch hợp lệ.
 
-### 4.9 Giao hàng theo item + Seller tạo danh mục + fix pro-rate coupon (giai đoạn 4)
+![Hình 11](images/course-20261117/11-admin-rfm.png)
 
-- **Per-item fulfillment:** Thêm enum `FulfillmentStatus` (Pending/Shipped/Delivered/Cancelled) và `OrderItem.ChangeStatus()` — máy trạng thái thứ ba của hệ thống, cùng pattern với `Order.ChangeStatus()` nhưng **độc lập hoàn toàn**. `Order.Status` vẫn chỉ Admin đổi (vòng đời thanh toán toàn đơn); `OrderItem.Status` do **Seller sở hữu item đó** tự cập nhật qua `PUT /api/seller/orders/items/{itemId}/status` — mỗi seller ship phần của mình trong một đơn trộn nhiều seller mà không cần chờ hay phụ thuộc seller khác. Item không thuộc seller gọi request → 403; chuyển sai cạnh (ví dụ Pending→Delivered) → 409. Khi Customer hủy đơn, mọi item còn Pending tự chuyển sang Cancelled.
-- **Seller tạo danh mục:** `POST /api/categories` mở từ `Admin` sang `Admin,Seller` — Seller tạo danh mục mới ngay lúc thêm sản phẩm, không phải chờ Admin duyệt trước. `DELETE /api/categories/{id}` vẫn giữ nguyên Admin-only.
-- **Fix bug pro-rate giảm giá coupon cho seller:** Trước đây `SellerOrderService.GetForSellerAsync` và `DashboardService.GetAsync(sellerId)` bỏ qua `Order.DiscountAmount` khi tính doanh thu/subtotal theo seller — seller thấy doanh thu cao hơn thực nhận vì không trừ phần giảm giá coupon. Sửa: chia tỉ lệ giảm giá theo tỉ trọng subtotal của seller trong đơn (`sellerDiscount = DiscountAmount × sellerSubtotal / orderSubtotal`), rồi `sellerTotal = sellerSubtotal − sellerDiscount`. Dashboard hệ thống (Admin) cũng đổi sang tính doanh thu **sau** giảm giá (`Σ Order.Total` của đơn đã thanh toán) thay vì tổng subtotal thô.
-  - **Đã verify bằng test (`FulfillmentTests.CouponDiscount_IsProRatedPerSeller`, `Dashboard_Revenue_IsAfterCouponDiscount`):** đơn $100 gồm seller A (sản phẩm $60) + seller B (sản phẩm $40), coupon giảm cố định $20 → seller A thấy discount $12, total $48; seller B thấy discount $8, total $32; tổng $48 + $32 = $80, khớp đúng `Order.Total` ($100 − $20) mà hệ thống thực nhận. Dashboard Admin (`sellerId = null`) báo doanh thu $80; dashboard seller A báo $48.
-- `OrderItemDto` bổ sung `Id` và `Status` để frontend hiển thị và gọi API đổi trạng thái theo từng item.
+Hình 11. Phân loại khách hàng theo Recency, Frequency và Monetary từ giao dịch hợp lệ.
 
----
+#### Hình 12 Shopping Assistant trả lời từ catalog SQL, giữ điều kiện giá trên 1000 USD và công bố chế độ retrieval thực tế.
 
-## 5. Kiểm thử
+![Hình 12](images/course-20261117/12-ai-assistant.png)
 
-- **Unit test (49 test, 100% pass):** state machine đơn hàng (mọi transition hợp lệ/không hợp lệ), giảm tồn kho, checkout (giỏ rỗng, vượt tồn kho, áp coupon hợp lệ/không hợp lệ), thanh toán (hoàn tất, chuyển trạng thái), hủy đơn (hoàn tồn kho), review (chặn chưa mua, chặn trùng), auth (đăng ký trùng email, sai mật khẩu), seller scope (gán SellerId, chặn sửa/xóa SP của seller khác → 403, admin toàn quyền, lọc theo seller, dashboard scope), **`FulfillmentTests` mới (10 test): máy trạng thái `OrderItem` (mọi transition hợp lệ/không hợp lệ), seller chỉ fulfill item của mình (403 nếu không), coupon pro-rate theo seller ($60/$40 split, coupon $20 → $48/$32), dashboard doanh thu sau giảm giá (system $80, seller A $48).**
-- **Smoke test thủ công qua HTTP thật** (không phải giả định): toàn bộ golden path đăng nhập → cart → checkout với coupon → pay đa phương thức → admin đổi trạng thái → dashboard, chạy trên môi trường local (`dotnet run` + `npm run dev`).
-- **Frontend:** `tsc -b && vite build` pass, không lỗi type.
+Hình 12. Shopping Assistant trả lời từ catalog SQL, giữ điều kiện giá trên 1000 USD và công bố chế độ retrieval thực tế.
 
----
+Tài khoản Seller dùng cho ảnh đang có phạm vi dữ liệu rỗng; giao diện thể hiện đúng trạng thái không có đơn. Dashboard Admin có dữ liệu thật từ database phát triển: 5.011 đơn hàng, 500 sản phẩm và 1.002 khách hàng. Tên trong top bán chạy lấy từ snapshot OrderItem, có thể khác tên catalog hiện tại vì lịch sử giao dịch được giữ nguyên.
 
-## 6. Cấu trúc file thay đổi/thêm mới (giai đoạn mở rộng)
+## 4. Thiết kế cơ sở dữ liệu
 
-**Backend:**
-`Domain/Entities/Coupon.cs`, `Application/DTOs/Coupons/*`, `Application/Services/CouponService.cs`, `Application/Services/PaymentService.cs` (viết lại), `Application/Interfaces/IServices.cs` + `IBusinessServices.cs` (mở rộng), `Infrastructure/Payments/{MoMoProvider,MockPaymentProvider,PaymentProviderFactory,PaymentOptions}.cs`, `Infrastructure/Storage/LocalFileStorage.cs`, `API/Controllers/{PaymentsController,CouponsController}.cs`, migration `AddCouponsAndDiscounts`.
+Database hiện có 16 bảng nghiệp vụ:
 
-**Frontend:**
-`pages/{AdminProductsPage,AdminCouponsPage}.tsx` (mới), `pages/{CheckoutPage,OrdersPage}.tsx` (viết lại), `api/hooks.ts` (mở rộng ~15 hook mới), `types.ts` (mở rộng).
+1. Users
+2. Categories
+3. Products
+4. Brands
+5. AttributeDefinitions
+6. ProductAttributeValues
+7. Carts
+8. CartItems
+9. Orders
+10. OrderItems
+11. Payments
+12. Refunds
+13. Reviews
+14. WishlistItems
+15. Coupons
+16. RefreshTokens
 
-**Marketplace (giai đoạn 3):**
-Backend — `Domain/Entities/{User,Product,OrderItem}.cs` + `Enums/UserRole.cs` (thêm SellerId/ShopName/role Seller), `Application/Services/{SellerOrderService,DashboardService,ProductService,AuthService}.cs`, `API/Controllers/SellerController.cs`, migration `AddSellerMarketplace`, `tests/.../SellerScopeTests.cs` (6 test).
-Frontend — `pages/{SellerDashboardPage,SellerProductsPage,SellerOrdersPage}.tsx` (mới), `LoginPage.tsx` (thêm mode đăng ký seller), `ProtectedRoute.tsx` (roles[]).
+Các quan hệ chính:
 
-**Per-item fulfillment + Seller category + coupon pro-rate fix (giai đoạn 4):**
-Backend — `Domain/Enums/FulfillmentStatus.cs` (mới), `Domain/Entities/OrderItem.cs` (thêm `Status` + `ChangeStatus()`), `Application/Services/{SellerOrderService,DashboardService,OrderService}.cs` (pro-rate coupon, hủy đơn set Cancelled cho item Pending), `Application/DTOs/Orders/OrderDtos.cs` (`OrderItemDto` thêm `Id`, `Status`), `API/Controllers/{SellerController,CategoriesController}.cs` (thêm `PUT orders/items/{itemId}/status`; mở `POST /api/categories` cho Seller), `tests/.../FulfillmentTests.cs` (mới, 10 test).
+- Một User có thể đặt nhiều Order; một Order có nhiều OrderItem.
+- Product liên kết Category, Seller và Brand; Product có thể có nhiều ProductAttributeValue.
+- Cart thuộc một User và có nhiều CartItem.
+- Order có Payment theo quan hệ một-một và có thể có Refund.
+- OrderItem lưu snapshot tên sản phẩm, người bán và đơn giá tại thời điểm đặt hàng để bảo toàn lịch sử giao dịch.
 
-**Hạ tầng:**
-`.github/workflows/ci.yml`.
+Toàn bộ schema được quản lý bằng EF Core migrations. Có 16 migrations trong baseline trước phần bổ sung phục vụ yêu cầu Stored Procedure; migration mới 20261117130000_AddDashboardStoredProcedures chỉ tạo Stored Procedure và cập nhật trigger, không thêm bảng/cột hoặc thay đổi dữ liệu nghiệp vụ. Migration này đã được áp dụng trước trên disposable LocalDB bằng SQL Server provider, sau đó trên clone đang dùng sau backup COPY_ONLY WITH CHECKSUM và RESTORE VERIFYONLY. Lịch sử hiện có 17 migration; EF không phát hiện pending model changes.
 
----
+### 4.1 Khóa và ràng buộc toàn vẹn
 
-## 7. Giới hạn & khuyến nghị tiếp theo
+- Primary Key xác định duy nhất mỗi bản ghi.
+- Foreign Key bảo vệ quan hệ giữa User, Product, Order, OrderItem, Payment, Refund và các bảng liên quan.
+- Unique indexes bảo vệ các business key như SKU, email, cart theo user, item trong cart, payment theo order/provider reference và review theo product/user.
+- CHECK constraints giới hạn các giá trị như giá và tồn kho không âm, số lượng dương, rating từ 1 đến 5 và trạng thái nằm trong miền enum hợp lệ.
+- RowVersion được dùng cho optimistic concurrency ở các thực thể có nguy cơ cập nhật đồng thời như Product, Coupon, Order, OrderItem, Payment và Refund.
 
-- MoMo chạy trên sandbox (test credentials công khai) — IPN server-to-server không gọi tới được `localhost` nên phần xác nhận đơn dựa vào redirect callback; khi deploy public (hoặc dùng ngrok) IPN mới hoạt động đầy đủ. Lên production cần đăng ký merchant MoMo để lấy key thật.
-- File upload lưu local disk (`wwwroot/uploads`) — khi cần scale nhiều instance nên chuyển sang object storage (S3/Azure Blob).
-- CI/CD chỉ build + test, chưa có bước deploy — có thể bổ sung khi có môi trường staging/production.
-- Ứng dụng chạy local; nếu cần triển khai lên server có thể đóng gói lại (Docker hoặc publish trực tiếp) về sau.
+## 5. CRUD và truy vấn có tham số
+
+Các thao tác Create, Read, Update, Delete được thực hiện qua service và Entity Framework Core:
+
+- Product: tạo, xem, cập nhật và xóa theo quyền Admin/Seller.
+- Cart: thêm, xem, cập nhật số lượng và xóa sản phẩm trong giỏ.
+- Order: checkout, xem lịch sử, hủy và theo dõi trạng thái.
+- Catalog: quản lý Category, Brand và typed attributes.
+- Admin: quản lý seller, refund và dữ liệu dashboard.
+
+Các truy vấn LINQ được EF Core chuyển thành SQL có tham số. Không ghép trực tiếp dữ liệu người dùng vào chuỗi SQL. Stored Procedure cũng nhận @SellerId và @Take qua parameter thay vì nối chuỗi.
+
+## 6. Index và tối ưu truy vấn
+
+Index được đặt theo khóa tra cứu, quan hệ và ràng buộc nghiệp vụ. Một số ví dụ:
+
+| Index | Mục đích |
+|---|---|
+| Unique Products.Sku | Tra cứu SKU và ngăn SKU trùng |
+| Products.CategoryId, SellerId, BrandId | Lọc catalog theo danh mục, người bán và thương hiệu |
+| Unique Carts.UserId | Mỗi khách hàng có tối đa một giỏ hàng |
+| Unique CartItems(CartId, ProductId) | Không tạo dòng sản phẩm trùng trong cùng giỏ |
+| Orders.UserId | Lấy đơn theo khách hàng |
+| OrderItems.OrderId, ProductId, SellerId | Tra cứu dòng đơn theo đơn, sản phẩm và seller |
+| Unique Payments.OrderId | Một payment record cho mỗi order |
+| Unique filtered Payments(ProviderKey, TransactionId) và (ProviderKey, ProviderReference) | Chống ghi nhận trùng giao dịch/provider reference |
+| Unique Reviews(ProductId, UserId) | Một khách hàng không tạo review trùng cho cùng sản phẩm |
+| ProductAttributeValues(AttributeDefinitionId, ValueNumber/ValueBoolean) | Lọc sản phẩm theo thuộc tính kiểu số/boolean |
+
+Index vừa phục vụ hiệu năng vừa thực thi các quy tắc duy nhất. Không kết luận một index cụ thể làm truy vấn nhanh hơn nếu chưa có execution plan hoặc phép đo IO/time tương ứng.
+
+## 7. Transaction và concurrency
+
+### 7.1 Checkout
+
+Checkout cập nhật tồn kho, tạo Order và OrderItem, áp dụng coupon và cập nhật giỏ hàng trong cùng một lần SaveChangesAsync. Với SQL Server provider, EF Core sử dụng transaction cho một lần SaveChanges để các thay đổi cùng thành công hoặc cùng rollback.
+
+### 7.2 Refund
+
+Các bước cập nhật Refund, Payment, Order, OrderItem và tồn kho trong thao tác hoàn tiền được lưu cùng một transaction database. Nếu một thay đổi thất bại, transaction rollback để không để lại trạng thái một phần.
+
+### 7.3 Payment gateway
+
+Gọi dịch vụ thanh toán bên ngoài không thể nằm trong transaction SQL Server. Ứng dụng dùng payment attempt, callback verification và reconciliation để xử lý kết quả từ provider. Vì vậy không mô tả transaction database như thể nó bao phủ cả hệ thống thanh toán bên ngoài.
+
+### 7.4 Optimistic concurrency
+
+RowVersion giúp phát hiện hai request đồng thời sửa cùng một dữ liệu. Ứng dụng xử lý conflict thay vì âm thầm ghi đè cập nhật trước đó.
+
+## 8. Stored Procedures
+
+Migration 20261117130000_AddDashboardStoredProcedures bổ sung hai Stored Procedure phục vụ dashboard. Chúng được gọi thực tế từ DashboardService thông qua DashboardStoredProcedureQueries.
+
+### 8.1 dbo.usp_GetOrderStatusSummary
+
+Tham số:
+- @SellerId INT = NULL: NULL lấy dữ liệu toàn sàn; có giá trị thì chỉ thống kê các đơn có OrderItem thuộc seller đó.
+
+Kết quả: trạng thái đơn hàng và số lượng đơn tương ứng. EXISTS được sử dụng để tránh đếm trùng một đơn có nhiều OrderItem của cùng seller.
+
+Nơi áp dụng: Admin Dashboard và Seller Dashboard, khu vực “Đơn theo trạng thái”.
+
+### 8.2 dbo.usp_GetTopSellingProducts
+
+Tham số:
+- @SellerId INT = NULL: phạm vi toàn sàn hoặc một seller.
+- @Take INT = 5: số sản phẩm trả về; giá trị được giới hạn an toàn trong procedure.
+
+Kết quả: ProductId, ProductName, UnitsSold và Revenue.
+
+Quy tắc dữ liệu:
+- Chỉ lấy Order có trạng thái Paid, Shipped hoặc Delivered.
+- Payment phải Completed.
+- Loại payment demo và payment đang yêu cầu reconciliation.
+- Loại OrderItem đã Cancelled.
+- Có thể giới hạn theo seller.
+
+Nơi áp dụng: Admin Dashboard và Seller Dashboard, khu vực “Top sản phẩm bán chạy”.
+
+Hai procedure chỉ đọc dữ liệu, không thay thế transaction hoặc business logic Checkout/Payment/Refund trong application service.
+
+## 9. Trigger
+
+Trigger: dbo.TR_OrderItems_ProtectSnapshot.
+
+Trigger được áp dụng trên bảng OrderItems cho ba sự kiện INSERT, UPDATE và DELETE.
+
+| Sự kiện | Quy tắc |
+|---|---|
+| INSERT | Snapshot SellerId, ProductName và UnitPrice của OrderItem phải khớp Product tại thời điểm tạo |
+| UPDATE | Không cho sửa OrderId, ProductId, SellerId, ProductName, UnitPrice và Quantity; trạng thái fulfillment vẫn được cập nhật |
+| DELETE | Không cho xóa vật lý OrderItem để bảo toàn lịch sử giao dịch và snapshot của đơn hàng |
+
+Khi vi phạm, trigger phát sinh lỗi SQL để hủy thao tác. Các thay đổi trạng thái giao hàng hợp lệ không bị chặn vì Status không thuộc nhóm trường snapshot bất biến.
+
+Trigger được quản lý trong migration để có thể áp dụng lại trên database mới và rollback có kiểm soát.
+
+## 10. Khai thác dữ liệu bằng AI
+
+- AI Shopping Assistant: kết hợp semantic retrieval và lexical retrieval trên catalog; dữ liệu giá, tồn kho và thuộc tính phải lấy từ nguồn SQL/evidence, không để mô hình tự suy đoán.
+- Recommendation: xếp hạng sản phẩm theo tín hiệu phù hợp và điều kiện eligibility của Marketplace.
+- RFM: phân nhóm khách hàng theo Recency, Frequency và Monetary; dùng giao dịch hợp lệ, canonical currency USD và quyền truy cập Admin.
+
+AI là lớp khai thác dữ liệu trên database hiện hữu, không thay thế SQL Server làm nguồn dữ liệu chuẩn.
+
+## 11. Kiểm thử và nghiệm thu
+
+Ngày nghiệm thu: 17 tháng 11 năm 2026. Hai lỗi thực tế được sửa: projection DTO của fallback dashboard không dịch được trên provider non-SQL Server; assertion của test SQL vẫn chờ Paid sau khi service đã chuyển đơn sang Shipped. Không sửa VNPAY, Payment, Refund hoặc các bảng/cột.
+
+| Hạng mục | Kết quả đã quan sát |
+|---|---|
+| Backend build | PASS, 0 warning và 0 error |
+| Backend test thường | 369 PASS, 0 FAIL, 3 SQL opt-in SKIP |
+| Frontend | 10 test PASS; production build và lint PASS |
+| Disposable LocalDB | 1 test SQL course PASS sau sửa; chạy đủ 17 migration bằng Microsoft.EntityFrameworkCore.SqlServer |
+| Stored Procedures | Cả hai được gọi qua DashboardService và API dashboard; bộ đếm SQL procedure có 4 lần thực thi mỗi procedure trong browser smoke |
+| Trigger INSERT | INSERT hợp lệ được lưu; INSERT sai ProductName với SellerId hợp lệ bị SQL 51006, không thêm dòng |
+| Trigger UPDATE | Snapshot bị sửa bị từ chối; cập nhật fulfillment Shipped hợp lệ được chấp nhận |
+| Trigger DELETE | Xóa OrderItem bị từ chối; dòng lịch sử vẫn tồn tại |
+| DB đang dùng | 17 migration; pending model changes false; hai procedure tồn tại; trigger đăng ký đủ INSERT UPDATE DELETE |
+| Bảo toàn dữ liệu | 16 bảng nghiệp vụ giữ nguyên row count và SHA-256 qua migration; không reset, reseed hoặc import |
+| Browser thật | 12 ảnh Guest Customer Seller Admin AI; 0 page error; dashboard HTTP 200 |
+| AI shopping | HTTP 200, lọc đúng 4 sản phẩm trên 1000 USD; lúc chụp sử dụng lexical-warming và fallback, không tuyên bố Gemini generation PASS |
+
+Backup trước migration được giữ riêng ngoài Git. SHA-256: `a27e191bc2c0026796dc68e4722f7cb0110ba454c77ab0b8b615af43b622921f`. RESTORE VERIFYONLY WITH CHECKSUM báo backup set hợp lệ. Không restore hoặc ghi đè database đang dùng.
+
+Hai test SQL lifecycle khác không được chạy lại trong lượt này. Kết quả 3/3 PASS ngày 16 tháng 11 là evidence lịch sử trên commit 7073342, không thay cho kết quả của HEAD hiện tại. Test SQL course mới đã thực sự chạy trên database disposable và fixture đã được dọn sau khi lưu kết quả. Việc đăng nhập qua UI có thể tạo RefreshTokens theo nghiệp vụ; không thay đổi đơn hàng, số tiền, tồn kho hay dữ liệu catalog.
+
+## 12. Giới hạn hiện tại
+
+- VNPAY status query còn trường hợp trả mã 99 cần được ghi nhận đúng theo kết quả runtime.
+- Hoàn tiền qua gateway bên ngoài chưa tự động hoàn tất; hệ thống quản lý refund state và reconciliation, việc chuyển tiền bên ngoài cần được xác nhận theo quy trình hiện tại.
+- Gemini có thể bị quota/rate-limit; retrieval cần giữ fallback an toàn.
+- Ứng dụng hiện hướng đến demo local, không tuyên bố production-ready.
+
+## 13. Kết luận
+
+Marketplace áp dụng SQL Server cho dữ liệu người dùng, catalog, giỏ hàng, đơn hàng, thanh toán, hoàn tiền và đánh giá. EF Core quản lý CRUD và migration; index, foreign key, unique/check constraints bảo vệ tính toàn vẹn; transaction và RowVersion bảo vệ các luồng cập nhật quan trọng. Hai Stored Procedure phục vụ dashboard và trigger bảo vệ snapshot OrderItem. Các chức năng AI khai thác catalog và giao dịch hiện hữu để hỗ trợ tìm kiếm, đề xuất và phân loại khách hàng.
+
+Báo cáo này kèm 12 ảnh giao diện thật, kết quả kiểm thử và minh chứng hai procedure cùng ba sự kiện trigger trên SQL Server. Ứng dụng có thể mở để trình diễn ở http://localhost:5173; Swagger ở http://localhost:5215/swagger. AI vẫn công bố đúng chế độ fallback khi provider chưa sẵn sàng.
+
+## 14. Hướng dẫn trình diễn local
+
+API sử dụng file cấu hình local riêng và kết nối tường minh tới `(localdb)\MarketplaceRefundDev20261113 / ECommerceDb_Dev`. Không để key trong repository. Khởi động bằng `scripts/Start-LocalApi.ps1` với `-LocalConfigPath` trỏ tới file riêng và `-DotnetPath` trỏ SDK .NET 9 hiện có. Trong thư mục client, chạy `npm run dev -- --host localhost --port 5173 --strictPort`.
+
+Mở localhost bằng tài khoản phát triển đã có để trình diễn lần lượt catalog, giỏ hàng, checkout, đơn hàng, seller dashboard, admin dashboard, refund, RFM và trợ lý mua sắm. Không cần chạy seeder hoặc migration lại khi khởi động. PR số 8 giữ trạng thái Draft, chưa merge.

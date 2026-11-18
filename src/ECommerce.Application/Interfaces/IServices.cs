@@ -70,7 +70,13 @@ public record PaymentVerifyResult(
     bool Authenticated = false,
     string? RequestId = null,
     decimal? Amount = null,
-    string? Currency = null);
+    string? Currency = null,
+    bool IsFinal = true);
+
+public interface IPaymentQueryProvider
+{
+    Task<PaymentVerifyResult> QueryAsync(string storedReference, CancellationToken ct = default);
+}
 
 // Factory phân giải provider theo key
 public interface IPaymentProviderFactory

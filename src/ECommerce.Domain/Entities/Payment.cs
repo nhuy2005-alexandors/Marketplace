@@ -16,7 +16,7 @@ public class Payment : BaseEntity
     public DateTime? PaidAt { get; set; }
     public string? ProviderKey { get; set; }
     public string? ProviderReference { get; set; }
-    // Frozen provider quote/capture in provider currency (MoMo: VND); never overwrite Amount.
+    // Frozen provider quote/capture in provider currency (MoMo/VNPAY: VND); never overwrite Amount.
     public decimal? ProviderAmount { get; set; }
     public string? ProviderCurrency { get; set; }
     public bool RequiresReconciliation { get; set; }

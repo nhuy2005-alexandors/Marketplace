@@ -13,6 +13,23 @@ namespace ECommerce.Tests.Unit;
 
 public class ReviewServiceTests
 {
+    [Fact]
+    public async Task PublicReviews_HideReviewsWhenSellerIsNotApproved()
+    {
+        using var db = TestDb.Create();
+        var (userId, productId) = await SeedAsync(db);
+        db.Reviews.Add(new Review { ProductId = productId, UserId = userId, Rating = 5, Comment = "Visible only with the public product" });
+        await db.SaveChangesAsync();
+        var service = new ReviewService(db);
+        (await service.GetForProductAsync(productId)).Should().ContainSingle();
+
+        var seller = await db.Users.SingleAsync(u => u.Role == UserRole.Seller);
+        seller.SellerStatus = SellerStatus.Pending;
+        await db.SaveChangesAsync();
+
+        (await service.GetForProductAsync(productId)).Should().BeEmpty();
+    }
+
     private static async Task<(int userId, int productId)> SeedAsync(Infrastructure.Persistence.AppDbContext db)
     {
         var user = new User { Email = "u@x.com", PasswordHash = "h", FullName = "Buyer", Role = UserRole.Customer };

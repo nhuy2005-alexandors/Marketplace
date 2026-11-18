@@ -5,6 +5,18 @@ public class PaymentOptions
     // Cho phép chế độ demo (hoàn tất ngay không cần key thật). Chỉ bật ở Development.
     public bool AllowDemo { get; set; }
     public MoMoOptions MoMo { get; set; } = new();
+    public VnpayOptions Vnpay { get; set; } = new();
+}
+
+public class VnpayOptions
+{
+    public string TmnCode { get; set; } = "";
+    public string HashSecret { get; set; } = "";
+    public string ReturnUrl { get; set; } = "http://localhost:5215/api/payments/vnpay/return";
+    public string CatalogCurrency { get; set; } = "USD";
+    public decimal? CatalogToVndRate { get; set; }
+    public string QueryIpAddress { get; set; } = "127.0.0.1";
+    public bool Enabled => !string.IsNullOrWhiteSpace(TmnCode) && !string.IsNullOrWhiteSpace(HashSecret);
 }
 
 public class MoMoOptions

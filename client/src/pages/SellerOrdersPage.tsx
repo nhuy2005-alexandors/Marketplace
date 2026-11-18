@@ -35,10 +35,14 @@ export function SellerOrdersPage() {
               <StatusBadge status={order.status} />
             </div>
             <div className="text-sm muted mb-2">Giao tới: {order.shippingAddress}</div>
+            {order.refundPending && <p className="text-sm text-amber-700 mb-2">Đơn đang tạm dừng giao hàng để xử lý hoàn tiền.</p>}
             <div className="divide-y divide-slate-200 dark:divide-slate-800 border-y border-slate-200 dark:border-slate-800">
               {order.items.map((it) => {
                 const next = NEXT_ITEM[it.status];
-                const canFulfill = order.status !== "Cancelled" && next;
+                const paymentAllowsFulfillment =
+                  (["Paid", "Shipped"].includes(order.status) && order.payment?.status === "Completed") ||
+                  (["Accepted", "Shipped"].includes(order.status) && order.payment?.method === "CashOnDelivery" && order.payment.status === "Pending");
+                const canFulfill = !order.refundPending && !order.payment?.requiresReconciliation && paymentAllowsFulfillment && next;
                 return (
                   <div key={it.productId} className="flex items-center justify-between py-2 text-sm gap-2">
                     <span className="flex-1">{it.productName} × {it.quantity}</span>

@@ -16,6 +16,8 @@ import { AdminProductsPage } from "./pages/AdminProductsPage";
 import { AdminCouponsPage } from "./pages/AdminCouponsPage";
 import { AdminSellersPage } from "./pages/AdminSellersPage";
 import { AdminRefundsPage } from "./pages/AdminRefundsPage";
+import { AdminRfmPage } from "./pages/AdminRfmPage";
+import { AssistantPage } from "./pages/AssistantPage";
 import { SellerDashboardPage } from "./pages/SellerDashboardPage";
 import { SellerProductsPage } from "./pages/SellerProductsPage";
 import { SellerOrdersPage } from "./pages/SellerOrdersPage";
@@ -32,6 +34,7 @@ export default function App() {
         <Route path="/products/:id" element={<ProductDetailPage />} />
         <Route path="/shop/:sellerId" element={<SellerShopPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/assistant" element={<AssistantPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/cart" element={<CartPage />} />
           <Route path="/checkout" element={<CheckoutPage />} />
@@ -44,6 +47,7 @@ export default function App() {
           <Route path="/admin/coupons" element={<AdminCouponsPage />} />
           <Route path="/admin/sellers" element={<AdminSellersPage />} />
           <Route path="/admin/refunds" element={<AdminRefundsPage />} />
+          <Route path="/admin/rfm" element={<AdminRfmPage />} />
         </Route>
         <Route element={<ProtectedRoute roles={["Seller"]} />}>
           <Route path="/seller" element={<SellerDashboardPage />} />

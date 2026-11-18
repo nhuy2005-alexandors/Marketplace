@@ -268,3 +268,104 @@ export interface Dashboard {
   ordersByStatus: StatusCount[];
   topProducts: TopProduct[];
 }
+
+
+export interface AssistantConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AssistantChatFilters {
+  categoryId?: number;
+  sellerId?: number;
+  minPrice?: number;
+  maxPrice?: number;
+  inStockOnly?: boolean;
+}
+
+export interface AssistantChatRequest {
+  query: string;
+  filters?: AssistantChatFilters;
+  conversation?: {
+    conversationId?: string;
+    recentTurns?: AssistantConversationTurn[];
+  };
+}
+
+export interface AssistantProductSource {
+  type: string;
+  productId: number;
+  chunkType: string;
+  contentHash: string;
+}
+
+export interface AssistantRetrievalMetadata {
+  mode: string;
+  hasEvidence: boolean;
+}
+
+export interface AssistantConstraint {
+  field: string;
+  operator: string;
+  value: string;
+  unit?: string | null;
+}
+
+export interface AssistantChatResponse {
+  answer: string;
+  products: Product[];
+  sources: AssistantProductSource[];
+  retrieval: AssistantRetrievalMetadata;
+  conversationId?: string | null;
+  evidenceStrength: string;
+  answerSource: string;
+  intent: string;
+  retrievalMode: string;
+  constraints?: AssistantConstraint[] | null;
+  contextAction: string;
+}
+
+export interface RecommendationReason {
+  code: string;
+  label: string;
+}
+
+export interface RecommendedProduct {
+  product: Product;
+  score: number;
+  reasons: RecommendationReason[];
+}
+
+export interface RecommendationResponse {
+  strategy: string;
+  generatedAtUtc: string;
+  items: RecommendedProduct[];
+}
+
+export interface RfmCustomer {
+  userId: number;
+  lastEligibleOrderCreatedAtUtc: string | null;
+  recencyDays: number | null;
+  frequency: number;
+  monetaryUsd: number;
+  rQuintile: number | null;
+  fQuintile: number | null;
+  mQuintile: number | null;
+  segmentCode: string;
+  segmentLabel: string;
+}
+
+export interface RfmSegmentCount {
+  segmentCode: string;
+  segmentLabel: string;
+  count: number;
+}
+
+export interface RfmCustomerPage {
+  asOfUtc: string;
+  page: number;
+  pageSize: number;
+  totalCustomers: number;
+  segmentCounts: RfmSegmentCount[];
+  items: RfmCustomer[];
+}
